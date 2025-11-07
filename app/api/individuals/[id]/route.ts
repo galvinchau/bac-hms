@@ -1,5 +1,6 @@
 // app/api/individuals/[id]/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 // Lưu ý: với Next 16, params là Promise
@@ -78,7 +79,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     };
 
     // Dùng transaction để update main record + các bảng con
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1) Update Individual
       await tx.individual.update({
         where: { id },
