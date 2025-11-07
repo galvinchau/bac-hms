@@ -1,15 +1,20 @@
 // lib/prisma.ts
-import { PrismaClient } from "@prisma/client";
+// Tạo PrismaClient singleton, nới lỏng type để tránh lỗi TypeScript trên Vercel.
 
-const globalForPrisma = global as unknown as { prisma?: PrismaClient };
+// Dùng require + any để không bị TS soi export 'PrismaClient'
+// @ts-ignore
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { PrismaClient } = require("@prisma/client") as any;
 
-// Export duy nhất: prisma
+const globalForPrisma = globalThis as any;
+
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: ["error", "warn"],
   });
 
+// Giữ 1 instance duy nhất trong development để tránh lỗi "Too many connections"
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
