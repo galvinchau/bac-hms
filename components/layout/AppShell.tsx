@@ -1,24 +1,15 @@
 // components/layout/AppShell.tsx
 "use client";
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import Sidebar from "@/components/sidebar/Sidebar";
 import React from "react";
+import Sidebar from "@/components/sidebar/Sidebar";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const router = useRouter();
-
   return (
     <div className="min-h-screen flex bg-bac-bg text-bac-text">
       {/* LEFT SIDEBAR (single instance app-wide) */}
       <aside className="w-64 border-r border-bac-border">
-        <Sidebar
-          onLogoClick={() => {
-            if (pathname !== "/dashboard") router.push("/dashboard");
-          }}
-        />
+        <Sidebar />
       </aside>
 
       {/* MAIN AREA */}
