@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  @apply bg-bac-bg text-bac-text;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-xl px-4 py-2
+         bg-bac-primary/90 hover:bg-bac-primary transition text-white text-sm;
+}
+.input {
+  @apply w-full rounded-xl bg-bac-panel border border-bac-border px-3 py-2
+         text-bac-text placeholder-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/50;
+}
+.card {
+  @apply rounded-2xl border border-bac-border bg-bac-panel shadow;
+}

@@ -1,0 +1,168 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"     // Dùng PostgreSQL (Supabase), URL lấy từ env("DATABASE_URL")
+  url      = env("DATABASE_URL")
+}
+
+/*
+  Individual = hồ sơ bệnh nhân/khách hàng
+  code      = mã hiển thị: IND-2025-000001
+*/
+
+model Individual {
+  id            String   @id @default(cuid())   // khoá kỹ thuật
+  code          String   @unique               // mã hiển thị, sẽ sinh từ Counter
+
+  firstName     String
+  middleName    String?
+  lastName      String
+  dob           String   // YYYY-MM-DD
+  gender        String?
+  ssnLast4      String?  // chỉ 4 số
+
+  branch        String
+  location      String
+
+  primaryPhone   String?
+  secondaryPhone String?
+  email          String?
+
+  address1 String?
+  address2 String?
+  city     String?
+  county   String?
+  state    String?
+  zip      String?
+
+  // acceptedServices: form gửi lên là mảng string, DB lưu dạng CSV cho đơn giản
+  acceptedServices String
+
+  // Emergency contacts
+  emergency1Name           String?
+  emergency1Relationship   String?
+  emergency1PhonePrimary   String?
+  emergency1PhoneSecondary String?
+  emergency1Notes          String?
+
+  emergency2Name           String?
+  emergency2Relationship   String?
+  emergency2PhonePrimary   String?
+  emergency2PhoneSecondary String?
+  emergency2Notes          String?
+
+  // Billing / guardian
+  billingSameAsPrimary Boolean @default(true)
+  billingAddress1      String?
+  billingAddress2      String?
+  billingCity          String?
+  billingState         String?
+  billingZip           String?
+
+  guardianName  String?
+  guardianPhone String?
+  repPayeeName  String?
+  repPayeePhone String?
+
+  // Clinical
+  pcpName    String?
+  pcpPhone   String?
+  pcpFax     String?
+  pcpNpi     String?
+  pcpAddress String?
+  allergies  String?
+
+  // Preparedness / equipment
+  priorityCode String?
+  mobility     String?
+  equipOxygen        Boolean @default(false)
+  equip_cpap         Boolean @default(false)
+  equip_ventilator   Boolean @default(false)
+  equip_iv_pump      Boolean @default(false)
+  equip_syringe_pump Boolean @default(false)
+  equip_feeding_tube Boolean @default(false)
+  equip_nebulizer    Boolean @default(false)
+  equip_wheelchair   Boolean @default(false)
+  equip_hospital_bed Boolean @default(false)
+  equipOther         String?
+
+  // Preferences
+  prefTime        String?
+  prefNotes       String?
+  langPrimary     String?
+  langSecondary   String?
+  caregiverGender String?
+  prefOther       String?
+
+  // Advanced directives
+  advType      String?
+  advDateIn    String?
+  advDateOut   String?
+  advStatus    String?
+  advPhysician String?
+  advAttach    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payers      Payer[]
+  medications Medication[]
+  diagnoses   Diagnosis[]
+}
+
+/*
+  Payer: các đối tượng thanh toán: Primary / Secondary
+*/
+model Payer {
+  id          String @id @default(cuid())
+  type        String        // "Primary" | "Secondary"
+  name        String
+  plan        String?
+  memberId    String
+  groupId     String?
+  startDate   String?
+  endDate     String?
+  eligibility String?       // Verified | Pending | Not Eligible
+  notes       String?
+
+  individualId String
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+}
+
+/*
+  Medications
+*/
+model Medication {
+  id       String @id @default(cuid())
+  name     String
+  dose     String?
+  schedule String?
+
+  individualId String
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+}
+
+/*
+  Diagnoses (ICD)
+*/
+model Diagnosis {
+  id          String @id @default(cuid())
+  icd         String
+  description String?
+  onset       String? // YYYY-MM-DD
+
+  individualId String
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+}
+
+/*
+  Counter dùng để sinh code: IND-2025-000001, IND-2025-000002, ...
+*/
+model Counter {
+  id    String @id   // ví dụ: "IND-2025"
+  value Int
+}
