@@ -2,18 +2,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// Lưu ý: với Next 16, params là Promise
-type RouteParams = {
-  params: Promise<{ id: string }>;
-};
-
 /**
  * GET /api/individuals/[id]
  * Lấy 1 individual + payers + medications + diagnoses
  */
-export async function GET(_req: Request, { params }: RouteParams) {
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = await params;
+    const { id } = params;
 
     if (!id) {
       return NextResponse.json({ error: "MISSING_ID" }, { status: 400 });
@@ -47,15 +45,18 @@ export async function GET(_req: Request, { params }: RouteParams) {
  * Update Individual + payers + medications + diagnoses
  * Body là form giống bên Edit (ProfileForm + các field khác)
  */
-export async function PATCH(req: Request, { params }: RouteParams) {
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = await params;
+    const { id } = params;
 
     if (!id) {
       return NextResponse.json({ error: "MISSING_ID" }, { status: 400 });
     }
 
-    const body = await req.json();
+    const body: any = await req.json();
 
     // acceptedServices: array -> CSV (giống POST)
     const acceptedServicesCsv = Array.isArray(body.acceptedServices)
