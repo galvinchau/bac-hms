@@ -1,119 +1,118 @@
-// web/components/sidebar/Sidebar.tsx
+// components/sidebar/Sidebar.tsx
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import clsx from "clsx";
+import Image from "next/image";
 
-import { MAIN_ITEMS, ADMIN_ITEMS, type MenuItem } from "./menus";
-
-type SectionProps = {
-  title: string;
-  items: MenuItem[];
+type SidebarProps = {
+  onLogoClick?: () => void;
 };
 
-function isActivePath(href: string | undefined, pathname: string) {
-  if (!href) return false;
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(href + "/");
-}
+const MENU = [
+  { label: "Programs", href: "/programs" },
+  { label: "Services", href: "/services" },
+  {
+    label: "Individual",
+    children: [
+      { label: "New Individual", href: "/individual/new" },
+      { label: "Search Individual", href: "/individual/search" },
+    ],
+  },
+  {
+    label: "Employees",
+    children: [
+      { label: "New Employee", href: "/employees/new" },
+      { label: "Search Employee", href: "/employees/search" },
+    ],
+  },
+  { label: "Schedule", href: "/schedule" },
+  { label: "Visited Maintenance", href: "/visited" },
+  { label: "Medication", href: "/medication" },
+  { label: "FireDrill", href: "/firedrill" },
+  { label: "Billing", href: "/billing" },
+  { label: "Authorizations", href: "/authorizations" },
+  { label: "Reports", href: "/reports" },
+];
 
-function ItemLink({ item, pathname }: { item: MenuItem; pathname: string }) {
-  const active = isActivePath(item.href, pathname);
+const ADMIN = [
+  { label: "Manage Users", href: "/admin/users" },
+  { label: "Manage User Roles", href: "/admin/roles" },
+  { label: "Change Password", href: "/admin/password" },
+];
 
-  const baseCls =
-    "block px-3 py-2 rounded-xl text-sm hover:bg-bac-panel hover:text-bac-text transition-colors";
+export default function Sidebar({ onLogoClick }: SidebarProps) {
   return (
-    <Link
-      href={item.href || "#"}
-      className={clsx(baseCls, active && "bg-bac-panel text-bac-text")}
-    >
-      {item.label}
-    </Link>
-  );
-}
-
-function ItemWithChildren({
-  item,
-  pathname,
-}: {
-  item: MenuItem;
-  pathname: string;
-}) {
-  // ⬇️ Luôn mở submenu (theo yêu cầu hiển thị 2 menu con ngay)
-  const open = true;
-
-  return (
-    <div className="mb-1">
-      <div className="text-sm font-medium px-3 py-2 text-bac-muted">
-        {item.label}
-      </div>
-      {open && (
-        <div className="ml-2 space-y-1">
-          {(item.children || []).map((child, idx) => (
-            <div key={`${item.label}-${child.href || idx}`}>
-              <ItemLink item={child} pathname={pathname} />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Section({ title, items }: SectionProps) {
-  const pathname = usePathname();
-
-  return (
-    <div className="mb-6">
-      <div className="text-[11px] uppercase tracking-widest text-bac-muted px-3 mb-2">
-        {title}
-      </div>
-
-      <div className="space-y-1">
-        {items.map((item, idx) => {
-          const key = item.href || item.label || String(idx);
-          const hasChildren =
-            Array.isArray(item.children) && item.children.length > 0;
-
-          return (
-            <div key={key}>
-              {hasChildren ? (
-                <ItemWithChildren item={item} pathname={pathname} />
-              ) : (
-                <ItemLink item={item} pathname={pathname} />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-export default function Sidebar() {
-  return (
-    <aside className="h-full w-64 shrink-0 border-r border-bac-border bg-bac-bg">
-      <div className="p-4 flex items-center gap-3 border-b border-bac-border">
-        <Link href="/dashboard" className="flex items-center gap-3">
-          <img
-            src="/Logo.png"
-            alt="Blue Angels Care"
-            className="w-8 h-8 rounded"
-          />
-          <div className="text-base font-semibold leading-5">
-            Blue Angels Care
-            <div className="text-xs font-normal text-bac-muted -mt-0.5">
+    <div className="h-full flex flex-col">
+      {/* LOGO + BRAND */}
+      <div className="h-14 flex items-center gap-3 px-4 border-b border-bac-border">
+        <button
+          type="button"
+          onClick={onLogoClick}
+          className="flex items-center gap-3 hover:opacity-90"
+          aria-label="Go to dashboard"
+          title="Blue Angels Care — Dashboard"
+        >
+          <Image src="/Logo.png" alt="Logo" width={28} height={28} />
+          <div className="leading-4 text-left">
+            <div className="font-semibold">Blue Angels Care</div>
+            <div className="text-xs text-bac-muted">
               Health Management System
             </div>
           </div>
-        </Link>
+        </button>
       </div>
 
-      <nav className="p-3 overflow-y-auto h-[calc(100%-72px)]">
-        <Section title="DASHBOARD" items={MAIN_ITEMS} />
-        <Section title="ADMIN" items={ADMIN_ITEMS} />
-      </nav>
-    </aside>
+      {/* NAV */}
+      <div className="flex-1 overflow-y-auto py-3">
+        <div className="px-4 text-xs uppercase tracking-wide text-bac-muted mb-2">
+          Dashboard
+        </div>
+        <nav className="space-y-1 px-2">
+          {MENU.map((m) =>
+            m.children ? (
+              <div key={m.label} className="mb-1">
+                <div className="px-2 py-1 text-sm text-bac-muted">
+                  {m.label}
+                </div>
+                <div className="ml-2 space-y-1">
+                  {m.children.map((c) => (
+                    <Link
+                      key={c.href}
+                      href={c.href}
+                      className="block px-2 py-1 rounded hover:bg-bac-panel"
+                    >
+                      {c.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Link
+                key={m.href}
+                href={m.href}
+                className="block px-2 py-1 rounded hover:bg-bac-panel"
+              >
+                {m.label}
+              </Link>
+            )
+          )}
+        </nav>
+
+        <div className="px-4 mt-4 text-xs uppercase tracking-wide text-bac-muted mb-2">
+          Admin
+        </div>
+        <nav className="space-y-1 px-2">
+          {ADMIN.map((a) => (
+            <Link
+              key={a.href}
+              href={a.href}
+              className="block px-2 py-1 rounded hover:bg-bac-panel"
+            >
+              {a.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </div>
   );
 }
