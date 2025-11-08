@@ -1,4 +1,3 @@
-// app/employees/new/page.tsx
 "use client";
 
 import React, { useState, ChangeEvent, FormEvent } from "react";
@@ -22,9 +21,9 @@ interface EmployeeFormValues {
   ssn: string;
 
   // Employment Info
-  employeeId: string;
+  employeeId: string; // sẽ để trống, backend tự sinh
   role: string;
-  status: EmploymentStatus;
+  status: EmploymentStatus | "";
   hireDate: string;
   terminationDate: string;
   employmentType: EmploymentType;
@@ -48,7 +47,7 @@ interface EmployeeFormValues {
   emergencyAddress: string;
 
   // Preferences
-  preferredShift: ShiftPreference;
+  preferredShift: ShiftPreference | "";
   canWorkWeekends: boolean;
   canWorkHolidays: boolean;
   maxWeeklyHours: string;
@@ -76,7 +75,7 @@ const initialValues: EmployeeFormValues = {
   ssn: "",
 
   // Employment Info
-  employeeId: "",
+  employeeId: "", // để trống, backend sẽ tự sinh
   role: "",
   status: "Active",
   hireDate: "",
@@ -121,6 +120,7 @@ export default function NewEmployeePage() {
   const router = useRouter();
   const [formValues, setFormValues] =
     useState<EmployeeFormValues>(initialValues);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -140,15 +140,43 @@ export default function NewEmployeePage() {
     }));
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
-    // Phase 1: Only log to console (no backend yet)
-    console.log("New Employee form submitted:", formValues);
+    try {
+      setIsSubmitting(true);
 
-    alert(
-      "Form data has been logged to console. Backend integration will come later."
-    );
+      const res = await fetch("/api/employees", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formValues),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => null);
+        console.error("Failed to create employee:", error);
+        alert(error?.message || "Failed to create employee.");
+        return;
+      }
+
+      const created = await res.json();
+      console.log("Employee created:", created);
+      alert(
+        `Employee has been created successfully.\nID: ${created.employeeId}`
+      );
+
+      // reset form
+      setFormValues(initialValues);
+      // hoặc điều hướng tới search:
+      // router.push("/employees/search");
+    } catch (err) {
+      console.error("Unexpected error creating employee:", err);
+      alert("Unexpected error while creating employee.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCancel = () => {
@@ -180,9 +208,10 @@ export default function NewEmployeePage() {
             <button
               type="submit"
               form="new-employee-form"
-              className="rounded-xl bg-bac-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-bac-primary/90"
+              disabled={isSubmitting}
+              className="rounded-xl bg-bac-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-bac-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Save Employee
+              {isSubmitting ? "Saving..." : "Save Employee"}
             </button>
           </div>
         </div>
@@ -408,9 +437,10 @@ export default function NewEmployeePage() {
                   name="employeeId"
                   type="text"
                   value={formValues.employeeId}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm outline-none ring-bac-primary/40 focus:ring"
-                  placeholder="BAC-E-2025-001"
+                  // backend tự sinh, nên không cho nhập
+                  readOnly
+                  className="w-full cursor-not-allowed rounded-xl border border-bac-border bg-bac-bg/60 px-3 py-2 text-sm text-bac-muted outline-none"
+                  placeholder="Auto-generated when saving"
                 />
               </div>
 
@@ -1005,9 +1035,10 @@ export default function NewEmployeePage() {
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-bac-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-bac-primary/90"
+              disabled={isSubmitting}
+              className="rounded-xl bg-bac-primary px-5 py-2 text-sm font-semibold text-white shadow hover:bg-bac-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Save Employee
+              {isSubmitting ? "Saving..." : "Save Employee"}
             </button>
           </div>
         </form>

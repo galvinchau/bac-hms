@@ -13,7 +13,6 @@ datasource db {
   Individual = hồ sơ bệnh nhân/khách hàng
   code      = mã hiển thị: IND-2025-000001
 */
-
 model Individual {
   id            String   @id @default(cuid())   // khoá kỹ thuật
   code          String   @unique               // mã hiển thị, sẽ sinh từ Counter
@@ -115,6 +114,70 @@ model Individual {
 }
 
 /*
+  Employee = hồ sơ nhân viên Blue Angels Care
+  employeeId = mã hiển thị: BAC-E-2025-001 (nhập từ form, sau này có thể sinh tự động bằng Counter)
+*/
+model Employee {
+  id String @id @default(cuid())   // khoá kỹ thuật
+
+  // Demographics
+  firstName  String
+  middleName String?
+  lastName   String
+  dob        String?  // YYYY-MM-DD
+  gender     String?
+  phone      String?
+  email      String
+
+  educationLevel String? // trình độ học vấn/chuyên môn
+  ssn           String?  // 9 digits
+
+  // Employment Info
+  employeeId     String  @unique // BAC-E-2025-001
+  role           String?         // DSP / Nurse / Supervisor / ...
+  status         String?         // Active / On Leave / Inactive
+  hireDate       String?         // YYYY-MM-DD
+  terminationDate String?        // YYYY-MM-DD
+  employmentType String?         // Full-time / Part-time / Per-diem / Contract
+  branch         String?         // Altoona / Hollidaysburg / ...
+  workLocation   String?         // mô tả chi tiết hơn location
+  supervisorName String?         // tên supervisor trực tiếp
+
+  // Address
+  address1 String?
+  address2 String?
+  city     String?
+  state    String?
+  zip      String?
+
+  // Emergency Contact
+  emergencyName              String?
+  emergencyRelationship      String?
+  emergencyPhone             String?
+  emergencyEmail             String?
+  emergencyPreferredLanguage String?
+  emergencyAddress           String?
+
+  // Work Preferences
+  preferredShift  String?   // Morning / Afternoon / Evening / Overnight
+  canWorkWeekends Boolean @default(false)
+  canWorkHolidays Boolean @default(false)
+  maxWeeklyHours  Int?
+  notes           String?
+
+  // Notification Preferences
+  notifyByEmail       Boolean @default(true)
+  notifyBySMS         Boolean @default(false)
+  notifyByInApp       Boolean @default(true)
+  sendScheduleChanges Boolean @default(true)
+  sendPayrollUpdates  Boolean @default(true)
+  sendPolicyUpdates   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/*
   Payer: các đối tượng thanh toán: Primary / Secondary
 */
 model Payer {
@@ -161,6 +224,7 @@ model Diagnosis {
 
 /*
   Counter dùng để sinh code: IND-2025-000001, IND-2025-000002, ...
+  (sau này có thể xài chung cho Employee, ví dụ id = "EMP-2025")
 */
 model Counter {
   id    String @id   // ví dụ: "IND-2025"
