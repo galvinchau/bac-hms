@@ -15,7 +15,7 @@ const MENU = [
     label: "Individual",
     children: [
       { label: "New Individual", href: "/individual/new" },
-      { label: "Search Individual", href: "/individual/search" },
+      { label: "Search Individual", href: "/individual" },
     ],
   },
   {
