@@ -1,19 +1,13 @@
+// app/api/services/[id]/route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-type RouteContext = {
-  params: { id: string };
-};
-
-export async function GET(_req: Request, context: RouteContext) {
+// GET: lấy thông tin 1 service theo ID
+export async function GET(_req: Request, context: any) {
   try {
-    const id = context.params.id;
-    if (!id) {
-      return NextResponse.json(
-        { message: "Missing service id" },
-        { status: 400 }
-      );
-    }
+    // context.params có thể là object hoặc Promise<object> nên dùng await cho chắc
+    const { id } = await context.params;
 
     const service = await prisma.service.findUnique({
       where: { id },
@@ -27,66 +21,38 @@ export async function GET(_req: Request, context: RouteContext) {
     }
 
     return NextResponse.json(service);
-  } catch (err) {
-    console.error("Error loading service:", err);
+  } catch (error) {
+    console.error("Error fetching service:", error);
     return NextResponse.json(
-      { message: "Failed to load service" },
+      { message: "Failed to fetch service" },
       { status: 500 }
     );
   }
 }
 
-export async function PUT(req: Request, context: RouteContext) {
+// PUT: cập nhật service
+export async function PUT(req: Request, context: any) {
   try {
-    const id = context.params.id;
-    if (!id) {
-      return NextResponse.json(
-        { message: "Missing service id" },
-        { status: 400 }
-      );
-    }
-
+    const { id } = await context.params;
     const body = await req.json();
-
-    const {
-      serviceCode,
-      serviceName,
-      billingCode,
-      category,
-      description,
-      status,
-      billable,
-      notes,
-    } = body ?? {};
 
     const updated = await prisma.service.update({
       where: { id },
       data: {
-        serviceCode,
-        serviceName,
-        billingCode,
-        category,
-        description,
-        status,
-        billable,
-        notes,
+        serviceCode: body.serviceCode,
+        serviceName: body.serviceName,
+        billingCode: body.billingCode,
+        category: body.category,
+        description: body.description,
+        status: body.status,
+        billable: body.billable,
+        notes: body.notes,
       },
     });
 
     return NextResponse.json(updated);
-  } catch (err: any) {
-    console.error("Error updating service:", err);
-
-    if (err?.code === "P2002") {
-      return NextResponse.json(
-        {
-          message:
-            "Service code already exists. Please choose another code.",
-        },
-        { status: 409 }
-      );
-    }
-
+  } catch (error) {
+    console.error("Error updating service:", error);
     return NextResponse.json(
       { message: "Failed to update service" },
       { status: 500 }
@@ -94,23 +60,18 @@ export async function PUT(req: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_req: Request, context: RouteContext) {
+// DELETE: xoá service
+export async function DELETE(_req: Request, context: any) {
   try {
-    const id = context.params.id;
-    if (!id) {
-      return NextResponse.json(
-        { message: "Missing service id" },
-        { status: 400 }
-      );
-    }
+    const { id } = await context.params;
 
     await prisma.service.delete({
       where: { id },
     });
 
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("Error deleting service:", err);
+  } catch (error) {
+    console.error("Error deleting service:", error);
     return NextResponse.json(
       { message: "Failed to delete service" },
       { status: 500 }
