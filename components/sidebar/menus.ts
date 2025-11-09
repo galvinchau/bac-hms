@@ -16,7 +16,14 @@ export type MenuSection = {
 /** ========= MAIN (DASHBOARD) ITEMS ========= **/
 export const MAIN_ITEMS: MenuItem[] = [
   { label: "Programs", href: "/programs" },
-  { label: "Services", href: "/services" },
+
+  {
+    label: "Services",
+    children: [
+      { label: "New Service", href: "/services/new" },
+      { label: "Search Service", href: "/services/search" },
+    ],
+  },
 
   // Individual có 2 menu con theo yêu cầu
   {
@@ -27,7 +34,15 @@ export const MAIN_ITEMS: MenuItem[] = [
     ],
   },
 
-  { label: "Employees", href: "/employees" },
+  // Employees: group với New / Search
+  {
+    label: "Employees",
+    children: [
+      { label: "New Employee", href: "/employees/new" },
+      { label: "Search Employee", href: "/employees/search" },
+    ],
+  },
+
   { label: "Schedule", href: "/schedule" },
   { label: "Visited Maintenance", href: "/visited-maintenance" },
   { label: "Medication", href: "/medication" },

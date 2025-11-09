@@ -10,7 +10,13 @@ type SidebarProps = {
 
 const MENU = [
   { label: "Programs", href: "/programs" },
-  { label: "Services", href: "/services" },
+ {
+  label: "Services",
+  children: [
+    { label: "New Service", href: "/services/new" },
+    { label: "Search Service", href: "/services/search" },
+  ],
+},
   {
     label: "Individual",
     children: [

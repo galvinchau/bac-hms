@@ -5,7 +5,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"     // Dùng PostgreSQL (Supabase), URL lấy từ env("DATABASE_URL")
+  provider = "postgresql"   // Dùng PostgreSQL (Supabase)
   url      = env("DATABASE_URL")
 }
 
@@ -133,15 +133,15 @@ model Employee {
   ssn           String?  // 9 digits
 
   // Employment Info
-  employeeId     String  @unique // BAC-E-2025-001
-  role           String?         // DSP / Nurse / Supervisor / ...
-  status         String?         // Active / On Leave / Inactive
-  hireDate       String?         // YYYY-MM-DD
-  terminationDate String?        // YYYY-MM-DD
-  employmentType String?         // Full-time / Part-time / Per-diem / Contract
-  branch         String?         // Altoona / Hollidaysburg / ...
-  workLocation   String?         // mô tả chi tiết hơn location
-  supervisorName String?         // tên supervisor trực tiếp
+  employeeId      String  @unique // BAC-E-2025-001
+  role            String?         // DSP / Nurse / Supervisor / ...
+  status          String?         // Active / On Leave / Inactive
+  hireDate        String?         // YYYY-MM-DD
+  terminationDate String?         // YYYY-MM-DD
+  employmentType  String?         // Full-time / Part-time / Per-diem / Contract
+  branch          String?         // Altoona / Hollidaysburg / ...
+  workLocation    String?         // mô tả chi tiết hơn location
+  supervisorName  String?         // tên supervisor trực tiếp
 
   // Address
   address1 String?
@@ -229,4 +229,38 @@ model Diagnosis {
 model Counter {
   id    String @id   // ví dụ: "IND-2025"
   value Int
+}
+
+/*
+  Service = danh mục dịch vụ (dùng cho Accepted Services + scheduling + billing)
+*/
+model Service {
+  id          String   @id @default(cuid())   // technical id
+
+  // Short code dùng chung với Accepted Services (PCA, NT, PBIS...)
+  serviceCode String   @unique               // e.g. "PCA"
+
+  // Tên đầy đủ: "Personal Care Assistant"
+  serviceName String
+
+  // Mã billing / code show cho payer (SVC-001, T1019...)
+  billingCode String?
+
+  // "None-Residential" | "Residential service"
+  category    String
+
+  // Mô tả dịch vụ
+  description String?
+
+  // "Active" | "Inactive"
+  status      String
+
+  // Có dùng để claim/billing không
+  billable    Boolean  @default(true)
+
+  // Ghi chú nội bộ
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
