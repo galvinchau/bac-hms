@@ -1,0 +1,999 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+// ===== Types =====
+
+type Individual = {
+    id: string;
+    code: string;
+    firstName: string;
+    lastName: string;
+};
+
+type Service = {
+    id: string;
+    serviceCode: string;
+    serviceName: string;
+};
+
+type Employee = {
+    id: string;
+    firstName: string;
+    lastName: string;
+    employeeId: string;
+};
+
+type MasterTemplateShift = {
+    id: string;
+    dayOfWeek: number; // 0-6
+    startMinutes: number;
+    endMinutes: number;
+    serviceId: string;
+    service?: Service;
+    defaultDsp?: Employee | null;
+    notes?: string | null;
+};
+
+type MasterScheduleTemplate = {
+    id: string;
+    individualId: string;
+    name: string | null;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    isActive: boolean;
+    notes?: string | null;
+    shifts: MasterTemplateShift[];
+};
+
+type Visit = {
+    id: string;
+    checkInAt: string;
+    checkOutAt: string | null;
+    units: number | null;
+};
+
+type ScheduleShift = {
+    id: string;
+    scheduleDate: string;
+    plannedStart: string;
+    plannedEnd: string;
+    status: string;
+    billable: boolean;
+    notes: string | null;
+    service: Service;
+    plannedDsp?: Employee | null;
+    actualDsp?: Employee | null;
+    visits: Visit[];
+};
+
+type ScheduleWeek = {
+    id: string;
+    individualId: string;
+    weekStart: string;
+    weekEnd: string;
+    templateId: string | null;
+    locked: boolean;
+    shifts: ScheduleShift[];
+};
+
+type WeekApiResponse = {
+    week: ScheduleWeek | null;
+    created?: boolean;
+    regenerated?: boolean;
+};
+
+type MasterApiResponse = MasterScheduleTemplate[];
+
+type IndividualsApiResponse = Individual[];
+
+const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// ===== Helpers =====
+
+function startOfWeekSunday(date: Date): Date {
+    const d = new Date(date);
+    const day = d.getDay(); // 0-6 (Sun = 0)
+    d.setDate(d.getDate() - day);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function addDays(date: Date, days: number): Date {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    return d;
+}
+
+function formatDateShort(dateStr: string | Date): string {
+    const d = typeof dateStr === "string" ? new Date(dateStr) : dateStr;
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const year = d.getFullYear();
+    return `${month.toString().padStart(2, "0")}/${day
+        .toString()
+        .padStart(2, "0")}/${year}`;
+}
+
+function formatTime(dateStr: string): string {
+    const d = new Date(dateStr);
+    const hours = d.getHours();
+    const minutes = d.getMinutes();
+    const hh = hours.toString().padStart(2, "0");
+    const mm = minutes.toString().padStart(2, "0");
+    return `${hh}:${mm}`;
+}
+
+function formatMinutesRange(start: number, end: number): string {
+    const fmt = (m: number) => {
+        const h = Math.floor(m / 60);
+        const min = m % 60;
+        return `${h.toString().padStart(2, "0")}:${min
+            .toString()
+            .padStart(2, "0")}`;
+    };
+    return `${fmt(start)} – ${fmt(end)}`;
+}
+
+function minutesToUnits(minutes: number): number {
+    return Math.round(minutes / 15);
+}
+
+function parseTimeToMinutes(time: string): number | null {
+    const [hh, mm] = time.split(":");
+    const h = Number(hh);
+    const m = Number(mm);
+    if (
+        Number.isNaN(h) ||
+        Number.isNaN(m) ||
+        h < 0 ||
+        h > 23 ||
+        m < 0 ||
+        m > 59
+    ) {
+        return null;
+    }
+    return h * 60 + m;
+}
+
+// ===== Page Component =====
+
+export default function SchedulePage() {
+    const [individuals, setIndividuals] = useState<Individual[]>([]);
+    const [selectedIndividualId, setSelectedIndividualId] = useState<string>("");
+
+    const [services, setServices] = useState<Service[]>([]);
+
+    const [weekStart, setWeekStart] = useState<Date>(() =>
+        startOfWeekSunday(new Date())
+    );
+
+    const [masterTemplates, setMasterTemplates] = useState<
+        MasterScheduleTemplate[]
+    >([]);
+    const [selectedTemplate, setSelectedTemplate] =
+        useState<MasterScheduleTemplate | null>(null);
+
+    // Draft master template đang chỉnh sửa trên UI
+    const [masterDraft, setMasterDraft] =
+        useState<MasterScheduleTemplate | null>(null);
+
+    const [currentWeek, setCurrentWeek] = useState<ScheduleWeek | null>(null);
+
+    const [loadingMaster, setLoadingMaster] = useState(false);
+    const [savingMaster, setSavingMaster] = useState(false);
+    const [loadingWeek, setLoadingWeek] = useState(false);
+    const [generatingWeek, setGeneratingWeek] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // Form thêm shift cho Master Week
+    const [editingDay, setEditingDay] = useState<number | null>(null);
+    const [editServiceId, setEditServiceId] = useState<string>("");
+    const [editStart, setEditStart] = useState<string>("07:00");
+    const [editEnd, setEditEnd] = useState<string>("14:00");
+
+    // --------- load Individuals (dùng simple=true) ---------
+    useEffect(() => {
+        async function fetchIndividuals() {
+            try {
+                const res = await fetch("/api/individuals?simple=true");
+                if (!res.ok) return;
+                const data = (await res.json()) as IndividualsApiResponse;
+                const arr = Array.isArray(data) ? data : [];
+                setIndividuals(arr);
+                if (arr.length > 0 && !selectedIndividualId) {
+                    setSelectedIndividualId(arr[0].id);
+                }
+            } catch (e) {
+                console.error("Failed to load individuals", e);
+            }
+        }
+        fetchIndividuals();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // --------- load Services (dùng cho Master template) ---------
+    useEffect(() => {
+        async function fetchServices() {
+            try {
+                const res = await fetch("/api/services");
+                if (!res.ok) return;
+                const data = await res.json();
+                const list: Service[] = Array.isArray(data)
+                    ? data
+                    : Array.isArray(data?.items)
+                        ? data.items
+                        : [];
+                setServices(list);
+            } catch (e) {
+                console.error("Failed to load services", e);
+            }
+        }
+        fetchServices();
+    }, []);
+
+    // --------- load Master template khi đổi Individual ---------
+    useEffect(() => {
+        if (!selectedIndividualId) {
+            setMasterTemplates([]);
+            setSelectedTemplate(null);
+            setMasterDraft(null);
+            return;
+        }
+
+        async function fetchMaster() {
+            setLoadingMaster(true);
+            setError(null);
+            try {
+                const res = await fetch(
+                    `/api/schedule/master?individualId=${selectedIndividualId}&activeOnly=true`
+                );
+                if (!res.ok) {
+                    throw new Error("Failed to load master templates");
+                }
+                const data = (await res.json()) as MasterApiResponse;
+                const arr = Array.isArray(data) ? data : [];
+                setMasterTemplates(arr);
+                const first = arr[0] ?? null;
+                setSelectedTemplate(first);
+
+                if (first) {
+                    setMasterDraft({
+                        ...first,
+                        shifts: [...first.shifts],
+                    });
+                } else {
+                    setMasterDraft(null);
+                }
+            } catch (e: any) {
+                console.error(e);
+                setError(e.message ?? "Failed to load master schedule");
+            } finally {
+                setLoadingMaster(false);
+            }
+        }
+
+        fetchMaster();
+    }, [selectedIndividualId]);
+
+    // --------- load Weekly schedule khi đổi Individual hoặc tuần ---------
+    useEffect(() => {
+        if (!selectedIndividualId) {
+            setCurrentWeek(null);
+            return;
+        }
+
+        async function fetchWeek() {
+            setLoadingWeek(true);
+            setError(null);
+            try {
+                const res = await fetch(
+                    `/api/schedule/week?individualId=${selectedIndividualId}&weekStart=${weekStart.toISOString()}`
+                );
+                if (!res.ok) {
+                    throw new Error("Failed to load weekly schedule");
+                }
+                const data = (await res.json()) as WeekApiResponse;
+                setCurrentWeek(data.week ?? null);
+            } catch (e: any) {
+                console.error(e);
+                setError(e.message ?? "Failed to load weekly schedule");
+            } finally {
+                setLoadingWeek(false);
+            }
+        }
+
+        fetchWeek();
+    }, [selectedIndividualId, weekStart]);
+
+    async function handleGenerateWeek() {
+        if (!selectedIndividualId) return;
+
+        try {
+            setGeneratingWeek(true);
+            setError(null);
+            const res = await fetch("/api/schedule/week", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    individualId: selectedIndividualId,
+                    weekStart: weekStart.toISOString(),
+                    templateId: selectedTemplate?.id ?? undefined,
+                    regenerate: true,
+                }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                throw new Error(data?.error || "Failed to generate week");
+            }
+            const data = (await res.json()) as WeekApiResponse;
+            setCurrentWeek(data.week ?? null);
+        } catch (e: any) {
+            console.error(e);
+            setError(e.message ?? "Failed to generate week");
+        } finally {
+            setGeneratingWeek(false);
+        }
+    }
+
+    function handlePrevWeek() {
+        const prev = addDays(weekStart, -7);
+        setWeekStart(startOfWeekSunday(prev));
+    }
+
+    function handleNextWeek() {
+        const next = addDays(weekStart, 7);
+        setWeekStart(startOfWeekSunday(next));
+    }
+
+    const weekRangeLabel = useMemo(() => {
+        const start = weekStart;
+        const end = addDays(weekStart, 6);
+        return `${formatDateShort(start)} – ${formatDateShort(end)}`;
+    }, [weekStart]);
+
+    // ---------- Tính dữ liệu grid: rows = Shift 1/2/3, cols = Sun..Sat ----------
+    const gridByDayAndSlot = useMemo(() => {
+        if (!currentWeek) return { maxSlots: 0, slots: [] as ScheduleShift[][] };
+
+        const byDay: ScheduleShift[][] = Array.from({ length: 7 }, () => []);
+        for (const shift of currentWeek.shifts) {
+            const d = new Date(shift.scheduleDate);
+            const day = d.getDay(); // 0-6
+            if (day >= 0 && day <= 6) {
+                byDay[day].push(shift);
+            }
+        }
+
+        const maxSlots = byDay.reduce((max, arr) => {
+            arr.sort(
+                (a, b) =>
+                    new Date(a.plannedStart).getTime() -
+                    new Date(b.plannedStart).getTime()
+            );
+            return Math.max(max, arr.length);
+        }, 0);
+
+        const slots: ScheduleShift[][] = [];
+        for (let slot = 0; slot < maxSlots; slot++) {
+            const row: ScheduleShift[] = [];
+            for (let day = 0; day < 7; day++) {
+                row.push(byDay[day][slot] ?? (null as any));
+            }
+            slots.push(row);
+        }
+
+        return { maxSlots, slots };
+    }, [currentWeek]);
+
+    // ---------- Master template editing ----------
+
+    function ensureDraftBase(): MasterScheduleTemplate | null {
+        if (!selectedIndividualId) return null;
+        if (masterDraft) return masterDraft;
+        const nowIso = new Date().toISOString();
+        const base: MasterScheduleTemplate = {
+            id: "draft",
+            individualId: selectedIndividualId,
+            name: selectedTemplate?.name ?? "Default week",
+            effectiveFrom: selectedTemplate?.effectiveFrom ?? nowIso,
+            effectiveTo: selectedTemplate?.effectiveTo ?? null,
+            isActive: selectedTemplate?.isActive ?? true,
+            notes: selectedTemplate?.notes ?? null,
+            shifts: [],
+        };
+        setMasterDraft(base);
+        return base;
+    }
+
+    function handleStartAddShift(dayIndex: number) {
+        if (!selectedIndividualId) return;
+        if (!services.length) {
+            setError("No services found. Please create at least one Service first.");
+            return;
+        }
+        setEditingDay(dayIndex);
+        setEditServiceId(services[0]?.id ?? "");
+        setEditStart("07:00");
+        setEditEnd("14:00");
+    }
+
+    function handleCancelAddShift() {
+        setEditingDay(null);
+    }
+
+    function handleConfirmAddShift() {
+        if (editingDay === null) return;
+        if (!editServiceId) {
+            setError("Vui lòng chọn Service cho Shift.");
+            return;
+        }
+        const start = parseTimeToMinutes(editStart);
+        const end = parseTimeToMinutes(editEnd);
+        if (start === null || end === null) {
+            setError("Giờ không hợp lệ. Định dạng HH:MM (vd: 07:00).");
+            return;
+        }
+
+        const base = ensureDraftBase();
+        if (!base) return;
+
+        const svc = services.find((s) => s.id === editServiceId);
+
+        const newShift: MasterTemplateShift = {
+            id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            dayOfWeek: editingDay,
+            startMinutes: start,
+            endMinutes: end,
+            serviceId: editServiceId,
+            service: svc,
+            defaultDsp: null,
+            notes: null,
+        };
+
+        setMasterDraft({
+            ...base,
+            shifts: [...base.shifts, newShift],
+        });
+
+        setEditingDay(null);
+    }
+
+    function handleDeleteMasterShift(shiftId: string) {
+        if (!masterDraft) return;
+        setMasterDraft({
+            ...masterDraft,
+            shifts: masterDraft.shifts.filter((s) => s.id !== shiftId),
+        });
+    }
+
+    async function handleSaveMasterTemplate() {
+        if (!selectedIndividualId) return;
+        const draft = ensureDraftBase();
+        if (!draft) return;
+        if (!draft.shifts.length) {
+            setError("Master Week chưa có shift nào để lưu.");
+            return;
+        }
+
+        try {
+            setSavingMaster(true);
+            setError(null);
+
+            const payload = {
+                name: draft.name,
+                effectiveFrom: draft.effectiveFrom,
+                effectiveTo: draft.effectiveTo,
+                isActive: draft.isActive,
+                notes: draft.notes ?? null,
+                shifts: draft.shifts.map((s) => ({
+                    dayOfWeek: s.dayOfWeek,
+                    serviceId: s.serviceId,
+                    startMinutes: s.startMinutes,
+                    endMinutes: s.endMinutes,
+                    defaultDspId: s.defaultDsp?.id ?? null,
+                    billable: true,
+                    notes: s.notes ?? null,
+                })),
+            };
+
+            let res: Response;
+            let savedTemplate: MasterScheduleTemplate;
+
+            if (selectedTemplate) {
+                res = await fetch(`/api/schedule/master/${selectedTemplate.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => null);
+                    throw new Error(
+                        data?.error || "Failed to update master schedule template"
+                    );
+                }
+                savedTemplate = (await res.json()) as MasterScheduleTemplate;
+            } else {
+                res = await fetch("/api/schedule/master", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        individualId: selectedIndividualId,
+                        ...payload,
+                    }),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => null);
+                    throw new Error(
+                        data?.error || "Failed to create master schedule template"
+                    );
+                }
+                savedTemplate = (await res.json()) as MasterScheduleTemplate;
+            }
+
+            setSelectedTemplate(savedTemplate);
+            setMasterTemplates([savedTemplate]);
+            setMasterDraft({
+                ...savedTemplate,
+                shifts: [...savedTemplate.shifts],
+            });
+        } catch (e: any) {
+            console.error(e);
+            setError(e.message ?? "Failed to save master template");
+        } finally {
+            setSavingMaster(false);
+        }
+    }
+
+    function handleResetMasterDraft() {
+        if (selectedTemplate) {
+            setMasterDraft({
+                ...selectedTemplate,
+                shifts: [...selectedTemplate.shifts],
+            });
+        } else {
+            setMasterDraft(null);
+        }
+        setEditingDay(null);
+    }
+
+    // ---------- render helpers ----------
+
+    function renderMasterDayCard(dayIndex: number) {
+        const shifts =
+            masterDraft?.shifts
+                .filter((s) => s.dayOfWeek === dayIndex)
+                .sort((a, b) => a.startMinutes - b.startMinutes) ?? [];
+
+        const isEditingThisDay = editingDay === dayIndex;
+
+        return (
+            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-sm text-slate-200 h-full flex flex-col">
+                <div className="font-semibold text-slate-100 flex items-center justify-between mb-2">
+                    <span>{dayLabels[dayIndex]}</span>
+                </div>
+
+                {shifts.length === 0 && !isEditingThisDay && (
+                    <div className="text-xs italic text-slate-500 flex-1 flex items-center">
+                        No master template
+                    </div>
+                )}
+
+                <div className="space-y-2">
+                    {shifts.map((shift) => (
+                        <div
+                            key={shift.id}
+                            className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs"
+                        >
+                            <div className="flex justify-between mb-1">
+                                <span className="font-semibold text-emerald-300">
+                                    {shift.service?.serviceCode || "SVC"}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="text-[10px] text-rose-400 hover:text-rose-300"
+                                    onClick={() => handleDeleteMasterShift(shift.id)}
+                                >
+                                    Delete
+                                </button>
+                            </div>
+                            <div className="text-slate-300">
+                                {formatMinutesRange(shift.startMinutes, shift.endMinutes)}
+                            </div>
+                        </div>
+                    ))}
+
+                    {isEditingThisDay && (
+                        <div className="rounded-xl border border-dashed border-slate-600 bg-slate-950/60 px-3 py-2 text-xs space-y-2">
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[11px] text-slate-300">Service</span>
+                                <select
+                                    value={editServiceId}
+                                    onChange={(e) => setEditServiceId(e.target.value)}
+                                    className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                                >
+                                    {services.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                            {s.serviceCode} — {s.serviceName}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex gap-2">
+                                <div className="flex-1 flex flex-col gap-1">
+                                    <span className="text-[11px] text-slate-300">Start</span>
+                                    <input
+                                        type="time"
+                                        value={editStart}
+                                        onChange={(e) => setEditStart(e.target.value)}
+                                        className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                                    />
+                                </div>
+                                <div className="flex-1 flex flex-col gap-1">
+                                    <span className="text-[11px] text-slate-300">End</span>
+                                    <input
+                                        type="time"
+                                        value={editEnd}
+                                        onChange={(e) => setEditEnd(e.target.value)}
+                                        className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2 pt-1">
+                                <button
+                                    type="button"
+                                    className="text-[11px] text-slate-400 hover:text-slate-200"
+                                    onClick={handleCancelAddShift}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    className="text-[11px] rounded-full bg-emerald-500 px-3 py-1 font-semibold text-slate-950 hover:bg-emerald-400"
+                                    onClick={handleConfirmAddShift}
+                                >
+                                    Save shift
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="mt-auto pt-2">
+                    {!isEditingThisDay && (
+                        <button
+                            type="button"
+                            // chỉ cần Individual, còn Service thiếu thì bấm sẽ báo lỗi
+                            disabled={!selectedIndividualId}
+                            onClick={() => handleStartAddShift(dayIndex)}
+                            className="text-[11px] text-sky-300 hover:text-sky-200 disabled:opacity-40"
+                        >
+                            + Event
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    function renderShiftCell(shift: ScheduleShift | null, dayIndex: number) {
+        if (!shift) {
+            return (
+                <div className="h-full rounded-2xl border border-dashed border-slate-700/40 bg-slate-900/10 flex items-center justify-center text-xs text-slate-600">
+                    No shift
+                </div>
+            );
+        }
+
+        const totalScheduledMinutes =
+            (new Date(shift.plannedEnd).getTime() -
+                new Date(shift.plannedStart).getTime()) /
+            (1000 * 60);
+        const scheduledUnits = minutesToUnits(totalScheduledMinutes);
+
+        const totalVisitedUnits = shift.visits.reduce(
+            (sum, v) => sum + (v.units ?? 0),
+            0
+        );
+
+        const deltaUnits = totalVisitedUnits - scheduledUnits;
+
+        const dspName =
+            shift.actualDsp ??
+            shift.plannedDsp ??
+            (null as unknown as Employee | null);
+
+        const statusColor =
+            shift.status === "COMPLETED"
+                ? "text-emerald-400"
+                : shift.status === "IN_PROGRESS"
+                    ? "text-amber-300"
+                    : shift.status === "CANCELLED"
+                        ? "text-rose-400"
+                        : shift.status === "BACKUP_PLAN"
+                            ? "text-sky-300"
+                            : "text-slate-400";
+
+        return (
+            <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
+                <div className="flex items-center justify-between mb-1">
+                    <div className="font-semibold text-emerald-300">
+                        {shift.service.serviceCode}
+                    </div>
+                    <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
+                        {shift.status.replace("_", " ")}
+                    </div>
+                </div>
+
+                {dspName && (
+                    <div className="text-[11px] text-slate-300 mb-1">
+                        {dspName.firstName} {dspName.lastName}
+                    </div>
+                )}
+
+                <div className="flex justify-between text-[11px] text-slate-300 mb-1">
+                    <span>
+                        Sched: {formatTime(shift.plannedStart)}–{formatTime(
+                            shift.plannedEnd
+                        )}
+                    </span>
+                    <span>{scheduledUnits}u</span>
+                </div>
+
+                <div className="flex justify-between text-[11px] text-slate-300 mb-1">
+                    <span>
+                        Visit:{" "}
+                        {shift.visits.length > 0
+                            ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
+                                ? formatTime(shift.visits[0].checkOutAt)
+                                : "--:--"
+                            }`
+                            : "--:-- – --:--"}
+                    </span>
+                    <span>{totalVisitedUnits}u</span>
+                </div>
+
+                <div className="mt-auto flex items-center justify-between pt-1 border-t border-slate-700/60 text-[11px] text-slate-400">
+                    <span>Δ {deltaUnits}u</span>
+                    <button
+                        type="button"
+                        className="text-[11px] underline decoration-dotted hover:text-sky-300"
+                        onClick={() => {
+                            console.log("Edit schedule", shift.id, "day", dayIndex);
+                        }}
+                    >
+                        Edit
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    const currentIndividual = Array.isArray(individuals)
+        ? individuals.find((i) => i.id === selectedIndividualId)
+        : undefined;
+
+    // ===== Render =====
+
+    return (
+        <div className="min-h-screen bg-slate-950 text-slate-100">
+            <div className="mx-auto max-w-7xl px-6 pb-10 pt-6 space-y-6">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-semibold tracking-tight">
+                            Schedule
+                        </h1>
+                        <p className="text-sm text-slate-400">
+                            Weekly master schedule, generated shifts, and summary for DSPs
+                            and Individuals.
+                        </p>
+                    </div>
+                </div>
+
+                {/* Filters bar */}
+                <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-900/60 px-4 py-3 border border-slate-700/60">
+                    <div className="flex flex-col gap-1">
+                        <span className="text-xs text-slate-400">Individual</span>
+                        <select
+                            value={selectedIndividualId}
+                            onChange={(e) => setSelectedIndividualId(e.target.value)}
+                            className="h-9 rounded-lg bg-slate-900 border border-slate-700 px-3 text-sm"
+                        >
+                            {individuals.length === 0 && (
+                                <option value="">No Individuals</option>
+                            )}
+                            {individuals.map((ind) => (
+                                <option key={ind.id} value={ind.id}>
+                                    {ind.code} — {ind.lastName} {ind.firstName}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                        <span className="text-xs text-slate-400">Week</span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={handlePrevWeek}
+                                className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
+                            >
+                                Prev
+                            </button>
+                            <span className="text-sm font-medium">{weekRangeLabel}</span>
+                            <button
+                                type="button"
+                                onClick={handleNextWeek}
+                                className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1" />
+
+                    <div className="flex flex-col gap-1 items-end">
+                        <span className="text-xs text-slate-400">Generate weekly</span>
+                        <button
+                            type="button"
+                            onClick={handleGenerateWeek}
+                            disabled={!selectedIndividualId || generatingWeek}
+                            className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-emerald-400 disabled:opacity-50"
+                        >
+                            {generatingWeek ? "Generating..." : "Generate"}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Info + errors */}
+                {currentIndividual && (
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-xs text-slate-300 flex items-center justify-between">
+                        <div>
+                            <div className="font-semibold text-slate-100">
+                                {currentIndividual.lastName} {currentIndividual.firstName}
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                                ID: {currentIndividual.code}
+                            </div>
+                        </div>
+                        {selectedTemplate && (
+                            <div className="text-right text-[11px] text-slate-400">
+                                <div>
+                                    Active template:{" "}
+                                    <span className="font-medium text-emerald-300">
+                                        {selectedTemplate.name || "Default"}
+                                    </span>
+                                </div>
+                                <div>
+                                    Effective:{" "}
+                                    {formatDateShort(selectedTemplate.effectiveFrom)} –{" "}
+                                    {selectedTemplate.effectiveTo
+                                        ? formatDateShort(selectedTemplate.effectiveTo)
+                                        : "open-ended"}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {error && (
+                    <div className="rounded-xl border border-rose-600/60 bg-rose-950/40 px-4 py-2 text-sm text-rose-200">
+                        {error}
+                    </div>
+                )}
+
+                {/* Master Week section */}
+                <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-semibold text-slate-100">
+                            Master Week – Template (Sun–Sat)
+                        </h2>
+                        <div className="flex items-center gap-3">
+                            {loadingMaster && (
+                                <span className="text-[11px] text-slate-400">
+                                    Loading master template...
+                                </span>
+                            )}
+                            <button
+                                type="button"
+                                onClick={handleResetMasterDraft}
+                                className="text-[11px] text-slate-400 hover:text-slate-100"
+                            >
+                                Reset
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveMasterTemplate}
+                                disabled={savingMaster || !selectedIndividualId}
+                                className="inline-flex items-center gap-2 rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-sky-400 disabled:opacity-50"
+                            >
+                                {savingMaster ? "Saving..." : "Save Master template"}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-3">
+                        {dayLabels.map((_, idx) => (
+                            <div key={idx}>{renderMasterDayCard(idx)}</div>
+                        ))}
+                    </div>
+                </section>
+
+                {/* Weekly Detail grid */}
+                <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-semibold text-slate-100">
+                            Weekly schedule – grid view (Sun–Sat)
+                        </h2>
+                        {loadingWeek && (
+                            <span className="text-[11px] text-slate-400">
+                                Loading weekly schedule...
+                            </span>
+                        )}
+                    </div>
+
+                    {!currentWeek && !loadingWeek && (
+                        <div className="rounded-2xl border border-dashed border-slate-700/60 bg-slate-900/40 px-4 py-6 text-sm text-slate-400 text-center">
+                            No weekly schedule for this week yet. Click{" "}
+                            <span className="font-semibold text-emerald-300">Generate</span>{" "}
+                            to create it from the Master template.
+                        </div>
+                    )}
+
+                    {currentWeek && (
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 space-y-3">
+                            {/* Header row: days */}
+                            <div className="grid grid-cols-[80px_repeat(7,minmax(0,1fr))] gap-3 text-xs text-slate-300 mb-2">
+                                <div />
+                                {Array.from({ length: 7 }).map((_, day) => {
+                                    const d = addDays(weekStart, day);
+                                    return (
+                                        <div key={day} className="text-center">
+                                            <div className="font-semibold text-slate-100">
+                                                {dayLabels[day]}
+                                            </div>
+                                            <div className="text-[11px] text-slate-400">
+                                                {formatDateShort(d)}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Grid rows: Shift 1 / 2 / 3 ... */}
+                            <div className="space-y-3">
+                                {gridByDayAndSlot.maxSlots === 0 && (
+                                    <div className="text-xs text-slate-500 text-center py-4">
+                                        No shifts for this week. Use Master template to generate
+                                        schedule.
+                                    </div>
+                                )}
+
+                                {gridByDayAndSlot.slots.map((row, rowIndex) => (
+                                    <div
+                                        key={rowIndex}
+                                        className="grid grid-cols-[80px_repeat(7,minmax(0,1fr))] gap-3"
+                                    >
+                                        <div className="flex items-start pt-2 text-xs text-slate-400">
+                                            Shift {rowIndex + 1}
+                                        </div>
+                                        {row.map((shift, dayIndex) => (
+                                            <div key={dayIndex}>
+                                                {renderShiftCell(
+                                                    shift && shift.id ? shift : null,
+                                                    dayIndex
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </section>
+            </div>
+        </div>
+    );
+}

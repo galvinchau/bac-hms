@@ -10,6 +10,8 @@ import { nextIndividualCode } from "@/lib/id";
  *   q        - text search (code, firstName, lastName, city, county)
  *   page     - page index (1-based)
  *   pageSize - rows per page
+ *
+ *   simple   - nếu simple=true thì trả về THẲNG mảng items (dùng cho dropdown, Schedule...)
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -20,6 +22,8 @@ export async function GET(req: Request) {
     50,
     Math.max(5, Number(searchParams.get("pageSize") || "10") || 10)
   );
+
+  const simple = searchParams.get("simple") === "true";
 
   const where =
     q.length > 0
@@ -59,6 +63,12 @@ export async function GET(req: Request) {
     }),
   ]);
 
+  // 👉 Nếu simple=true: trả về thẳng mảng items cho những chỗ chỉ cần dropdown.
+  if (simple) {
+    return NextResponse.json(items);
+  }
+
+  // 👉 Mặc định: giữ nguyên format cũ cho màn Search Individual.
   return NextResponse.json({
     items,
     total,

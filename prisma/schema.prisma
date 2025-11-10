@@ -111,6 +111,13 @@ model Individual {
   payers      Payer[]
   medications Medication[]
   diagnoses   Diagnosis[]
+
+  // Relations mới cho Schedule / Visit / ISP
+  masterScheduleTemplates MasterScheduleTemplate[]
+  scheduleWeeks           ScheduleWeek[]
+  scheduleShifts          ScheduleShift[]
+  visits                  Visit[]
+  ispAllocations          ISPAllocation[]
 }
 
 /*
@@ -175,6 +182,12 @@ model Employee {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relations mới
+  templateDefaultShifts MasterTemplateShift[] @relation("TemplateDefaultDSP")
+  plannedShifts         ScheduleShift[]       @relation("PlannedDSP")
+  actualShifts          ScheduleShift[]       @relation("ActualDSP")
+  visits                Visit[]               @relation("VisitDSP")
 }
 
 /*
@@ -194,6 +207,8 @@ model Payer {
 
   individualId String
   individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+
+  ispAllocations ISPAllocation[]
 }
 
 /*
@@ -263,4 +278,219 @@ model Service {
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Relations mới
+  masterTemplateShifts MasterTemplateShift[]
+  scheduleShifts       ScheduleShift[]
+  visits               Visit[]
+  ispAllocations       ISPAllocation[]
+}
+
+// =====================================================
+//  ENUMS CHO SCHEDULE / VISIT
+// =====================================================
+
+enum ScheduleStatus {
+  NOT_STARTED   // chưa đến giờ, chưa có visit
+  IN_PROGRESS   // đã check in, chưa check out
+  COMPLETED     // có visit đầy đủ, đã đối soát
+  NOT_COMPLETED // có check in nhưng hết ca mà chưa check out
+  CANCELLED     // ca bị hủy (thường do Individual)
+  BACKUP_PLAN   // ca có backup DSP thay thế DSP gốc
+}
+
+enum VisitSource {
+  MOBILE      // DSP check in/out từ app điện thoại
+  OFFICE_EDIT // văn phòng nhập / chỉnh tay
+  AUTO_MATCH  // hệ thống tự gắn visit với ca schedule
+}
+
+enum CancelledBy {
+  INDIVIDUAL
+  DSP
+  OFFICE
+}
+
+// =====================================================
+//  MASTER SCHEDULE TEMPLATE (lịch cứng – Master Week)
+// =====================================================
+
+model MasterScheduleTemplate {
+  id           String   @id @default(cuid())
+  individualId String
+  name         String?          // VD: "Weekday template"
+  effectiveFrom DateTime        // ngày bắt đầu áp dụng
+  effectiveTo   DateTime?       // null = áp dụng vô thời hạn
+  isActive     Boolean  @default(true)
+  notes        String?
+
+  individual   Individual        @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  shifts       MasterTemplateShift[]
+  scheduleWeeks ScheduleWeek[]   // <== thêm dòng này để làm đầu kia của relation
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([individualId, isActive])
+}
+
+model MasterTemplateShift {
+  id             String   @id @default(cuid())
+  templateId     String
+  dayOfWeek      Int      // 0 = Sun, 6 = Sat
+  serviceId      String
+
+  // Thời gian trong ngày, tính theo phút từ 00:00 (VD: 7h = 420)
+  startMinutes   Int
+  endMinutes     Int
+
+  // DSP mặc định (có thể null, thực tế assign ở Weekly)
+  defaultDspId   String?
+  billable       Boolean  @default(true)
+  notes          String?
+
+  template       MasterScheduleTemplate @relation(fields: [templateId], references: [id])
+  service        Service                @relation(fields: [serviceId], references: [id])
+  defaultDsp     Employee?              @relation("TemplateDefaultDSP", fields: [defaultDspId], references: [id])
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([templateId, dayOfWeek])
+}
+
+// =====================================================
+//  WEEKLY SCHEDULE (PLAN) – hiển thị ở Weekly Detail
+// =====================================================
+
+model ScheduleWeek {
+  id           String   @id @default(cuid())
+  individualId String
+  templateId   String?          // generate từ template nào (nếu có)
+  weekStart    DateTime         // Chủ nhật 00:00
+  weekEnd      DateTime         // Thứ 7 23:59 hoặc weekStart + 7 ngày
+  generatedFromTemplate Boolean @default(true)
+  notes        String?
+  locked       Boolean  @default(false) // đã khóa khi payroll/billing xong
+
+  individual   Individual              @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  template     MasterScheduleTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  shifts       ScheduleShift[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([individualId, weekStart])
+}
+
+model ScheduleShift {
+  id             String   @id @default(cuid())
+  weekId         String
+  individualId   String
+  serviceId      String
+
+  // DSP gốc (plan) và DSP thực tế (backup hoặc trùng luôn)
+  plannedDspId   String?
+  actualDspId    String?
+
+  scheduleDate   DateTime           // ngày của ca (00:00)
+  plannedStart   DateTime           // thời gian bắt đầu plan
+  plannedEnd     DateTime           // thời gian kết thúc plan
+
+  status         ScheduleStatus @default(NOT_STARTED)
+
+  cancelledBy    CancelledBy?
+  cancelledAt    DateTime?
+  cancelReason   String?
+
+  backupNote     String?            // "ABC replacing Garret due to ..."
+
+  billable       Boolean  @default(true)
+  notes          String?
+
+  week           ScheduleWeek @relation(fields: [weekId], references: [id])
+  individual     Individual   @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  service        Service      @relation(fields: [serviceId], references: [id])
+
+  plannedDsp     Employee?    @relation("PlannedDSP", fields: [plannedDspId], references: [id])
+  actualDsp      Employee?    @relation("ActualDSP", fields: [actualDspId], references: [id])
+
+  visits         Visit[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([weekId])
+  @@index([scheduleDate])
+  @@index([individualId, scheduleDate])
+  @@index([plannedDspId, scheduleDate])
+  @@index([actualDspId, scheduleDate])
+}
+
+// =====================================================
+//  VISIT (thực tế – Check in/Out) – cho Billing & Payroll
+// =====================================================
+
+model Visit {
+  id              String   @id @default(cuid())
+
+  scheduleShiftId String?        // có thể null nếu là unscheduled / backup chưa gắn ca
+  individualId    String
+  dspId           String
+  serviceId       String?
+
+  checkInAt       DateTime
+  checkOutAt      DateTime?
+
+  source          VisitSource @default(MOBILE)
+
+  // cache sẵn để report nhanh (tính khi close visit)
+  durationMinutes Int?        // tổng số phút (Out - In, có xử lý qua ngày)
+  units           Int?        // số unit 15 phút
+  isBillable      Boolean @default(true)
+  nonBillableReason String?
+
+  gpsLatitude     Float?      // optional – sau này dùng cho GPS
+  gpsLongitude    Float?
+
+  scheduleShift   ScheduleShift? @relation(fields: [scheduleShiftId], references: [id])
+  individual      Individual     @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  dsp             Employee       @relation("VisitDSP", fields: [dspId], references: [id])
+  service         Service?       @relation(fields: [serviceId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([scheduleShiftId])
+  @@index([dspId, checkInAt])
+  @@index([individualId, checkInAt])
+}
+
+// =====================================================
+//  ISP ALLOCATION (Hợp đồng ISP – units được cấp)
+// =====================================================
+
+model ISPAllocation {
+  id           String   @id @default(cuid())
+  individualId String
+  serviceId    String
+  payerId      String?      // Medicaid, ODP, etc.
+
+  startDate    DateTime     // ngày bắt đầu ủy quyền
+  endDate      DateTime?    // ngày kết thúc (hết hợp đồng)
+
+  unitsPerWeek       Int?   // ISP quy định mỗi tuần bao nhiêu unit
+  unitsPerMonth      Int?   // hoặc mỗi tháng
+  totalAuthorizedUnits Int? // tổng số unit cho cả hợp đồng
+
+  notes        String?
+
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  service      Service    @relation(fields: [serviceId], references: [id])
+  payer        Payer?     @relation(fields: [payerId], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([individualId, serviceId, startDate])
 }
