@@ -1,13 +1,40 @@
+// app/api/services/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+/**
+ * GET /api/services
+ *
+ * - Dùng cho:
+ *   + Màn Search Service (list)
+ *   + Dropdown ở Schedule (+ Event) để chọn Service
+ *
+ * - Response format:
+ *   { items: Service[] }
+ *   trong đó mỗi Service chỉ gồm các trường cần thiết.
+ */
 export async function GET(_req: Request) {
   try {
     const services = await prisma.service.findMany({
+      where: {
+        // chỉ lấy dịch vụ đang Active để schedule
+        status: "Active",
+      },
       orderBy: [{ category: "asc" }, { serviceCode: "asc" }],
+      select: {
+        id: true,
+        serviceCode: true,
+        serviceName: true,
+        billingCode: true,
+        category: true,
+        description: true,
+        status: true,
+        billable: true,
+      },
     });
 
-    return NextResponse.json({ services });
+    // QUAN TRỌNG: trả về { items: [...] } để SchedulePage đọc được
+    return NextResponse.json({ items: services });
   } catch (err) {
     console.error("Error loading services:", err);
     return NextResponse.json(
@@ -17,6 +44,11 @@ export async function GET(_req: Request) {
   }
 }
 
+/**
+ * POST /api/services
+ *
+ * Tạo Service mới (giữ nguyên logic cũ của anh)
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -42,8 +74,7 @@ export async function POST(req: Request) {
     if (missing.length > 0) {
       return NextResponse.json(
         {
-          message:
-            "Missing required fields: " + missing.join(", "),
+          message: "Missing required fields: " + missing.join(", "),
         },
         { status: 400 }
       );
