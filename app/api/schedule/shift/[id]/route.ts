@@ -2,46 +2,84 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-type RouteContext = {
+type RouteParams = {
   params: { id: string };
 };
 
-/**
- * PUT /api/schedule/shift/:id
- * Cập nhật một shift trong weekly schedule
- * Body có thể chứa: plannedStart, plannedEnd, status, notes
- */
-export async function PUT(req: Request, context: RouteContext) {
-  const shiftId = context.params.id;
+export async function PUT(req: Request, { params }: RouteParams) {
+  const { id } = params;
 
   try {
     const body = await req.json();
 
+    const {
+      serviceId,
+      plannedDspId,
+      plannedStart,
+      plannedEnd,
+      status,
+      notes,
+      checkInAt,
+      checkOutAt,
+    } = body ?? {};
+
     const data: any = {};
+    if (serviceId) data.serviceId = serviceId;
+    if ("plannedDspId" in body) data.plannedDspId = plannedDspId ?? null;
+    if (plannedStart) data.plannedStart = plannedStart;
+    if (plannedEnd) data.plannedEnd = plannedEnd;
+    if (status) data.status = status;
+    if ("notes" in body) data.notes = notes;
 
-    if (body.plannedStart) {
-      data.plannedStart = new Date(body.plannedStart);
-    }
-    if (body.plannedEnd) {
-      data.plannedEnd = new Date(body.plannedEnd);
-    }
-    if (typeof body.status === "string") {
-      data.status = body.status;
-    }
-    if (typeof body.notes === "string") {
-      data.notes = body.notes;
-    }
-
-    if (Object.keys(data).length === 0) {
-      return NextResponse.json(
-        { error: "No fields to update" },
-        { status: 400 }
-      );
-    }
-
-    const updated = await prisma.scheduleShift.update({
-      where: { id: shiftId },
+    // update shift chính
+    await prisma.scheduleShift.update({
+      where: { id },
       data,
+    });
+
+    // Handle Check-in / Check-out → Visit
+    if (checkInAt || checkOutAt) {
+      let visit = await prisma.visit.findFirst({
+        where: { shiftId: id },
+        orderBy: { checkInAt: "asc" },
+      });
+
+      if (!visit) {
+        visit = await prisma.visit.create({
+          data: {
+            shiftId: id,
+            checkInAt: checkInAt ?? plannedStart ?? new Date().toISOString(),
+            checkOutAt: checkOutAt ?? null,
+            units: 0,
+          },
+        });
+      } else {
+        visit = await prisma.visit.update({
+          where: { id: visit.id },
+          data: {
+            checkInAt: checkInAt ?? visit.checkInAt,
+            checkOutAt: checkOutAt ?? visit.checkOutAt,
+          },
+        });
+      }
+
+      // tính lại units nếu đủ in/out
+      if (visit.checkInAt && visit.checkOutAt) {
+        const mins =
+          (new Date(visit.checkOutAt).getTime() -
+            new Date(visit.checkInAt).getTime()) /
+          (1000 * 60);
+        const units = Math.max(0, Math.round(mins / 15));
+
+        await prisma.visit.update({
+          where: { id: visit.id },
+          data: { units },
+        });
+      }
+    }
+
+    const full = await prisma.scheduleShift.findUnique({
+      where: { id },
       include: {
         service: true,
         plannedDsp: true,
@@ -50,13 +88,13 @@ export async function PUT(req: Request, context: RouteContext) {
       },
     });
 
-    return NextResponse.json(updated);
-  } catch (error: any) {
-    console.error("PUT /api/schedule/shift/[id] error:", error);
+    return NextResponse.json(full);
+  } catch (err: any) {
+    console.error("Update shift error:", err);
     return NextResponse.json(
       {
-        error: "Failed to update shift",
-        detail: String(error?.message || error),
+        error: "UPDATE_SHIFT_FAILED",
+        detail: String(err?.message || err),
       },
       { status: 500 }
     );

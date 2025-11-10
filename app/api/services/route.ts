@@ -1,44 +1,38 @@
-// app/api/services/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 /**
  * GET /api/services
  *
- * - Dùng cho:
- *   + Màn Search Service (list)
- *   + Dropdown ở Schedule (+ Event) để chọn Service
+ * Dùng cho:
+ *  - màn Search Service
+ *  - dropdown ở Schedule (+Event)
  *
- * - Response format:
- *   { items: Service[] }
- *   trong đó mỗi Service chỉ gồm các trường cần thiết.
+ * Trả về dạng:
+ * {
+ *   services: Service[]  // UI cũ dùng
+ *   items:    Service[]  // Schedule mới dùng
+ * }
  */
 export async function GET(_req: Request) {
   try {
     const services = await prisma.service.findMany({
-      where: {
-        // chỉ lấy dịch vụ đang Active để schedule
-        status: "Active",
-      },
+      // KHÔNG filter status ở server nữa, trả tất cả
       orderBy: [{ category: "asc" }, { serviceCode: "asc" }],
-      select: {
-        id: true,
-        serviceCode: true,
-        serviceName: true,
-        billingCode: true,
-        category: true,
-        description: true,
-        status: true,
-        billable: true,
-      },
     });
 
-    // QUAN TRỌNG: trả về { items: [...] } để SchedulePage đọc được
-    return NextResponse.json({ items: services });
-  } catch (err) {
+    return NextResponse.json({
+      services,
+      items: services,
+    });
+  } catch (err: any) {
     console.error("Error loading services:", err);
+
     return NextResponse.json(
-      { message: "Failed to load services" },
+      {
+        message: "Failed to load services",
+        detail: String(err?.message || err),
+      },
       { status: 500 }
     );
   }
@@ -46,8 +40,6 @@ export async function GET(_req: Request) {
 
 /**
  * POST /api/services
- *
- * Tạo Service mới (giữ nguyên logic cũ của anh)
  */
 export async function POST(req: Request) {
   try {
@@ -98,18 +90,20 @@ export async function POST(req: Request) {
     console.error("Error creating service:", err);
 
     if (err?.code === "P2002") {
-      // unique constraint (serviceCode)
+      // trùng serviceCode
       return NextResponse.json(
         {
-          message:
-            "Service code already exists. Please choose another code.",
+          message: "Service code already exists. Please choose another code.",
         },
         { status: 409 }
       );
     }
 
     return NextResponse.json(
-      { message: "Failed to create service" },
+      {
+        message: "Failed to create service",
+        detail: String(err?.message || err),
+      },
       { status: 500 }
     );
   }

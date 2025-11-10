@@ -177,6 +177,7 @@ export default function SchedulePage() {
   const [selectedIndividualId, setSelectedIndividualId] = useState<string>("");
 
   const [services, setServices] = useState<Service[]>([]);
+  const [dsps, setDsps] = useState<Employee[]>([]);
 
   const [weekStart, setWeekStart] = useState<Date>(() =>
     startOfWeekSunday(new Date())
@@ -188,8 +189,9 @@ export default function SchedulePage() {
   const [selectedTemplate, setSelectedTemplate] =
     useState<MasterScheduleTemplate | null>(null);
 
-  const [masterDraft, setMasterDraft] =
-    useState<MasterScheduleTemplate | null>(null);
+  const [masterDraft, setMasterDraft] = useState<MasterScheduleTemplate | null>(
+    null
+  );
 
   const [currentWeek, setCurrentWeek] = useState<ScheduleWeek | null>(null);
 
@@ -199,6 +201,7 @@ export default function SchedulePage() {
   const [generatingWeek, setGeneratingWeek] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // inline add event (master)
   const [editingDay, setEditingDay] = useState<number | null>(null);
   const [editServiceId, setEditServiceId] = useState<string>("");
   const [editStart, setEditStart] = useState<string>("07:00");
@@ -208,12 +211,23 @@ export default function SchedulePage() {
 
   // Modal edit shift (weekly)
   const [editingShift, setEditingShift] = useState<ScheduleShift | null>(null);
+  const [editShiftServiceId, setEditShiftServiceId] = useState<string>("");
+  const [editShiftDspId, setEditShiftDspId] = useState<string>("");
   const [editShiftStart, setEditShiftStart] = useState<string>("07:00");
   const [editShiftEnd, setEditShiftEnd] = useState<string>("14:00");
-  const [editShiftStatus, setEditShiftStatus] =
-    useState<string>("NOT_STARTED");
+  const [editShiftStatus, setEditShiftStatus] = useState<string>("NOT_STARTED");
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
+
+  // Modal edit master event
+  const [editingMasterShift, setEditingMasterShift] =
+    useState<MasterTemplateShift | null>(null);
+  const [masterModalServiceId, setMasterModalServiceId] = useState<string>("");
+  const [masterModalDspId, setMasterModalDspId] = useState<string>("");
+  const [masterModalStart, setMasterModalStart] = useState<string>("07:00");
+  const [masterModalEnd, setMasterModalEnd] = useState<string>("14:00");
+  const [masterModalNotes, setMasterModalNotes] = useState<string>("");
+  const [masterModalSaving, setMasterModalSaving] = useState(false);
 
   const shiftStatusOptions = [
     "NOT_STARTED",
@@ -255,6 +269,8 @@ export default function SchedulePage() {
           ? data
           : Array.isArray(data?.items)
           ? data.items
+          : Array.isArray(data?.services)
+          ? data.services
           : [];
         setServices(list);
       } catch (e) {
@@ -262,6 +278,26 @@ export default function SchedulePage() {
       }
     }
     fetchServices();
+  }, []);
+
+  // --------- load DSPs (Employees – simple) ---------
+  useEffect(() => {
+    async function fetchDsps() {
+      try {
+        const res = await fetch("/api/employees?simple=true");
+        if (!res.ok) return;
+        const data = await res.json();
+        const list: Employee[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+          ? data.items
+          : [];
+        setDsps(list);
+      } catch (e) {
+        console.error("Failed to load DSPs", e);
+      }
+    }
+    fetchDsps();
   }, []);
 
   // --------- load Master template khi đổi Individual ---------
@@ -425,7 +461,7 @@ export default function SchedulePage() {
     if (masterDraft) return masterDraft;
     const nowIso = new Date().toISOString();
     const base: MasterScheduleTemplate = {
-      id: "draft",
+      id: selectedTemplate?.id ?? "draft",
       individualId: selectedIndividualId,
       name: selectedTemplate?.name ?? "Default week",
       effectiveFrom: selectedTemplate?.effectiveFrom ?? nowIso,
@@ -491,12 +527,82 @@ export default function SchedulePage() {
     setEditingDay(null);
   }
 
-  function handleDeleteMasterShift(shiftId: string) {
-    if (!masterDraft) return;
+  function openEditMasterShift(shift: MasterTemplateShift) {
+    setEditingMasterShift(shift);
+    setMasterModalServiceId(shift.serviceId);
+    setMasterModalDspId(shift.defaultDsp?.id ?? "");
+    setMasterModalStart(
+      (() => {
+        const h = Math.floor(shift.startMinutes / 60)
+          .toString()
+          .padStart(2, "0");
+        const m = (shift.startMinutes % 60).toString().padStart(2, "0");
+        return `${h}:${m}`;
+      })()
+    );
+    setMasterModalEnd(
+      (() => {
+        const h = Math.floor(shift.endMinutes / 60)
+          .toString()
+          .padStart(2, "0");
+        const m = (shift.endMinutes % 60).toString().padStart(2, "0");
+        return `${h}:${m}`;
+      })()
+    );
+    setMasterModalNotes(shift.notes ?? "");
+  }
+
+  function closeEditMasterShift() {
+    setEditingMasterShift(null);
+    setMasterModalSaving(false);
+  }
+
+  function handleDeleteMasterShiftFromModal() {
+    if (!editingMasterShift || !masterDraft) return;
     setMasterDraft({
       ...masterDraft,
-      shifts: masterDraft.shifts.filter((s) => s.id !== shiftId),
+      shifts: masterDraft.shifts.filter((s) => s.id !== editingMasterShift.id),
     });
+    closeEditMasterShift();
+  }
+
+  function handleApplyMasterShiftEdit() {
+    if (!editingMasterShift || !masterDraft) return;
+    if (!masterModalServiceId) {
+      setError("Please select a Service.");
+      return;
+    }
+
+    const start = parseTimeToMinutes(masterModalStart);
+    const end = parseTimeToMinutes(masterModalEnd);
+    if (start === null || end === null) {
+      setError("Time is not valid. Use HH:MM format (e.g. 07:00).");
+      return;
+    }
+
+    const svc = services.find((s) => s.id === masterModalServiceId) ?? null;
+    const dsp = dsps.find((d) => d.id === masterModalDspId) ?? null;
+
+    const updatedShifts = masterDraft.shifts.map((s) =>
+      s.id === editingMasterShift.id
+        ? {
+            ...s,
+            serviceId: masterModalServiceId,
+            service: svc ?? undefined,
+            defaultDsp: dsp ?? null,
+            startMinutes: start,
+            endMinutes: end,
+            notes: masterModalNotes || null,
+          }
+        : s
+    );
+
+    setMasterDraft({
+      ...masterDraft,
+      shifts: updatedShifts,
+    });
+
+    closeEditMasterShift();
   }
 
   async function handleSaveMasterTemplate() {
@@ -504,7 +610,7 @@ export default function SchedulePage() {
     const draft = ensureDraftBase();
     if (!draft) return;
     if (!draft.shifts.length) {
-      setError("Master Week is empty. Please add at least one Event.");
+      setError("Master Schedule is empty. Please add at least one Event.");
       return;
     }
 
@@ -533,19 +639,22 @@ export default function SchedulePage() {
       let savedTemplate: MasterScheduleTemplate;
 
       if (selectedTemplate && selectedTemplate.id !== "draft") {
+        // UPDATE existing
         res = await fetch(`/api/schedule/master/${selectedTemplate.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            id: selectedTemplate.id,
+            ...payload,
+          }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => null);
-          throw new Error(
-            data?.error || "Failed to update master schedule template"
-          );
+          throw new Error(data?.error || "FAILED_TO_UPDATE_MASTER");
         }
         savedTemplate = (await res.json()) as MasterScheduleTemplate;
       } else {
+        // CREATE new
         res = await fetch("/api/schedule/master", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -556,9 +665,7 @@ export default function SchedulePage() {
         });
         if (!res.ok) {
           const data = await res.json().catch(() => null);
-          throw new Error(
-            data?.error || "Failed to create master schedule template"
-          );
+          throw new Error(data?.error || "FAILED_TO_CREATE_MASTER");
         }
         savedTemplate = (await res.json()) as MasterScheduleTemplate;
       }
@@ -571,7 +678,7 @@ export default function SchedulePage() {
       });
     } catch (e: any) {
       console.error(e);
-      setError(e.message ?? "Failed to save master template");
+      setError(e.message ?? "FAILED_TO_UPDATE_MASTER");
     } finally {
       setSavingMaster(false);
     }
@@ -592,11 +699,12 @@ export default function SchedulePage() {
   // ---------- Summary & conflicts / payroll ----------
 
   const summaryByService = useMemo(() => {
-    if (!currentWeek) return [] as {
-      service: Service;
-      scheduledUnits: number;
-      visitedUnits: number;
-    }[];
+    if (!currentWeek)
+      return [] as {
+        service: Service;
+        scheduledUnits: number;
+        visitedUnits: number;
+      }[];
 
     const map = new Map<
       string,
@@ -623,16 +731,22 @@ export default function SchedulePage() {
   }, [currentWeek]);
 
   const summaryByDsp = useMemo(() => {
-    if (!currentWeek) return [] as {
-      dspId: string;
-      dspName: string;
-      scheduledUnits: number;
-      visitedUnits: number;
-    }[];
+    if (!currentWeek)
+      return [] as {
+        dspId: string;
+        dspName: string;
+        scheduledUnits: number;
+        visitedUnits: number;
+      }[];
 
     const map = new Map<
       string,
-      { dspId: string; dspName: string; scheduledUnits: number; visitedUnits: number }
+      {
+        dspId: string;
+        dspName: string;
+        scheduledUnits: number;
+        visitedUnits: number;
+      }
     >();
 
     for (const s of currentWeek.shifts) {
@@ -658,12 +772,13 @@ export default function SchedulePage() {
   }, [currentWeek]);
 
   const conflicts = useMemo(() => {
-    if (!currentWeek) return [] as {
-      dspName: string;
-      date: string;
-      dayIndex: number;
-      shifts: ScheduleShift[];
-    }[];
+    if (!currentWeek)
+      return [] as {
+        dspName: string;
+        date: string;
+        dayIndex: number;
+        shifts: ScheduleShift[];
+      }[];
 
     const result: {
       dspName: string;
@@ -697,7 +812,7 @@ export default function SchedulePage() {
           new Date(current.plannedEnd).getTime() >
           new Date(next.plannedStart).getTime()
         ) {
-          const [dspId, dayStr] = key.split("-");
+          const [, dayStr] = key.split("-");
           const dsp = (current.actualDsp ?? current.plannedDsp)!;
           result.push({
             dspName: `${dsp.firstName} ${dsp.lastName}`,
@@ -716,6 +831,8 @@ export default function SchedulePage() {
 
   function openEditShift(shift: ScheduleShift) {
     setEditingShift(shift);
+    setEditShiftServiceId(shift.service.id);
+    setEditShiftDspId(shift.actualDsp?.id ?? shift.plannedDsp?.id ?? "");
     setEditShiftStart(formatTime(shift.plannedStart));
     setEditShiftEnd(formatTime(shift.plannedEnd));
     setEditShiftStatus(shift.status);
@@ -760,10 +877,12 @@ export default function SchedulePage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          serviceId: editShiftServiceId || editingShift.service.id,
           plannedStart: plannedStartIso,
           plannedEnd: plannedEndIso,
           status: editShiftStatus,
           notes: editShiftNotes || null,
+          dspId: editShiftDspId || null,
         }),
       });
 
@@ -804,7 +923,7 @@ export default function SchedulePage() {
     const isEditingThisDay = editingDay === dayIndex;
 
     return (
-      <div className="rounded-2xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-sm text-slate-200 h-full flex flex-col">
+      <div className="h-full flex flex-col rounded-2xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
         <div className="font-semibold text-slate-100 flex items-center justify-between mb-2">
           <span>{dayLabels[dayIndex]}</span>
         </div>
@@ -825,17 +944,26 @@ export default function SchedulePage() {
                 <span className="font-semibold text-emerald-300">
                   {shift.service?.serviceCode || "SVC"}
                 </span>
-                <button
-                  type="button"
-                  className="text-[10px] text-rose-400 hover:text-rose-300"
-                  onClick={() => handleDeleteMasterShift(shift.id)}
-                >
-                  Delete
-                </button>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-[2px] text-[10px] font-medium text-emerald-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Active
+                </span>
               </div>
-              <div className="text-slate-300">
+              <div className="text-slate-300 mb-1">
                 {formatMinutesRange(shift.startMinutes, shift.endMinutes)}
               </div>
+              {shift.defaultDsp && (
+                <div className="text-[11px] text-slate-400 mb-1">
+                  DSP: {shift.defaultDsp.firstName} {shift.defaultDsp.lastName}
+                </div>
+              )}
+              <button
+                type="button"
+                className="mt-1 text-[11px] text-sky-300 hover:text-sky-100"
+                onClick={() => openEditMasterShift(shift)}
+              >
+                Edit event
+              </button>
             </div>
           ))}
 
@@ -911,7 +1039,7 @@ export default function SchedulePage() {
     );
   }
 
-  function renderShiftCell(shift: ScheduleShift | null, dayIndex: number) {
+  function renderShiftCell(shift: ScheduleShift | null) {
     if (!shift) {
       return (
         <div className="h-full rounded-2xl border border-dashed border-slate-700/40 bg-slate-900/10 flex items-center justify-center text-xs text-slate-600">
@@ -924,10 +1052,8 @@ export default function SchedulePage() {
     const visitedUnits = calcVisitedUnits(shift);
     const deltaUnits = visitedUnits - scheduledUnits;
 
-    const dspName =
-      shift.actualDsp ??
-      shift.plannedDsp ??
-      (null as unknown as Employee | null);
+    const dsp =
+      shift.actualDsp ?? shift.plannedDsp ?? (null as unknown as Employee);
 
     const statusColor =
       shift.status === "COMPLETED"
@@ -951,17 +1077,16 @@ export default function SchedulePage() {
           </div>
         </div>
 
-        {dspName && (
+        {dsp && (
           <div className="text-[11px] text-slate-300 mb-1">
-            {dspName.firstName} {dspName.lastName}
+            {dsp.firstName} {dsp.lastName}
           </div>
         )}
 
         <div className="flex justify-between text-[11px] text-slate-300 mb-1">
           <span>
-            Sched: {formatTime(shift.plannedStart)}–{formatTime(
-              shift.plannedEnd
-            )}
+            Sched: {formatTime(shift.plannedStart)}–
+            {formatTime(shift.plannedEnd)}
           </span>
           <span>{scheduledUnits}u</span>
         </div>
@@ -1002,16 +1127,14 @@ export default function SchedulePage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-7xl px-6 pb-10 pt-6 space-y-6">
+      <div className="px-6 pb-10 pt-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Schedule
-            </h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Schedule</h1>
             <p className="text-sm text-slate-400">
-              Weekly master schedule, generated shifts, and summary for DSPs
-              and Individuals.
+              Weekly master schedule, generated shifts, and summary for DSPs and
+              Individuals.
             </p>
           </div>
         </div>
@@ -1092,8 +1215,7 @@ export default function SchedulePage() {
                   </span>
                 </div>
                 <div>
-                  Effective:{" "}
-                  {formatDateShort(selectedTemplate.effectiveFrom)} –{" "}
+                  Effective: {formatDateShort(selectedTemplate.effectiveFrom)} –{" "}
                   {selectedTemplate.effectiveTo
                     ? formatDateShort(selectedTemplate.effectiveTo)
                     : "open-ended"}
@@ -1109,16 +1231,16 @@ export default function SchedulePage() {
           </div>
         )}
 
-        {/* Master Week section */}
+        {/* Master Schedule section */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-100">
-              Master Week – Template (Sun–Sat)
+              Master Schedule (Sunday–Saturday)
             </h2>
             <div className="flex items-center gap-3">
               {loadingMaster && (
                 <span className="text-[11px] text-slate-400">
-                  Loading master template...
+                  Loading master schedule...
                 </span>
               )}
               <button
@@ -1134,7 +1256,7 @@ export default function SchedulePage() {
                 disabled={savingMaster || !selectedIndividualId}
                 className="inline-flex items-center gap-2 rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-sky-400 disabled:opacity-50"
               >
-                {savingMaster ? "Saving..." : "Save Master template"}
+                {savingMaster ? "Saving..." : "Save Master schedule"}
               </button>
             </div>
           </div>
@@ -1150,10 +1272,10 @@ export default function SchedulePage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-100">
-              Weekly schedule – grid view (Sun–Sat)
+              Weekly schedule (Sunday–Saturday)
             </h2>
 
-            <div className="flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-900/60 px-1 py-1 text-[11px]">
+            <div className="flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-900/60 px-1 py-1 text-sm font-semibold">
               <button
                 type="button"
                 onClick={() => setActiveTab("weekly")}
@@ -1205,7 +1327,7 @@ export default function SchedulePage() {
                   <span className="font-semibold text-emerald-300">
                     Generate
                   </span>{" "}
-                  to create it from the Master template.
+                  to create it from the Master schedule.
                 </div>
               )}
 
@@ -1233,8 +1355,8 @@ export default function SchedulePage() {
                   <div className="space-y-3">
                     {gridByDayAndSlot.maxSlots === 0 && (
                       <div className="text-xs text-slate-500 text-center py-4">
-                        No shifts for this week. Use Master template to
-                        generate schedule.
+                        No shifts for this week. Use Master schedule to generate
+                        schedule.
                       </div>
                     )}
 
@@ -1248,14 +1370,26 @@ export default function SchedulePage() {
                         </div>
                         {row.map((shift, dayIndex) => (
                           <div key={dayIndex}>
-                            {renderShiftCell(
-                              shift && shift.id ? shift : null,
-                              dayIndex
-                            )}
+                            {renderShiftCell(shift && shift.id ? shift : null)}
                           </div>
                         ))}
                       </div>
                     ))}
+                  </div>
+
+                  <div className="pt-3">
+                    <button
+                      type="button"
+                      className="text-xs text-sky-300 hover:text-sky-100"
+                      // TODO: future: open modal thêm shift mới
+                      onClick={() =>
+                        alert(
+                          "Add shift: sẽ implement sau khi chốt logic business chi tiết."
+                        )
+                      }
+                    >
+                      + Add shift
+                    </button>
                   </div>
                 </div>
               )}
@@ -1279,19 +1413,14 @@ export default function SchedulePage() {
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="py-1 pr-2">Service</th>
-                        <th className="py-1 pr-2 text-right">
-                          Scheduled (u)
-                        </th>
-                        <th className="py-1 pr-2 text-right">
-                          Actual (u)
-                        </th>
+                        <th className="py-1 pr-2 text-right">Scheduled (u)</th>
+                        <th className="py-1 pr-2 text-right">Actual (u)</th>
                         <th className="py-1 text-right">Δ (u)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {summaryByService.map((row) => {
-                        const delta =
-                          row.visitedUnits - row.scheduledUnits;
+                        const delta = row.visitedUnits - row.scheduledUnits;
                         return (
                           <tr key={row.service.id}>
                             <td className="py-1 pr-2">
@@ -1349,9 +1478,8 @@ export default function SchedulePage() {
                         </div>
                         {c.shifts.map((s) => (
                           <div key={s.id} className="text-slate-100">
-                            {s.service.serviceCode}{" "}
-                            {formatTime(s.plannedStart)}–
-                            {formatTime(s.plannedEnd)}
+                            {s.service.serviceCode} {formatTime(s.plannedStart)}
+                            –{formatTime(s.plannedEnd)}
                           </div>
                         ))}
                       </div>
@@ -1382,9 +1510,7 @@ export default function SchedulePage() {
                         <th className="py-1 pr-2 text-right">
                           Scheduled (hrs)
                         </th>
-                        <th className="py-1 pr-2 text-right">
-                          Actual (hrs)
-                        </th>
+                        <th className="py-1 pr-2 text-right">Actual (hrs)</th>
                         <th className="py-1 text-right">Δ (hrs)</th>
                       </tr>
                     </thead>
@@ -1425,7 +1551,7 @@ export default function SchedulePage() {
                 )}
               </div>
 
-              {/* ISP summary by Service (actual only – Plan sẽ cắm sau) */}
+              {/* ISP summary by Service */}
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <h3 className="text-xs font-semibold text-slate-100 mb-3">
                   ISP allocation – Actual units by Service
@@ -1439,12 +1565,8 @@ export default function SchedulePage() {
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="py-1 pr-2">Service</th>
-                        <th className="py-1 pr-2 text-right">
-                          Actual (units)
-                        </th>
-                        <th className="py-1 text-right">
-                          ISP Plan (units)
-                        </th>
+                        <th className="py-1 pr-2 text-right">Actual (units)</th>
+                        <th className="py-1 text-right">ISP Plan (units)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1461,10 +1583,7 @@ export default function SchedulePage() {
                           <td className="py-1 pr-2 text-right">
                             {row.visitedUnits}
                           </td>
-                          <td className="py-1 text-right text-slate-500">
-                            {/* Chỗ này sau nối với ISPAllocation */}
-                            —
-                          </td>
+                          <td className="py-1 text-right text-slate-500">—</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1502,10 +1621,47 @@ export default function SchedulePage() {
             </div>
 
             <div className="space-y-3">
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Service</div>
+                <select
+                  value={editShiftServiceId}
+                  onChange={(e) => setEditShiftServiceId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value={editingShift.service.id}>
+                    {editingShift.service.serviceCode} —{" "}
+                    {editingShift.service.serviceName}
+                  </option>
+                  {services
+                    .filter((s) => s.id !== editingShift.service.id)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.serviceCode} — {s.serviceName}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">DSP</div>
+                <select
+                  value={editShiftDspId}
+                  onChange={(e) => setEditShiftDspId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="">— No DSP —</option>
+                  {dsps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.firstName} {d.lastName} ({d.employeeId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="flex gap-3">
                 <div className="flex-1">
                   <div className="text-[11px] text-slate-300 mb-1">
-                    Start time
+                    Schedule start
                   </div>
                   <input
                     type="time"
@@ -1516,7 +1672,7 @@ export default function SchedulePage() {
                 </div>
                 <div className="flex-1">
                   <div className="text-[11px] text-slate-300 mb-1">
-                    End time
+                    Schedule end
                   </div>
                   <input
                     type="time"
@@ -1528,9 +1684,7 @@ export default function SchedulePage() {
               </div>
 
               <div>
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Status
-                </div>
+                <div className="text-[11px] text-slate-300 mb-1">Status</div>
                 <select
                   value={editShiftStatus}
                   onChange={(e) => setEditShiftStatus(e.target.value)}
@@ -1545,9 +1699,7 @@ export default function SchedulePage() {
               </div>
 
               <div>
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Notes
-                </div>
+                <div className="text-[11px] text-slate-300 mb-1">Notes</div>
                 <textarea
                   value={editShiftNotes}
                   onChange={(e) => setEditShiftNotes(e.target.value)}
@@ -1573,6 +1725,126 @@ export default function SchedulePage() {
               >
                 {editShiftSaving ? "Saving..." : "Save changes"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal edit master event */}
+      {editingMasterShift && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-xs text-slate-400 mb-1">
+                  Edit event – {dayLabels[editingMasterShift.dayOfWeek]}
+                </div>
+                <div className="font-semibold text-slate-100">
+                  {editingMasterShift.service?.serviceCode ?? "Service"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={closeEditMasterShift}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Service</div>
+                <select
+                  value={masterModalServiceId}
+                  onChange={(e) => setMasterModalServiceId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.serviceCode} — {s.serviceName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">DSP</div>
+                <select
+                  value={masterModalDspId}
+                  onChange={(e) => setMasterModalDspId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="">— No default DSP —</option>
+                  {dsps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.firstName} {d.lastName} ({d.employeeId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Start time
+                  </div>
+                  <input
+                    type="time"
+                    value={masterModalStart}
+                    onChange={(e) => setMasterModalStart(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    End time
+                  </div>
+                  <input
+                    type="time"
+                    value={masterModalEnd}
+                    onChange={(e) => setMasterModalEnd(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Notes</div>
+                <textarea
+                  value={masterModalNotes}
+                  onChange={(e) => setMasterModalNotes(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-between items-center gap-2">
+              <button
+                type="button"
+                className="text-xs text-rose-300 hover:text-rose-200"
+                onClick={handleDeleteMasterShiftFromModal}
+              >
+                Delete event
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-slate-400 hover:text-slate-100"
+                  onClick={closeEditMasterShift}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={masterModalSaving}
+                  onClick={handleApplyMasterShiftEdit}
+                  className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {masterModalSaving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

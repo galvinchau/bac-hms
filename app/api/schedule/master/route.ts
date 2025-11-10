@@ -1,149 +1,96 @@
-// app/api/schedule/master/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// Optional: để Next.js không cache API này
-export const dynamic = "force-dynamic";
-
-// GET /api/schedule/master
-// ?individualId=xxx&activeOnly=true
+/**
+ * GET /api/schedule/master
+ * Query:
+ *  - individualId (required)
+ *  - activeOnly=true|false
+ */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const individualId = searchParams.get("individualId") || undefined;
+    const individualId = searchParams.get("individualId");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
+    if (!individualId) {
+      return NextResponse.json(
+        { error: "MISSING_INDIVIDUAL_ID" },
+        { status: 400 }
+      );
+    }
+
+    const where: any = { individualId };
+    if (activeOnly) where.isActive = true;
+
     const templates = await prisma.masterScheduleTemplate.findMany({
-      where: {
-        ...(individualId ? { individualId } : {}),
-        ...(activeOnly ? { isActive: true } : {}),
-      },
+      where,
+      orderBy: { effectiveFrom: "desc" },
       include: {
         shifts: {
+          include: {
+            service: true,
+            defaultDsp: true,
+          },
           orderBy: [{ dayOfWeek: "asc" }, { startMinutes: "asc" }],
         },
       },
-      orderBy: [{ effectiveFrom: "desc" }],
     });
 
     return NextResponse.json(templates);
-  } catch (error) {
-    console.error("GET /api/schedule/master error:", error);
+  } catch (err) {
+    console.error("Error loading master templates:", err);
     return NextResponse.json(
-      { error: "Failed to fetch master schedule templates" },
+      { error: "FAILED_TO_LOAD_MASTER" },
       { status: 500 }
     );
   }
 }
 
-type MasterShiftInput = {
-  dayOfWeek: number; // 0 = Sun ... 6 = Sat
-  serviceId: string;
-  startMinutes: number; // 0-1439
-  endMinutes: number;   // 0-1439 (có thể < startMinutes nếu qua ngày sau)
-  defaultDspId?: string | null;
-  billable?: boolean;
-  notes?: string | null;
-};
-
-type MasterTemplateInput = {
-  individualId: string;
-  name?: string | null;
-  effectiveFrom: string; // ISO date string
-  effectiveTo?: string | null;
-  isActive?: boolean;
-  notes?: string | null;
-  shifts?: MasterShiftInput[];
-};
-
-// POST /api/schedule/master
-// Body: MasterTemplateInput + shifts[]
+/**
+ * POST /api/schedule/master
+ * Body:
+ *  - individualId
+ *  - name, effectiveFrom, effectiveTo, isActive, notes
+ *  - shifts: [{ dayOfWeek, serviceId, startMinutes, endMinutes, defaultDspId?, billable?, notes? }]
+ */
 export async function POST(req: Request) {
   try {
-    const data = (await req.json()) as MasterTemplateInput;
+    const body = await req.json();
 
-    if (!data.individualId) {
-      return NextResponse.json(
-        { error: "individualId is required" },
-        { status: 400 }
-      );
-    }
-    if (!data.effectiveFrom) {
-      return NextResponse.json(
-        { error: "effectiveFrom is required" },
-        { status: 400 }
-      );
-    }
+    const {
+      individualId,
+      name,
+      effectiveFrom,
+      effectiveTo,
+      isActive,
+      notes,
+      shifts = [],
+    } = body ?? {};
 
-    const effectiveFrom = new Date(data.effectiveFrom);
-    if (Number.isNaN(effectiveFrom.getTime())) {
+    if (!individualId || !effectiveFrom) {
       return NextResponse.json(
-        { error: "effectiveFrom must be a valid ISO date string" },
+        { error: "MISSING_REQUIRED_FIELDS" },
         { status: 400 }
       );
     }
 
-    const effectiveTo = data.effectiveTo
-      ? new Date(data.effectiveTo)
-      : null;
-    if (effectiveTo && Number.isNaN(effectiveTo.getTime())) {
-      return NextResponse.json(
-        { error: "effectiveTo must be a valid ISO date string" },
-        { status: 400 }
-      );
-    }
+    const result = await prisma.$transaction(async (tx) => {
+      const tpl = await tx.masterScheduleTemplate.create({
+        data: {
+          individualId,
+          name: name ?? "Default week",
+          effectiveFrom: new Date(effectiveFrom),
+          effectiveTo: effectiveTo ? new Date(effectiveTo) : null,
+          isActive: typeof isActive === "boolean" ? isActive : true,
+          notes: notes ?? null,
+        },
+      });
 
-    const shifts = Array.isArray(data.shifts) ? data.shifts : [];
-
-    // Validate sơ bộ shift
-    for (const [index, s] of shifts.entries()) {
-      if (s.dayOfWeek < 0 || s.dayOfWeek > 6) {
-        return NextResponse.json(
-          { error: `shifts[${index}].dayOfWeek must be between 0 and 6` },
-          { status: 400 }
-        );
-      }
-      if (!s.serviceId) {
-        return NextResponse.json(
-          { error: `shifts[${index}].serviceId is required` },
-          { status: 400 }
-        );
-      }
-      if (
-        typeof s.startMinutes !== "number" ||
-        typeof s.endMinutes !== "number"
-      ) {
-        return NextResponse.json(
-          {
-            error: `shifts[${index}].startMinutes and endMinutes must be numbers`,
-          },
-          { status: 400 }
-        );
-      }
-      if (s.startMinutes < 0 || s.startMinutes > 1439) {
-        return NextResponse.json(
-          { error: `shifts[${index}].startMinutes must be 0–1439` },
-          { status: 400 }
-        );
-      }
-      if (s.endMinutes < 0 || s.endMinutes > 1439) {
-        return NextResponse.json(
-          { error: `shifts[${index}].endMinutes must be 0–1439` },
-          { status: 400 }
-        );
-      }
-    }
-
-    const template = await prisma.masterScheduleTemplate.create({
-      data: {
-        individualId: data.individualId,
-        name: data.name ?? null,
-        effectiveFrom,
-        effectiveTo,
-        isActive: data.isActive ?? true,
-        notes: data.notes ?? null,
-        shifts: {
-          create: shifts.map((s) => ({
+      if (Array.isArray(shifts) && shifts.length > 0) {
+        await tx.masterTemplateShift.createMany({
+          data: shifts.map((s: any) => ({
+            templateId: tpl.id,
             dayOfWeek: s.dayOfWeek,
             serviceId: s.serviceId,
             startMinutes: s.startMinutes,
@@ -152,20 +99,30 @@ export async function POST(req: Request) {
             billable: s.billable ?? true,
             notes: s.notes ?? null,
           })),
+        });
+      }
+
+      const full = await tx.masterScheduleTemplate.findUnique({
+        where: { id: tpl.id },
+        include: {
+          shifts: {
+            include: {
+              service: true,
+              defaultDsp: true,
+            },
+            orderBy: [{ dayOfWeek: "asc" }, { startMinutes: "asc" }],
+          },
         },
-      },
-      include: {
-        shifts: {
-          orderBy: [{ dayOfWeek: "asc" }, { startMinutes: "asc" }],
-        },
-      },
+      });
+
+      return full;
     });
 
-    return NextResponse.json(template, { status: 201 });
-  } catch (error) {
-    console.error("POST /api/schedule/master error:", error);
+    return NextResponse.json(result, { status: 201 });
+  } catch (err) {
+    console.error("Error creating master template:", err);
     return NextResponse.json(
-      { error: "Failed to create master schedule template" },
+      { error: "FAILED_TO_CREATE_MASTER" },
       { status: 500 }
     );
   }
