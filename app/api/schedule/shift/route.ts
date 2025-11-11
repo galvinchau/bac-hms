@@ -4,12 +4,16 @@ import { prisma } from "@/lib/prisma";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const rawBody = await req.json().catch(() => ({}));
+    const body = (rawBody && typeof rawBody === "object") ? rawBody : {};
 
     const {
       weekId,
+      individualId, // FE đang gửi thêm field này
       scheduleDate,
       serviceId,
+      // FE gửi dspId, file cũ dùng plannedDspId → support cả 2
+      dspId,
       plannedDspId,
       plannedStart,
       plannedEnd,
@@ -17,8 +21,22 @@ export async function POST(req: Request) {
       notes,
       checkInAt,
       checkOutAt,
-    } = body ?? {};
+    } = body as {
+      weekId?: string;
+      individualId?: string;
+      scheduleDate?: string;
+      serviceId?: string;
+      dspId?: string | null;
+      plannedDspId?: string | null;
+      plannedStart?: string;
+      plannedEnd?: string;
+      status?: string;
+      notes?: string | null;
+      checkInAt?: string | null;
+      checkOutAt?: string | null;
+    };
 
+    // Validate các field bắt buộc (giống file gốc)
     if (
       !weekId ||
       !scheduleDate ||
@@ -29,17 +47,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "MISSING_FIELDS" }, { status: 400 });
     }
 
+    // Ưu tiên dspId (FE) nếu có, fallback về plannedDspId
+    const effectiveDspId =
+      (typeof dspId !== "undefined" ? dspId : plannedDspId) ?? null;
+
+    // Tạo ScheduleShift
     const created = await prisma.scheduleShift.create({
       data: {
         weekId,
-        scheduleDate,
+        scheduleDate: new Date(scheduleDate),
         serviceId,
-        plannedDspId: plannedDspId ?? null,
-        plannedStart,
-        plannedEnd,
+        plannedDspId: effectiveDspId,
+        plannedStart: new Date(plannedStart),
+        plannedEnd: new Date(plannedEnd),
         status: status ?? "NOT_STARTED",
         billable: true,
         notes: notes ?? null,
+        // chỉ set individualId nếu FE gửi, tránh đụng schema nếu field optional
+        ...(individualId ? { individualId } : {}),
       },
     });
 
@@ -48,12 +73,15 @@ export async function POST(req: Request) {
       let visit = await prisma.visit.create({
         data: {
           shiftId: created.id,
-          checkInAt: checkInAt ?? plannedStart,
-          checkOutAt: checkOutAt ?? null,
+          checkInAt: checkInAt
+            ? new Date(checkInAt)
+            : new Date(plannedStart),
+          checkOutAt: checkOutAt ? new Date(checkOutAt) : null,
           units: 0,
         },
       });
 
+      // tính lại units nếu đủ in/out
       if (visit.checkInAt && visit.checkOutAt) {
         const mins =
           (new Date(visit.checkOutAt).getTime() -

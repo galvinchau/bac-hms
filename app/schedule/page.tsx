@@ -200,6 +200,7 @@ export default function SchedulePage() {
   const [loadingWeek, setLoadingWeek] = useState(false);
   const [generatingWeek, setGeneratingWeek] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // inline add event (master)
   const [editingDay, setEditingDay] = useState<number | null>(null);
@@ -215,9 +216,11 @@ export default function SchedulePage() {
   const [editShiftDspId, setEditShiftDspId] = useState<string>("");
   const [editShiftStart, setEditShiftStart] = useState<string>("07:00");
   const [editShiftEnd, setEditShiftEnd] = useState<string>("14:00");
-  const [editShiftStatus, setEditShiftStatus] = useState<string>("NOT_STARTED");
+  const [editShiftStatus, setEditShiftStatus] =
+    useState<string>("NOT_STARTED");
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
+  const [editShiftDeleting, setEditShiftDeleting] = useState(false);
 
   // Modal edit master event
   const [editingMasterShift, setEditingMasterShift] =
@@ -228,6 +231,23 @@ export default function SchedulePage() {
   const [masterModalEnd, setMasterModalEnd] = useState<string>("14:00");
   const [masterModalNotes, setMasterModalNotes] = useState<string>("");
   const [masterModalSaving, setMasterModalSaving] = useState(false);
+
+  // Modal generate multi weeks
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generateWeeksCount, setGenerateWeeksCount] = useState<number>(1);
+
+  // Modal create new shift
+  const [showCreateShiftModal, setShowCreateShiftModal] = useState(false);
+  const [creatingShift, setCreatingShift] = useState(false);
+  const [createShiftDayIndex, setCreateShiftDayIndex] = useState<number>(0);
+  const [createShiftServiceId, setCreateShiftServiceId] =
+    useState<string>("");
+  const [createShiftDspId, setCreateShiftDspId] = useState<string>("");
+  const [createShiftStart, setCreateShiftStart] = useState<string>("07:00");
+  const [createShiftEnd, setCreateShiftEnd] = useState<string>("14:00");
+  const [createShiftStatus, setCreateShiftStatus] =
+    useState<string>("NOT_STARTED");
+  const [createShiftNotes, setCreateShiftNotes] = useState<string>("");
 
   const shiftStatusOptions = [
     "NOT_STARTED",
@@ -374,31 +394,75 @@ export default function SchedulePage() {
     fetchWeek();
   }, [selectedIndividualId, weekStart]);
 
-  async function handleGenerateWeek() {
+  // --------- Generate multi-weeks helper ---------
+
+  async function generateWeekAt(startDate: Date): Promise<ScheduleWeek | null> {
+    if (!selectedIndividualId) return null;
+
+    const res = await fetch("/api/schedule/week", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        individualId: selectedIndividualId,
+        weekStart: startDate.toISOString(),
+        templateId: selectedTemplate?.id ?? undefined,
+        regenerate: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || "Failed to generate week");
+    }
+
+    const data = (await res.json()) as WeekApiResponse;
+    return data.week ?? null;
+  }
+
+  function handleGenerateWeek() {
+    if (!selectedIndividualId || generatingWeek) return;
+    setGenerateWeeksCount(1);
+    setShowGenerateModal(true);
+    setError(null);
+    setSuccess(null);
+  }
+
+  async function handleConfirmGenerateWeeks() {
     if (!selectedIndividualId) return;
 
     try {
       setGeneratingWeek(true);
       setError(null);
-      const res = await fetch("/api/schedule/week", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          individualId: selectedIndividualId,
-          weekStart: weekStart.toISOString(),
-          templateId: selectedTemplate?.id ?? undefined,
-          regenerate: true,
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Failed to generate week");
+      setSuccess(null);
+
+      const count = Math.max(
+        1,
+        Math.min(4, Number(generateWeeksCount) || 1)
+      );
+
+      let firstWeek: ScheduleWeek | null = null;
+
+      for (let i = 0; i < count; i++) {
+        const targetStart = addDays(weekStart, i * 7);
+        const generated = await generateWeekAt(targetStart);
+        if (i === 0 && generated) {
+          firstWeek = generated;
+        }
       }
-      const data = (await res.json()) as WeekApiResponse;
-      setCurrentWeek(data.week ?? null);
+
+      if (firstWeek) {
+        setCurrentWeek(firstWeek);
+      }
+
+      setShowGenerateModal(false);
+      setSuccess(
+        count === 1
+          ? "Weekly schedule generated successfully."
+          : `Weekly schedules generated for ${count} weeks successfully.`
+      );
     } catch (e: any) {
       console.error(e);
-      setError(e.message ?? "Failed to generate week");
+      setError(e.message ?? "Failed to generate weekly schedule");
     } finally {
       setGeneratingWeek(false);
     }
@@ -617,6 +681,7 @@ export default function SchedulePage() {
     try {
       setSavingMaster(true);
       setError(null);
+      setSuccess(null);
 
       const payload = {
         name: draft.name,
@@ -676,6 +741,7 @@ export default function SchedulePage() {
         ...savedTemplate,
         shifts: [...savedTemplate.shifts],
       });
+      setSuccess("Master schedule saved successfully.");
     } catch (e: any) {
       console.error(e);
       setError(e.message ?? "FAILED_TO_UPDATE_MASTER");
@@ -842,6 +908,7 @@ export default function SchedulePage() {
   function closeEditShift() {
     setEditingShift(null);
     setEditShiftSaving(false);
+    setEditShiftDeleting(false);
   }
 
   async function handleSaveShiftEdit() {
@@ -872,11 +939,14 @@ export default function SchedulePage() {
     try {
       setEditShiftSaving(true);
       setError(null);
+      setSuccess(null);
 
       const res = await fetch(`/api/schedule/shift/${editingShift.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // 👇 thêm shiftId để backend không báo MISSING_SHIFT_ID
+          shiftId: editingShift.id,
           serviceId: editShiftServiceId || editingShift.service.id,
           plannedStart: plannedStartIso,
           plannedEnd: plannedEndIso,
@@ -904,11 +974,160 @@ export default function SchedulePage() {
           : prev
       );
 
+      setSuccess("Shift updated successfully.");
       closeEditShift();
     } catch (e: any) {
       console.error(e);
       setError(e.message ?? "Failed to update shift");
       setEditShiftSaving(false);
+    }
+  }
+
+  async function handleDeleteShiftFromModal() {
+    if (!editingShift) return;
+    if (!currentWeek) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this shift?"
+    );
+    if (!confirmed) return;
+
+    try {
+      setEditShiftDeleting(true);
+      setError(null);
+      setSuccess(null);
+
+      const res = await fetch(`/api/schedule/shift/${editingShift.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // gửi kèm shiftId cho thống nhất với backend
+          shiftId: editingShift.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to delete shift");
+      }
+
+      setCurrentWeek((prev) =>
+        prev
+          ? {
+              ...prev,
+              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+            }
+          : prev
+      );
+
+      setSuccess("Shift deleted successfully.");
+      closeEditShift();
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "Failed to delete shift");
+      setEditShiftDeleting(false);
+    }
+  }
+
+  // ---------- Create new shift (modal) ----------
+
+  function openCreateShiftModal() {
+    if (!currentWeek) {
+      setError("No weekly schedule. Please Generate first.");
+      return;
+    }
+    if (!services.length) {
+      setError("No services found. Please create at least one Service first.");
+      return;
+    }
+
+    setCreateShiftDayIndex(0);
+    setCreateShiftServiceId(services[0]?.id ?? "");
+    setCreateShiftDspId("");
+    setCreateShiftStart("07:00");
+    setCreateShiftEnd("14:00");
+    setCreateShiftStatus("NOT_STARTED");
+    setCreateShiftNotes("");
+    setShowCreateShiftModal(true);
+    setError(null);
+    setSuccess(null);
+  }
+
+  function closeCreateShiftModal() {
+    if (creatingShift) return;
+    setShowCreateShiftModal(false);
+  }
+
+  async function handleCreateShift() {
+    if (!currentWeek || !selectedIndividualId) return;
+
+    const startMinutes = parseTimeToMinutes(createShiftStart);
+    const endMinutes = parseTimeToMinutes(createShiftEnd);
+
+    if (startMinutes === null || endMinutes === null) {
+      setError("Time is not valid. Use HH:MM format (e.g. 07:00).");
+      return;
+    }
+
+    const baseDate = addDays(weekStart, createShiftDayIndex);
+    baseDate.setHours(0, 0, 0, 0);
+    const scheduleDateIso = baseDate.toISOString();
+
+    const makeDate = (base: Date, minutes: number) => {
+      const d = new Date(base);
+      d.setMinutes(minutes);
+      return d.toISOString();
+    };
+
+    const plannedStartIso = makeDate(baseDate, startMinutes);
+    const endBase =
+      endMinutes >= startMinutes ? baseDate : addDays(baseDate, 1);
+    const plannedEndIso = makeDate(endBase, endMinutes);
+
+    try {
+      setCreatingShift(true);
+      setError(null);
+      setSuccess(null);
+
+      const res = await fetch("/api/schedule/shift", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weekId: currentWeek.id,
+          individualId: selectedIndividualId,
+          scheduleDate: scheduleDateIso,
+          serviceId: createShiftServiceId,
+          plannedStart: plannedStartIso,
+          plannedEnd: plannedEndIso,
+          status: createShiftStatus,
+          notes: createShiftNotes || null,
+          dspId: createShiftDspId || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to create shift");
+      }
+
+      const created = (await res.json()) as ScheduleShift;
+
+      setCurrentWeek((prev) =>
+        prev
+          ? {
+              ...prev,
+              shifts: [...prev.shifts, created],
+            }
+          : prev
+      );
+
+      setSuccess("Shift created successfully.");
+      setShowCreateShiftModal(false);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "Failed to create shift");
+    } finally {
+      setCreatingShift(false);
     }
   }
 
@@ -1159,27 +1378,6 @@ export default function SchedulePage() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-slate-400">Week</span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handlePrevWeek}
-                className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
-              >
-                Prev
-              </button>
-              <span className="text-sm font-medium">{weekRangeLabel}</span>
-              <button
-                type="button"
-                onClick={handleNextWeek}
-                className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-
           <div className="flex-1" />
 
           <div className="flex flex-col gap-1 items-end">
@@ -1195,7 +1393,7 @@ export default function SchedulePage() {
           </div>
         </div>
 
-        {/* Info + errors */}
+        {/* Info + errors / success */}
         {currentIndividual && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-xs text-slate-300 flex items-center justify-between">
             <div>
@@ -1228,6 +1426,12 @@ export default function SchedulePage() {
         {error && (
           <div className="rounded-xl border border-rose-600/60 bg-rose-950/40 px-4 py-2 text-sm text-rose-200">
             {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="rounded-xl border border-emerald-600/60 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200">
+            {success}
           </div>
         )}
 
@@ -1271,51 +1475,79 @@ export default function SchedulePage() {
         {/* Weekly Detail + tabs */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-100">
-              Weekly schedule (Sunday–Saturday)
-            </h2>
+            <div className="flex items-center gap-6">
+              <h2 className="text-sm font-semibold text-slate-100">
+                Weekly schedule (Sunday–Saturday)
+              </h2>
 
-            <div className="flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-900/60 px-1 py-1 text-sm font-semibold">
-              <button
-                type="button"
-                onClick={() => setActiveTab("weekly")}
-                className={`px-3 py-1 rounded-full ${
-                  activeTab === "weekly"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                }`}
-              >
-                Weekly detail
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("summary")}
-                className={`px-3 py-1 rounded-full ${
-                  activeTab === "summary"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                }`}
-              >
-                Summary & conflicts
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("payroll")}
-                className={`px-3 py-1 rounded-full ${
-                  activeTab === "payroll"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                }`}
-              >
-                Payroll & ISP
-              </button>
+              {/* Week navigation moved here */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-400">Week</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrevWeek}
+                    className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
+                  >
+                    Prev
+                  </button>
+                  <span className="text-sm font-medium">
+                    {weekRangeLabel}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNextWeek}
+                    className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {loadingWeek && (
-              <span className="text-[11px] text-slate-400">
-                Loading weekly schedule...
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-900/60 px-1 py-1 text-sm font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("weekly")}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "weekly"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  Weekly detail
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("summary")}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "summary"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  Summary & conflicts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("payroll")}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "payroll"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  Payroll & ISP
+                </button>
+              </div>
+
+              {loadingWeek && (
+                <span className="text-[11px] text-slate-400">
+                  Loading weekly schedule...
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Tab: Weekly */}
@@ -1381,12 +1613,7 @@ export default function SchedulePage() {
                     <button
                       type="button"
                       className="text-xs text-sky-300 hover:text-sky-100"
-                      // TODO: future: open modal thêm shift mới
-                      onClick={() =>
-                        alert(
-                          "Add shift: sẽ implement sau khi chốt logic business chi tiết."
-                        )
-                      }
+                      onClick={openCreateShiftModal}
                     >
                       + Add shift
                     </button>
@@ -1478,8 +1705,9 @@ export default function SchedulePage() {
                         </div>
                         {c.shifts.map((s) => (
                           <div key={s.id} className="text-slate-100">
-                            {s.service.serviceCode} {formatTime(s.plannedStart)}
-                            –{formatTime(s.plannedEnd)}
+                            {s.service.serviceCode}{" "}
+                            {formatTime(s.plannedStart)}–
+                            {formatTime(s.plannedEnd)}
                           </div>
                         ))}
                       </div>
@@ -1565,7 +1793,9 @@ export default function SchedulePage() {
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="py-1 pr-2">Service</th>
-                        <th className="py-1 pr-2 text-right">Actual (units)</th>
+                        <th className="py-1 pr-2 text-right">
+                          Actual (units)
+                        </th>
                         <th className="py-1 text-right">ISP Plan (units)</th>
                       </tr>
                     </thead>
@@ -1709,22 +1939,32 @@ export default function SchedulePage() {
               </div>
             </div>
 
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex justify-between items-center gap-2">
               <button
                 type="button"
-                className="text-xs text-slate-400 hover:text-slate-100"
-                onClick={closeEditShift}
+                className="text-xs text-rose-300 hover:text-rose-200 disabled:opacity-50"
+                onClick={handleDeleteShiftFromModal}
+                disabled={editShiftSaving || editShiftDeleting}
               >
-                Cancel
+                {editShiftDeleting ? "Deleting..." : "Delete shift"}
               </button>
-              <button
-                type="button"
-                disabled={editShiftSaving}
-                onClick={handleSaveShiftEdit}
-                className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-              >
-                {editShiftSaving ? "Saving..." : "Save changes"}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-slate-400 hover:text-slate-100"
+                  onClick={closeEditShift}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={editShiftSaving || editShiftDeleting}
+                  onClick={handleSaveShiftEdit}
+                  className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {editShiftSaving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1845,6 +2085,210 @@ export default function SchedulePage() {
                   {masterModalSaving ? "Saving..." : "Save changes"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Generate multi weeks */}
+      {showGenerateModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-sm rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-slate-100">
+                Generate schedule
+              </div>
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={() => setShowGenerateModal(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-xs text-slate-300">
+                Generate schedule starting from{" "}
+                <span className="font-medium">{weekRangeLabel}</span> for how
+                many consecutive weeks?
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">
+                  Number of weeks (1–4)
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  max={4}
+                  value={generateWeeksCount}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (Number.isNaN(val)) {
+                      setGenerateWeeksCount(1);
+                    } else {
+                      setGenerateWeeksCount(Math.max(1, Math.min(4, val)));
+                    }
+                  }}
+                  className="h-8 w-24 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={() => setShowGenerateModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={generatingWeek}
+                onClick={handleConfirmGenerateWeeks}
+                className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {generatingWeek ? "Generating..." : "Generate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Create new shift */}
+      {showCreateShiftModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-slate-100">
+                Create new shift
+              </div>
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={closeCreateShiftModal}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Day</div>
+                <select
+                  value={createShiftDayIndex}
+                  onChange={(e) =>
+                    setCreateShiftDayIndex(Number(e.target.value) || 0)
+                  }
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {dayLabels.map((label, idx) => (
+                    <option key={idx} value={idx}>
+                      {label} – {formatDateShort(addDays(weekStart, idx))}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Service</div>
+                <select
+                  value={createShiftServiceId}
+                  onChange={(e) => setCreateShiftServiceId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.serviceCode} — {s.serviceName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">DSP</div>
+                <select
+                  value={createShiftDspId}
+                  onChange={(e) => setCreateShiftDspId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="">— No DSP —</option>
+                  {dsps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.firstName} {d.lastName} ({d.employeeId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Schedule start
+                  </div>
+                  <input
+                    type="time"
+                    value={createShiftStart}
+                    onChange={(e) => setCreateShiftStart(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Schedule end
+                  </div>
+                  <input
+                    type="time"
+                    value={createShiftEnd}
+                    onChange={(e) => setCreateShiftEnd(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Status</div>
+                <select
+                  value={createShiftStatus}
+                  onChange={(e) => setCreateShiftStatus(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {shiftStatusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Notes</div>
+                <textarea
+                  value={createShiftNotes}
+                  onChange={(e) => setCreateShiftNotes(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={closeCreateShiftModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={creatingShift}
+                onClick={handleCreateShift}
+                className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {creatingShift ? "Creating..." : "Create shift"}
+              </button>
             </div>
           </div>
         </div>
