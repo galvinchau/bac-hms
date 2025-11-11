@@ -2,13 +2,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-type RouteParams = {
-  params: { id: string };
-};
-
-// Helper: cố gắng lấy id từ cả params lẫn URL (phòng hờ)
-function getShiftId(req: Request, params?: { id?: string }) {
-  if (params?.id) return params.id;
+/**
+ * Helper: cố gắng lấy shiftId từ cả params lẫn URL (phòng hờ)
+ */
+function getShiftId(req: Request, context?: any): string | null {
+  const paramId = context?.params?.id;
+  if (paramId) return paramId;
 
   try {
     const url = new URL(req.url);
@@ -21,8 +20,8 @@ function getShiftId(req: Request, params?: { id?: string }) {
   }
 }
 
-export async function PUT(req: Request, ctx: RouteParams) {
-  const id = getShiftId(req, ctx?.params);
+export async function PUT(req: Request, context: any) {
+  const id = getShiftId(req, context);
 
   if (!id) {
     return NextResponse.json({ error: "MISSING_SHIFT_ID" }, { status: 400 });
@@ -30,7 +29,7 @@ export async function PUT(req: Request, ctx: RouteParams) {
 
   try {
     const rawBody = await req.json().catch(() => ({}));
-    const body = rawBody && typeof rawBody === "object" ? rawBody : {};
+    const body = rawBody && typeof rawBody === "object" ? rawBody : ({} as any);
 
     const {
       serviceId,
@@ -154,8 +153,8 @@ export async function PUT(req: Request, ctx: RouteParams) {
   }
 }
 
-export async function DELETE(req: Request, ctx: RouteParams) {
-  const id = getShiftId(req, ctx?.params);
+export async function DELETE(req: Request, context: any) {
+  const id = getShiftId(req, context);
 
   if (!id) {
     return NextResponse.json({ error: "MISSING_SHIFT_ID" }, { status: 400 });
@@ -164,7 +163,7 @@ export async function DELETE(req: Request, ctx: RouteParams) {
   try {
     // Nếu DB đã set ON DELETE CASCADE cho visit.shiftId
     // thì không cần xoá visit thủ công.
-    // Nếu chưa set, bạn có thể bật lại đoạn dưới:
+    // Nếu chưa set, có thể mở lại đoạn dưới:
     //
     // await prisma.visit.deleteMany({
     //   where: { shiftId: id },
