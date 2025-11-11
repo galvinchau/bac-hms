@@ -170,6 +170,24 @@ function calcVisitedUnits(shift: ScheduleShift): number {
   return shift.visits.reduce((sum, v) => sum + (v.units ?? 0), 0);
 }
 
+/**
+ * Tính vị trí trong tuần (0–6) của một scheduleDate dựa theo weekStart (ISO string).
+ * Không dùng getDay/getUTCDay để tránh lệch timezone.
+ */
+function getDayIndexInWeek(weekStartIso: string, dateIso: string): number {
+  const ws = new Date(weekStartIso);
+  ws.setHours(0, 0, 0, 0);
+
+  const d = new Date(dateIso);
+  d.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.round(
+    (d.getTime() - ws.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  return diffDays;
+}
+
 // ===== Page Component =====
 
 export default function SchedulePage() {
@@ -216,8 +234,7 @@ export default function SchedulePage() {
   const [editShiftDspId, setEditShiftDspId] = useState<string>("");
   const [editShiftStart, setEditShiftStart] = useState<string>("07:00");
   const [editShiftEnd, setEditShiftEnd] = useState<string>("14:00");
-  const [editShiftStatus, setEditShiftStatus] =
-    useState<string>("NOT_STARTED");
+  const [editShiftStatus, setEditShiftStatus] = useState<string>("NOT_STARTED");
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
   const [editShiftDeleting, setEditShiftDeleting] = useState(false);
@@ -240,8 +257,7 @@ export default function SchedulePage() {
   const [showCreateShiftModal, setShowCreateShiftModal] = useState(false);
   const [creatingShift, setCreatingShift] = useState(false);
   const [createShiftDayIndex, setCreateShiftDayIndex] = useState<number>(0);
-  const [createShiftServiceId, setCreateShiftServiceId] =
-    useState<string>("");
+  const [createShiftServiceId, setCreateShiftServiceId] = useState<string>("");
   const [createShiftDspId, setCreateShiftDspId] = useState<string>("");
   const [createShiftStart, setCreateShiftStart] = useState<string>("07:00");
   const [createShiftEnd, setCreateShiftEnd] = useState<string>("14:00");
@@ -435,10 +451,7 @@ export default function SchedulePage() {
       setError(null);
       setSuccess(null);
 
-      const count = Math.max(
-        1,
-        Math.min(4, Number(generateWeeksCount) || 1)
-      );
+      const count = Math.max(1, Math.min(4, Number(generateWeeksCount) || 1));
 
       let firstWeek: ScheduleWeek | null = null;
 
@@ -489,11 +502,15 @@ export default function SchedulePage() {
     if (!currentWeek) return { maxSlots: 0, slots: [] as ScheduleShift[][] };
 
     const byDay: ScheduleShift[][] = Array.from({ length: 7 }, () => []);
+
     for (const shift of currentWeek.shifts) {
-      const d = new Date(shift.scheduleDate);
-      const day = d.getDay();
-      if (day >= 0 && day <= 6) {
-        byDay[day].push(shift);
+      const dayIndex = getDayIndexInWeek(
+        currentWeek.weekStart,
+        shift.scheduleDate
+      );
+
+      if (dayIndex >= 0 && dayIndex <= 6) {
+        byDay[dayIndex].push(shift);
       }
     }
 
@@ -858,9 +875,11 @@ export default function SchedulePage() {
     for (const s of currentWeek.shifts) {
       const dsp = s.actualDsp ?? s.plannedDsp;
       if (!dsp) continue;
-      const d = new Date(s.scheduleDate);
-      const day = d.getDay();
-      const key = `${dsp.id}-${day}`;
+
+      const dayIndex = getDayIndexInWeek(currentWeek.weekStart, s.scheduleDate);
+      if (dayIndex < 0 || dayIndex > 6) continue;
+
+      const key = `${dsp.id}-${dayIndex}`;
       if (!byKey[key]) byKey[key] = [];
       byKey[key].push(s);
     }
@@ -945,7 +964,7 @@ export default function SchedulePage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // 👇 thêm shiftId để backend không báo MISSING_SHIFT_ID
+          // gửi kèm shiftId cho thống nhất với backend
           shiftId: editingShift.id,
           serviceId: editShiftServiceId || editingShift.service.id,
           plannedStart: plannedStartIso,
@@ -1069,7 +1088,10 @@ export default function SchedulePage() {
       return;
     }
 
-    const baseDate = addDays(weekStart, createShiftDayIndex);
+    const baseWeekStart = currentWeek
+      ? new Date(currentWeek.weekStart)
+      : weekStart;
+    const baseDate = addDays(baseWeekStart, createShiftDayIndex);
     baseDate.setHours(0, 0, 0, 0);
     const scheduleDateIso = baseDate.toISOString();
 
@@ -1491,9 +1513,7 @@ export default function SchedulePage() {
                   >
                     Prev
                   </button>
-                  <span className="text-sm font-medium">
-                    {weekRangeLabel}
-                  </span>
+                  <span className="text-sm font-medium">{weekRangeLabel}</span>
                   <button
                     type="button"
                     onClick={handleNextWeek}
@@ -1705,9 +1725,8 @@ export default function SchedulePage() {
                         </div>
                         {c.shifts.map((s) => (
                           <div key={s.id} className="text-slate-100">
-                            {s.service.serviceCode}{" "}
-                            {formatTime(s.plannedStart)}–
-                            {formatTime(s.plannedEnd)}
+                            {s.service.serviceCode} {formatTime(s.plannedStart)}
+                            –{formatTime(s.plannedEnd)}
                           </div>
                         ))}
                       </div>
@@ -1793,9 +1812,7 @@ export default function SchedulePage() {
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="py-1 pr-2">Service</th>
-                        <th className="py-1 pr-2 text-right">
-                          Actual (units)
-                        </th>
+                        <th className="py-1 pr-2 text-right">Actual (units)</th>
                         <th className="py-1 text-right">ISP Plan (units)</th>
                       </tr>
                     </thead>
@@ -1833,7 +1850,22 @@ export default function SchedulePage() {
               <div>
                 <div className="text-xs text-slate-400 mb-1">
                   Edit shift –{" "}
-                  {dayLabels[new Date(editingShift.scheduleDate).getDay()]}{" "}
+                  {
+                    dayLabels[
+                      currentWeek
+                        ? Math.max(
+                            0,
+                            Math.min(
+                              6,
+                              getDayIndexInWeek(
+                                currentWeek.weekStart,
+                                editingShift.scheduleDate
+                              )
+                            )
+                          )
+                        : new Date(editingShift.scheduleDate).getDay()
+                    ]
+                  }{" "}
                   {formatDateShort(editingShift.scheduleDate)}
                 </div>
                 <div className="font-semibold text-slate-100">
