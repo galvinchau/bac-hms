@@ -2,17 +2,25 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import ISPandBSP from "@/components/individual/ISPandBSP"; // <-- [NEW] add tab component
 
 /* =========================
    NAV / LAYOUT HELPERS
    ========================= */
-type TabKey = "profile" | "billing" | "clinical" | "equipment" | "preferences";
+type TabKey =
+  | "profile"
+  | "billing"
+  | "clinical"
+  | "equipment"
+  | "preferences"
+  | "ispbsp"; // <-- [NEW]
 const TABS = [
   { key: "profile", label: "Profile & Contacts" },
   { key: "billing", label: "Coverage & Billing" },
   { key: "clinical", label: "Clinical & Medication" },
   { key: "equipment", label: "Preparedness & Equipment" },
   { key: "preferences", label: "Preferences & Directives" },
+  { key: "ispbsp", label: "ISP & BSP" }, // <-- [NEW]
 ] as const;
 
 /* =========================
@@ -2009,6 +2017,16 @@ export default function NewIndividualPage() {
               </Labeled>
             </div>
           </section>
+        </div>
+      )}
+
+      {/* =========================
+          TAB 6 — ISP & BSP
+          ========================= */}
+      {activeTab === "ispbsp" && (
+        <div className="space-y-8">
+          {/* UI-only layout component */}
+          <ISPandBSP />
         </div>
       )}
     </div>
