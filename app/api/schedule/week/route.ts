@@ -6,23 +6,15 @@ export const dynamic = "force-dynamic";
 
 // ===== Helpers =====
 
-// Fix lệch 1 ngày do timezone:
-// FE đang gửi weekStart = weekStart.toISOString() (UTC).
-// Nếu mình set về 00:00 local thì ở client (múi giờ âm) sẽ bị tụt về ngày hôm trước.
-// => Chuẩn hoá weekStart về **giữa trưa UTC** của đúng ngày đó để client
-// convert về local vẫn cùng ngày.
+// Giữ cách cũ: chuẩn hoá về 00:00 local của ngày được gửi lên.
+// (UI đã fix mapping ngày nên thứ tự Chủ nhật→Thứ bảy hiển thị đúng.)
 function normalizeWeekStart(input: string): Date {
   const d = new Date(input);
   if (Number.isNaN(d.getTime())) {
     throw new Error("weekStart must be a valid ISO date string");
   }
-
-  const year = d.getUTCFullYear();
-  const month = d.getUTCMonth();
-  const date = d.getUTCDate();
-
-  // 12:00 UTC để tránh bị lệch ngày ở các múi giờ khác
-  return new Date(Date.UTC(year, month, date, 12, 0, 0, 0));
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -156,9 +148,7 @@ export async function POST(req: Request) {
           individualId: body.individualId,
           isActive: true,
         },
-        include: {
-          shifts: true,
-        },
+        include: { shifts: true },
       });
 
       if (!template) {
@@ -175,9 +165,7 @@ export async function POST(req: Request) {
           effectiveFrom: { lte: weekStart },
           OR: [{ effectiveTo: null }, { effectiveTo: { gte: weekStart } }],
         },
-        include: {
-          shifts: true,
-        },
+        include: { shifts: true },
         orderBy: [{ effectiveFrom: "desc" }],
       });
 

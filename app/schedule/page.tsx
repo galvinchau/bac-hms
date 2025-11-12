@@ -122,7 +122,7 @@ function formatDateShort(dateStr: string | Date): string {
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr);
-  const hours = d.getHours();
+  const hours = d.getHours(); // 👈 quay về local time
   const minutes = d.getMinutes();
   const hh = hours.toString().padStart(2, "0");
   const mm = minutes.toString().padStart(2, "0");
@@ -307,10 +307,10 @@ export default function SchedulePage() {
         const list: Service[] = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-            ? data.items
-            : Array.isArray(data?.services)
-              ? data.services
-              : [];
+          ? data.items
+          : Array.isArray(data?.services)
+          ? data.services
+          : [];
         setServices(list);
       } catch (e) {
         console.error("Failed to load services", e);
@@ -329,8 +329,8 @@ export default function SchedulePage() {
         const list: Employee[] = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-            ? data.items
-            : [];
+          ? data.items
+          : [];
         setDsps(list);
       } catch (e) {
         console.error("Failed to load DSPs", e);
@@ -700,14 +700,14 @@ export default function SchedulePage() {
     const updatedShifts = masterDraft.shifts.map((s) =>
       s.id === editingMasterShift.id
         ? {
-          ...s,
-          serviceId: masterModalServiceId,
-          service: svc ?? undefined,
-          defaultDsp: dsp ?? null,
-          startMinutes: start,
-          endMinutes: end,
-          notes: masterModalNotes || null,
-        }
+            ...s,
+            serviceId: masterModalServiceId,
+            service: svc ?? undefined,
+            defaultDsp: dsp ?? null,
+            startMinutes: start,
+            endMinutes: end,
+            notes: masterModalNotes || null,
+          }
         : s
     );
 
@@ -1020,11 +1020,11 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: prev.shifts.map((s) =>
-              s.id === updated.id ? updated : s
-            ),
-          }
+              ...prev,
+              shifts: prev.shifts.map((s) =>
+                s.id === updated.id ? updated : s
+              ),
+            }
           : prev
       );
 
@@ -1068,9 +1068,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
-          }
+              ...prev,
+              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+            }
           : prev
       );
 
@@ -1172,9 +1172,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: [...prev.shifts, created],
-          }
+              ...prev,
+              shifts: [...prev.shifts, created],
+            }
           : prev
       );
 
@@ -1230,8 +1230,7 @@ export default function SchedulePage() {
               </div>
               {shift.defaultDsp && (
                 <div className="text-[11px] text-slate-400 mb-1">
-                  DSP: {shift.defaultDsp.firstName}{" "}
-                  {shift.defaultDsp.lastName}
+                  DSP: {shift.defaultDsp.firstName} {shift.defaultDsp.lastName}
                 </div>
               )}
               <button
@@ -1336,12 +1335,12 @@ export default function SchedulePage() {
       shift.status === "COMPLETED"
         ? "text-emerald-400"
         : shift.status === "IN_PROGRESS"
-          ? "text-amber-300"
-          : shift.status === "CANCELLED"
-            ? "text-rose-400"
-            : shift.status === "BACKUP_PLAN"
-              ? "text-sky-300"
-              : "text-slate-400";
+        ? "text-amber-300"
+        : shift.status === "CANCELLED"
+        ? "text-rose-400"
+        : shift.status === "BACKUP_PLAN"
+        ? "text-sky-300"
+        : "text-slate-400";
 
     return (
       <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
@@ -1372,10 +1371,11 @@ export default function SchedulePage() {
           <span>
             Visit:{" "}
             {shift.visits.length > 0
-              ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
-                ? formatTime(shift.visits[0].checkOutAt)
-                : "--:--"
-              }`
+              ? `${formatTime(shift.visits[0].checkInAt)}–${
+                  shift.visits[0].checkOutAt
+                    ? formatTime(shift.visits[0].checkOutAt)
+                    : "--:--"
+                }`
               : "--:-- – --:--"}
           </span>
           <span>{visitedUnits}u</span>
@@ -1565,30 +1565,33 @@ export default function SchedulePage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("weekly")}
-                  className={`px-3 py-1 rounded-full ${activeTab === "weekly"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                    }`}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "weekly"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
                 >
                   Weekly detail
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("summary")}
-                  className={`px-3 py-1 rounded-full ${activeTab === "summary"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                    }`}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "summary"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
                 >
                   Summary & conflicts
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("payroll")}
-                  className={`px-3 py-1 rounded-full ${activeTab === "payroll"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                    }`}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "payroll"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
                 >
                   Payroll & ISP
                 </button>
@@ -1644,10 +1647,7 @@ export default function SchedulePage() {
                     )}
 
                     {gridByDayAndSlot.slots.map((row, rowIndex) => (
-                      <div
-                        key={rowIndex}
-                        className="grid grid-cols-7 gap-3"
-                      >
+                      <div key={rowIndex} className="grid grid-cols-7 gap-3">
                         {row.map((shift, dayIndex) => (
                           <div key={dayIndex}>
                             {renderShiftCell(shift && shift.id ? shift : null)}
@@ -1713,12 +1713,13 @@ export default function SchedulePage() {
                               {row.visitedUnits}
                             </td>
                             <td
-                              className={`py-1 text-right ${delta > 0
-                                ? "text-emerald-300"
-                                : delta < 0
+                              className={`py-1 text-right ${
+                                delta > 0
+                                  ? "text-emerald-300"
+                                  : delta < 0
                                   ? "text-rose-300"
                                   : "text-slate-300"
-                                }`}
+                              }`}
                             >
                               {delta}
                             </td>
@@ -1752,9 +1753,8 @@ export default function SchedulePage() {
                         </div>
                         {c.shifts.map((s) => (
                           <div key={s.id} className="text-slate-100">
-                            {s.service.serviceCode}{" "}
-                            {formatTime(s.plannedStart)}–
-                            {formatTime(s.plannedEnd)}
+                            {s.service.serviceCode} {formatTime(s.plannedStart)}
+                            –{formatTime(s.plannedEnd)}
                           </div>
                         ))}
                       </div>
@@ -1808,12 +1808,13 @@ export default function SchedulePage() {
                               {actualHours.toFixed(2)}
                             </td>
                             <td
-                              className={`py-1 text-right ${delta > 0
-                                ? "text-emerald-300"
-                                : delta < 0
+                              className={`py-1 text-right ${
+                                delta > 0
+                                  ? "text-emerald-300"
+                                  : delta < 0
                                   ? "text-rose-300"
                                   : "text-slate-300"
-                                }`}
+                              }`}
                             >
                               {delta.toFixed(2)}
                             </td>
@@ -1839,9 +1840,7 @@ export default function SchedulePage() {
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="py-1 pr-2">Service</th>
-                        <th className="py-1 pr-2 text-right">
-                          Actual (units)
-                        </th>
+                        <th className="py-1 pr-2 text-right">Actual (units)</th>
                         <th className="py-1 text-right">ISP Plan (units)</th>
                       </tr>
                     </thead>
@@ -1893,8 +1892,9 @@ export default function SchedulePage() {
                       )}`;
                     }
                     const d = new Date(editingShift.scheduleDate);
-                    return `${dayLabels[d.getDay()]
-                      } ${formatDateShort(d.toISOString())}`;
+                    return `${dayLabels[d.getDay()]} ${formatDateShort(
+                      d.toISOString()
+                    )}`;
                   })()}
                 </div>
                 <div className="font-semibold text-slate-100">
@@ -2175,9 +2175,7 @@ export default function SchedulePage() {
                 selected end date. Weeks before this range will be kept as-is.
               </div>
               <div>
-                <div className="text-[11px] text-slate-300 mb-1">
-                  End date
-                </div>
+                <div className="text-[11px] text-slate-300 mb-1">End date</div>
                 <input
                   type="date"
                   value={generateToDate}
