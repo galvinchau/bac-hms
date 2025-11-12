@@ -17,12 +17,6 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
   const q = (searchParams.get("q") || "").trim();
-  const page = Math.max(1, Number(searchParams.get("page") || "1") || 1);
-  const pageSize = Math.min(
-    50,
-    Math.max(5, Number(searchParams.get("pageSize") || "10") || 10)
-  );
-
   const simple = searchParams.get("simple") === "true";
 
   const where =
@@ -37,6 +31,39 @@ export async function GET(req: Request) {
           ],
         }
       : {};
+
+  // 👉 Mode simple: dùng cho dropdown / schedule → KHÔNG phân trang, trả thẳng tất cả
+  if (simple) {
+    const items = await prisma.individual.findMany({
+      where,
+      orderBy: { createdAt: "desc" }, // hoặc đổi sang code/id nếu muốn
+      take: 500, // limit an toàn, dư sức cho case hiện tại (22 người)
+      select: {
+        id: true,
+        code: true,
+        firstName: true,
+        lastName: true,
+        dob: true,
+        primaryPhone: true,
+        email: true,
+        city: true,
+        county: true,
+        state: true,
+        zip: true,
+        branch: true,
+        location: true,
+      },
+    });
+
+    return NextResponse.json(items);
+  }
+
+  // 👉 Mode đầy đủ: có paging cho màn Search Individual
+  const page = Math.max(1, Number(searchParams.get("page") || "1") || 1);
+  const pageSize = Math.min(
+    50,
+    Math.max(5, Number(searchParams.get("pageSize") || "10") || 10)
+  );
 
   const [total, items] = await Promise.all([
     prisma.individual.count({ where }),
@@ -63,12 +90,7 @@ export async function GET(req: Request) {
     }),
   ]);
 
-  // 👉 Nếu simple=true: trả về thẳng mảng items cho những chỗ chỉ cần dropdown.
-  if (simple) {
-    return NextResponse.json(items);
-  }
-
-  // 👉 Mặc định: giữ nguyên format cũ cho màn Search Individual.
+  // Mặc định: giữ nguyên format cũ cho màn Search Individual.
   return NextResponse.json({
     items,
     total,

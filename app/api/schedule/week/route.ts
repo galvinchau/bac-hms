@@ -6,13 +6,23 @@ export const dynamic = "force-dynamic";
 
 // ===== Helpers =====
 
+// Fix lệch 1 ngày do timezone:
+// FE đang gửi weekStart = weekStart.toISOString() (UTC).
+// Nếu mình set về 00:00 local thì ở client (múi giờ âm) sẽ bị tụt về ngày hôm trước.
+// => Chuẩn hoá weekStart về **giữa trưa UTC** của đúng ngày đó để client
+// convert về local vẫn cùng ngày.
 function normalizeWeekStart(input: string): Date {
   const d = new Date(input);
   if (Number.isNaN(d.getTime())) {
     throw new Error("weekStart must be a valid ISO date string");
   }
-  d.setHours(0, 0, 0, 0);
-  return d;
+
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth();
+  const date = d.getUTCDate();
+
+  // 12:00 UTC để tránh bị lệch ngày ở các múi giờ khác
+  return new Date(Date.UTC(year, month, date, 12, 0, 0, 0));
 }
 
 function addDays(date: Date, days: number): Date {
@@ -52,10 +62,7 @@ export async function GET(req: Request) {
               actualDsp: true,
               visits: true,
             },
-            orderBy: [
-              { scheduleDate: "asc" },
-              { plannedStart: "asc" },
-            ],
+            orderBy: [{ scheduleDate: "asc" }, { plannedStart: "asc" }],
           },
         },
       });
@@ -126,10 +133,7 @@ export async function POST(req: Request) {
             actualDsp: true,
             visits: true,
           },
-          orderBy: [
-            { scheduleDate: "asc" },
-            { plannedStart: "asc" },
-          ],
+          orderBy: [{ scheduleDate: "asc" }, { plannedStart: "asc" }],
         },
       },
     });
@@ -256,10 +260,7 @@ export async function POST(req: Request) {
               actualDsp: true,
               visits: true,
             },
-            orderBy: [
-              { scheduleDate: "asc" },
-              { plannedStart: "asc" },
-            ],
+            orderBy: [{ scheduleDate: "asc" }, { plannedStart: "asc" }],
           },
         },
       });

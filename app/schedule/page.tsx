@@ -107,11 +107,14 @@ function addDays(date: Date, days: number): Date {
   return d;
 }
 
+/**
+ * Hiển thị ngày theo UTC để tránh lệch ngày do timezone
+ */
 function formatDateShort(dateStr: string | Date): string {
   const d = typeof dateStr === "string" ? new Date(dateStr) : dateStr;
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  const year = d.getFullYear();
+  const month = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  const year = d.getUTCFullYear();
   return `${month.toString().padStart(2, "0")}/${day
     .toString()
     .padStart(2, "0")}/${year}`;
@@ -249,9 +252,9 @@ export default function SchedulePage() {
   const [masterModalNotes, setMasterModalNotes] = useState<string>("");
   const [masterModalSaving, setMasterModalSaving] = useState(false);
 
-  // Modal generate multi weeks
+  // Modal generate range (đến ngày)
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [generateWeeksCount, setGenerateWeeksCount] = useState<number>(1);
+  const [generateToDate, setGenerateToDate] = useState<string>("");
 
   // Modal create new shift
   const [showCreateShiftModal, setShowCreateShiftModal] = useState(false);
@@ -304,10 +307,10 @@ export default function SchedulePage() {
         const list: Service[] = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-          ? data.items
-          : Array.isArray(data?.services)
-          ? data.services
-          : [];
+            ? data.items
+            : Array.isArray(data?.services)
+              ? data.services
+              : [];
         setServices(list);
       } catch (e) {
         console.error("Failed to load services", e);
@@ -326,8 +329,8 @@ export default function SchedulePage() {
         const list: Employee[] = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-          ? data.items
-          : [];
+            ? data.items
+            : [];
         setDsps(list);
       } catch (e) {
         console.error("Failed to load DSPs", e);
@@ -437,7 +440,12 @@ export default function SchedulePage() {
 
   function handleGenerateWeek() {
     if (!selectedIndividualId || generatingWeek) return;
-    setGenerateWeeksCount(1);
+    // default generate đến hết tuần đang xem
+    const defaultEnd = addDays(
+      currentWeek ? new Date(currentWeek.weekStart) : weekStart,
+      6
+    );
+    setGenerateToDate(defaultEnd.toISOString().slice(0, 10));
     setShowGenerateModal(true);
     setError(null);
     setSuccess(null);
@@ -446,17 +454,40 @@ export default function SchedulePage() {
   async function handleConfirmGenerateWeeks() {
     if (!selectedIndividualId) return;
 
+    if (!generateToDate) {
+      setError("Please select an end date.");
+      return;
+    }
+
     try {
       setGeneratingWeek(true);
       setError(null);
       setSuccess(null);
 
-      const count = Math.max(1, Math.min(4, Number(generateWeeksCount) || 1));
+      const baseStart = currentWeek
+        ? new Date(currentWeek.weekStart)
+        : weekStart;
+      const start = new Date(baseStart);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(`${generateToDate}T00:00:00`);
+      end.setHours(0, 0, 0, 0);
+
+      if (end.getTime() < start.getTime()) {
+        setError("End date must be on or after the current week start.");
+        setGeneratingWeek(false);
+        return;
+      }
+
+      const diffDays = Math.floor(
+        (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      const weeksCount = Math.floor(diffDays / 7) + 1;
 
       let firstWeek: ScheduleWeek | null = null;
 
-      for (let i = 0; i < count; i++) {
-        const targetStart = addDays(weekStart, i * 7);
+      for (let i = 0; i < weeksCount; i++) {
+        const targetStart = addDays(start, i * 7);
         const generated = await generateWeekAt(targetStart);
         if (i === 0 && generated) {
           firstWeek = generated;
@@ -469,9 +500,9 @@ export default function SchedulePage() {
 
       setShowGenerateModal(false);
       setSuccess(
-        count === 1
+        weeksCount === 1
           ? "Weekly schedule generated successfully."
-          : `Weekly schedules generated for ${count} weeks successfully.`
+          : `Weekly schedules generated up to ${formatDateShort(end)}.`
       );
     } catch (e: any) {
       console.error(e);
@@ -492,12 +523,14 @@ export default function SchedulePage() {
   }
 
   const weekRangeLabel = useMemo(() => {
-    const start = weekStart;
-    const end = addDays(weekStart, 6);
+    const base = currentWeek ? new Date(currentWeek.weekStart) : weekStart;
+    const start = base;
+    const end = addDays(base, 6);
     return `${formatDateShort(start)} – ${formatDateShort(end)}`;
-  }, [weekStart]);
+  }, [weekStart, currentWeek]);
 
   // ---------- Tính grid weekly ----------
+
   const gridByDayAndSlot = useMemo(() => {
     if (!currentWeek) return { maxSlots: 0, slots: [] as ScheduleShift[][] };
 
@@ -667,14 +700,14 @@ export default function SchedulePage() {
     const updatedShifts = masterDraft.shifts.map((s) =>
       s.id === editingMasterShift.id
         ? {
-            ...s,
-            serviceId: masterModalServiceId,
-            service: svc ?? undefined,
-            defaultDsp: dsp ?? null,
-            startMinutes: start,
-            endMinutes: end,
-            notes: masterModalNotes || null,
-          }
+          ...s,
+          serviceId: masterModalServiceId,
+          service: svc ?? undefined,
+          defaultDsp: dsp ?? null,
+          startMinutes: start,
+          endMinutes: end,
+          notes: masterModalNotes || null,
+        }
         : s
     );
 
@@ -899,9 +932,11 @@ export default function SchedulePage() {
         ) {
           const [, dayStr] = key.split("-");
           const dsp = (current.actualDsp ?? current.plannedDsp)!;
+          const baseWeek = new Date(currentWeek.weekStart);
+          const displayDate = addDays(baseWeek, Number(dayStr));
           result.push({
             dspName: `${dsp.firstName} ${dsp.lastName}`,
-            date: current.scheduleDate,
+            date: displayDate.toISOString(),
             dayIndex: Number(dayStr),
             shifts: [current, next],
           });
@@ -985,11 +1020,11 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: prev.shifts.map((s) =>
-                s.id === updated.id ? updated : s
-              ),
-            }
+            ...prev,
+            shifts: prev.shifts.map((s) =>
+              s.id === updated.id ? updated : s
+            ),
+          }
           : prev
       );
 
@@ -1033,9 +1068,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
-            }
+            ...prev,
+            shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+          }
           : prev
       );
 
@@ -1137,9 +1172,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: [...prev.shifts, created],
-            }
+            ...prev,
+            shifts: [...prev.shifts, created],
+          }
           : prev
       );
 
@@ -1195,7 +1230,8 @@ export default function SchedulePage() {
               </div>
               {shift.defaultDsp && (
                 <div className="text-[11px] text-slate-400 mb-1">
-                  DSP: {shift.defaultDsp.firstName} {shift.defaultDsp.lastName}
+                  DSP: {shift.defaultDsp.firstName}{" "}
+                  {shift.defaultDsp.lastName}
                 </div>
               )}
               <button
@@ -1300,12 +1336,12 @@ export default function SchedulePage() {
       shift.status === "COMPLETED"
         ? "text-emerald-400"
         : shift.status === "IN_PROGRESS"
-        ? "text-amber-300"
-        : shift.status === "CANCELLED"
-        ? "text-rose-400"
-        : shift.status === "BACKUP_PLAN"
-        ? "text-sky-300"
-        : "text-slate-400";
+          ? "text-amber-300"
+          : shift.status === "CANCELLED"
+            ? "text-rose-400"
+            : shift.status === "BACKUP_PLAN"
+              ? "text-sky-300"
+              : "text-slate-400";
 
     return (
       <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
@@ -1336,11 +1372,10 @@ export default function SchedulePage() {
           <span>
             Visit:{" "}
             {shift.visits.length > 0
-              ? `${formatTime(shift.visits[0].checkInAt)}–${
-                  shift.visits[0].checkOutAt
-                    ? formatTime(shift.visits[0].checkOutAt)
-                    : "--:--"
-                }`
+              ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
+                ? formatTime(shift.visits[0].checkOutAt)
+                : "--:--"
+              }`
               : "--:-- – --:--"}
           </span>
           <span>{visitedUnits}u</span>
@@ -1403,7 +1438,7 @@ export default function SchedulePage() {
           <div className="flex-1" />
 
           <div className="flex flex-col gap-1 items-end">
-            <span className="text-xs text-slate-400">Generate weekly</span>
+            <span className="text-xs text-slate-400">Generate schedule</span>
             <button
               type="button"
               onClick={handleGenerateWeek}
@@ -1530,33 +1565,30 @@ export default function SchedulePage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("weekly")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "weekly"
-                      ? "bg-slate-100 text-slate-950"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
+                  className={`px-3 py-1 rounded-full ${activeTab === "weekly"
+                    ? "bg-slate-100 text-slate-950"
+                    : "text-slate-300 hover:text-slate-50"
+                    }`}
                 >
                   Weekly detail
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("summary")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "summary"
-                      ? "bg-slate-100 text-slate-950"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
+                  className={`px-3 py-1 rounded-full ${activeTab === "summary"
+                    ? "bg-slate-100 text-slate-950"
+                    : "text-slate-300 hover:text-slate-50"
+                    }`}
                 >
                   Summary & conflicts
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("payroll")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "payroll"
-                      ? "bg-slate-100 text-slate-950"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
+                  className={`px-3 py-1 rounded-full ${activeTab === "payroll"
+                    ? "bg-slate-100 text-slate-950"
+                    : "text-slate-300 hover:text-slate-50"
+                    }`}
                 >
                   Payroll & ISP
                 </button>
@@ -1586,8 +1618,7 @@ export default function SchedulePage() {
               {currentWeek && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 space-y-3">
                   {/* Header row: days */}
-                  <div className="grid grid-cols-[80px_repeat(7,minmax(0,1fr))] gap-3 text-xs text-slate-300 mb-2">
-                    <div />
+                  <div className="grid grid-cols-7 gap-3 text-xs text-slate-300 mb-2">
                     {Array.from({ length: 7 }).map((_, day) => {
                       const d = addDays(weekStart, day);
                       return (
@@ -1603,7 +1634,7 @@ export default function SchedulePage() {
                     })}
                   </div>
 
-                  {/* Grid rows: Shift 1 / 2 / 3 ... */}
+                  {/* Grid rows: each row of shifts */}
                   <div className="space-y-3">
                     {gridByDayAndSlot.maxSlots === 0 && (
                       <div className="text-xs text-slate-500 text-center py-4">
@@ -1615,11 +1646,8 @@ export default function SchedulePage() {
                     {gridByDayAndSlot.slots.map((row, rowIndex) => (
                       <div
                         key={rowIndex}
-                        className="grid grid-cols-[80px_repeat(7,minmax(0,1fr))] gap-3"
+                        className="grid grid-cols-7 gap-3"
                       >
-                        <div className="flex items-start pt-2 text-xs text-slate-400">
-                          Shift {rowIndex + 1}
-                        </div>
                         {row.map((shift, dayIndex) => (
                           <div key={dayIndex}>
                             {renderShiftCell(shift && shift.id ? shift : null)}
@@ -1685,13 +1713,12 @@ export default function SchedulePage() {
                               {row.visitedUnits}
                             </td>
                             <td
-                              className={`py-1 text-right ${
-                                delta > 0
-                                  ? "text-emerald-300"
-                                  : delta < 0
+                              className={`py-1 text-right ${delta > 0
+                                ? "text-emerald-300"
+                                : delta < 0
                                   ? "text-rose-300"
                                   : "text-slate-300"
-                              }`}
+                                }`}
                             >
                               {delta}
                             </td>
@@ -1725,8 +1752,9 @@ export default function SchedulePage() {
                         </div>
                         {c.shifts.map((s) => (
                           <div key={s.id} className="text-slate-100">
-                            {s.service.serviceCode} {formatTime(s.plannedStart)}
-                            –{formatTime(s.plannedEnd)}
+                            {s.service.serviceCode}{" "}
+                            {formatTime(s.plannedStart)}–
+                            {formatTime(s.plannedEnd)}
                           </div>
                         ))}
                       </div>
@@ -1780,13 +1808,12 @@ export default function SchedulePage() {
                               {actualHours.toFixed(2)}
                             </td>
                             <td
-                              className={`py-1 text-right ${
-                                delta > 0
-                                  ? "text-emerald-300"
-                                  : delta < 0
+                              className={`py-1 text-right ${delta > 0
+                                ? "text-emerald-300"
+                                : delta < 0
                                   ? "text-rose-300"
                                   : "text-slate-300"
-                              }`}
+                                }`}
                             >
                               {delta.toFixed(2)}
                             </td>
@@ -1812,7 +1839,9 @@ export default function SchedulePage() {
                     <thead className="text-slate-400 border-b border-slate-800">
                       <tr>
                         <th className="py-1 pr-2">Service</th>
-                        <th className="py-1 pr-2 text-right">Actual (units)</th>
+                        <th className="py-1 pr-2 text-right">
+                          Actual (units)
+                        </th>
                         <th className="py-1 text-right">ISP Plan (units)</th>
                       </tr>
                     </thead>
@@ -1850,23 +1879,23 @@ export default function SchedulePage() {
               <div>
                 <div className="text-xs text-slate-400 mb-1">
                   Edit shift –{" "}
-                  {
-                    dayLabels[
-                      currentWeek
-                        ? Math.max(
-                            0,
-                            Math.min(
-                              6,
-                              getDayIndexInWeek(
-                                currentWeek.weekStart,
-                                editingShift.scheduleDate
-                              )
-                            )
-                          )
-                        : new Date(editingShift.scheduleDate).getDay()
-                    ]
-                  }{" "}
-                  {formatDateShort(editingShift.scheduleDate)}
+                  {(() => {
+                    if (currentWeek) {
+                      const idx = getDayIndexInWeek(
+                        currentWeek.weekStart,
+                        editingShift.scheduleDate
+                      );
+                      const safeIdx = Math.max(0, Math.min(6, idx));
+                      const base = new Date(currentWeek.weekStart);
+                      const displayDate = addDays(base, safeIdx);
+                      return `${dayLabels[safeIdx]} ${formatDateShort(
+                        displayDate
+                      )}`;
+                    }
+                    const d = new Date(editingShift.scheduleDate);
+                    return `${dayLabels[d.getDay()]
+                      } ${formatDateShort(d.toISOString())}`;
+                  })()}
                 </div>
                 <div className="font-semibold text-slate-100">
                   {editingShift.service.serviceCode} –{" "}
@@ -2122,7 +2151,7 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {/* Modal Generate multi weeks */}
+      {/* Modal Generate range (đến ngày) */}
       {showGenerateModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-sm rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
@@ -2142,27 +2171,18 @@ export default function SchedulePage() {
             <div className="space-y-3">
               <div className="text-xs text-slate-300">
                 Generate schedule starting from{" "}
-                <span className="font-medium">{weekRangeLabel}</span> for how
-                many consecutive weeks?
+                <span className="font-medium">{weekRangeLabel}</span> until the
+                selected end date. Weeks before this range will be kept as-is.
               </div>
               <div>
                 <div className="text-[11px] text-slate-300 mb-1">
-                  Number of weeks (1–4)
+                  End date
                 </div>
                 <input
-                  type="number"
-                  min={1}
-                  max={4}
-                  value={generateWeeksCount}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    if (Number.isNaN(val)) {
-                      setGenerateWeeksCount(1);
-                    } else {
-                      setGenerateWeeksCount(Math.max(1, Math.min(4, val)));
-                    }
-                  }}
-                  className="h-8 w-24 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  type="date"
+                  value={generateToDate}
+                  onChange={(e) => setGenerateToDate(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
                 />
               </div>
             </div>
@@ -2215,11 +2235,18 @@ export default function SchedulePage() {
                   }
                   className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
                 >
-                  {dayLabels.map((label, idx) => (
-                    <option key={idx} value={idx}>
-                      {label} – {formatDateShort(addDays(weekStart, idx))}
-                    </option>
-                  ))}
+                  {dayLabels.map((label, idx) => {
+                    const base =
+                      currentWeek && currentWeek.weekStart
+                        ? new Date(currentWeek.weekStart)
+                        : weekStart;
+                    const d = addDays(base, idx);
+                    return (
+                      <option key={idx} value={idx}>
+                        {label} – {formatDateShort(d)}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
