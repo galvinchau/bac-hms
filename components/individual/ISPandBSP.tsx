@@ -59,7 +59,35 @@ const L: React.FC<{ label: string; className?: string }> = ({
   </div>
 );
 
+/** ===== New: Behaviors of Concern options ===== */
+const BOC_OPTIONS = [
+  "Aggression",
+  "Self-injury (SIB)",
+  "Elopement",
+  "Property Destruction",
+  "Non-compliance",
+  "Other…",
+] as const;
+
 export default function ISPandBSP() {
+  /** ===== New: local UI state for BOC checkboxes =====
+   *  (Giữ trong component vì file gốc chỉ là UI; khi tích hợp với API,
+   *  có thể đưa state này lên trên qua props/onChange nếu cần.)
+   */
+  const [boc, setBoc] = React.useState<string[]>([]);
+  const [bocOther, setBocOther] = React.useState<string>("");
+
+  const toggleBoc = (label: string, checked: boolean) => {
+    setBoc((prev) => {
+      const s = new Set(prev);
+      if (checked) s.add(label);
+      else s.delete(label);
+      return Array.from(s);
+    });
+  };
+
+  const otherChecked = boc.includes("Other…");
+
   return (
     <div className="grid md:grid-cols-2 gap-6">
       {/* ========== ISP LEFT ========== */}
@@ -219,21 +247,45 @@ export default function ISPandBSP() {
 
         <Section title="Overview">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <L label="Behaviors of Concern" className="md:col-span-2">
-              <select
-                multiple
-                className="w-full mt-1 px-3 py-2 rounded-xl border border-bac-border bg-bac-panel h-28"
-              >
-                <option>Aggression</option>
-                <option>Self-injury (SIB)</option>
-                <option>Elopement</option>
-                <option>Property Destruction</option>
-                <option>Non-compliance</option>
-              </select>
-              <div className="text-xs text-bac-muted mt-1">
-                Hold CTRL/CMD to select multiple.
+            {/* ===== Updated: Behaviors of Concern → checkboxes + Other… ===== */}
+            <div className="md:col-span-2">
+              <div className="text-sm">Behaviors of Concern</div>
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-y-2">
+                {BOC_OPTIONS.map((label) => {
+                  const checked = boc.includes(label);
+                  return (
+                    <label
+                      key={label}
+                      className="inline-flex items-center gap-2 text-sm cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => toggleBoc(label, e.target.checked)}
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
               </div>
-            </L>
+
+              {otherChecked && (
+                <div className="mt-3">
+                  <L label="Other — please specify">
+                    <Input
+                      placeholder="Describe other behaviors…"
+                      value={bocOther}
+                      onChange={(e) => setBocOther(e.target.value)}
+                    />
+                  </L>
+                </div>
+              )}
+
+              <div className="text-xs text-bac-muted mt-2">
+                (Tick “Other…” to specify details.)
+              </div>
+            </div>
+
             <L label="Frequency">
               <Select defaultValue="Daily">
                 <option>Hourly</option>

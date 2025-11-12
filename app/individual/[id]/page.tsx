@@ -8,17 +8,25 @@ import React, {
   ChangeEvent,
 } from "react";
 import { useParams, useRouter } from "next/navigation";
+import ISPandBSP from "@/components/individual/ISPandBSP";
 
 /* =========================
    NAV / LAYOUT HELPERS
    ========================= */
-type TabKey = "profile" | "billing" | "clinical" | "equipment" | "preferences";
+type TabKey =
+  | "profile"
+  | "billing"
+  | "clinical"
+  | "equipment"
+  | "preferences"
+  | "ispbsp";
 const TABS = [
   { key: "profile", label: "Profile & Contacts" },
   { key: "billing", label: "Coverage & Billing" },
   { key: "clinical", label: "Clinical & Medication" },
   { key: "equipment", label: "Preparedness & Equipment" },
   { key: "preferences", label: "Preferences & Directives" },
+  { key: "ispbsp", label: "ISP & BSP" },
 ] as const;
 
 /* =========================
@@ -612,6 +620,9 @@ export default function IndividualDetailPage() {
           anyForm.advPhysician = "";
           anyForm.advAttach = "";
           return f;
+        case "ispbsp":
+          // No-op for now: giữ nguyên dữ liệu tab ISP/BSP (sẽ nối API sau)
+          return f;
       }
     });
   };
@@ -669,7 +680,7 @@ export default function IndividualDetailPage() {
     );
   }
 
-  // =================== RENDER TABS (giống trang New) ===================
+  // =================== RENDER TABS ===================
 
   return (
     <div className="p-6 space-y-5">
@@ -728,7 +739,7 @@ export default function IndividualDetailPage() {
               onClick={() => setActiveTab(t.key as TabKey)}
               className={
                 "px-3 py-2 -mb-px border-b-2 " +
-                (activeTab === t.key
+                (activeTab === (t.key as TabKey)
                   ? "border-white text-white"
                   : "border-transparent text-bac-muted hover:text-white")
               }
@@ -1154,7 +1165,7 @@ export default function IndividualDetailPage() {
       )}
 
       {/* ============================================================
-          TAB 2 — COVERAGE & BILLING  (giống trang New Individual)
+          TAB 2 — COVERAGE & BILLING
           ============================================================ */}
       {activeTab === "billing" && (
         <div className="space-y-8">
@@ -2198,6 +2209,15 @@ export default function IndividualDetailPage() {
               </Labeled>
             </div>
           </section>
+        </div>
+      )}
+
+      {/* ============================================================
+          TAB 6 — ISP & BSP
+          ============================================================ */}
+      {activeTab === "ispbsp" && (
+        <div className="space-y-4">
+          <ISPandBSP />
         </div>
       )}
     </div>
