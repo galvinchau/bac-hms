@@ -118,6 +118,9 @@ model Individual {
   scheduleShifts          ScheduleShift[]
   visits                  Visit[]
   ispAllocations          ISPAllocation[]
+
+  // ISP & BSP form (lưu toàn bộ dữ liệu form dạng JSON)
+  ispBspForm IspBspForm?
 }
 
 /*
@@ -493,4 +496,26 @@ model ISPAllocation {
   updatedAt    DateTime @updatedAt
 
   @@index([individualId, serviceId, startDate])
+}
+
+// =====================================================
+//  ISP & BSP FORM (lưu toàn bộ form dạng JSON)
+// =====================================================
+
+// =====================================================
+//  ISP & BSP FORM (lưu toàn bộ form dạng JSON)
+// =====================================================
+
+model IspBspForm {
+  /// lấy id của Individual làm khóa chính luôn
+  individualId String @id
+
+  /// toàn bộ dữ liệu form ISP & BSP sẽ lưu dạng JSON
+  formData     Json
+
+  /// quan hệ về Individual
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

@@ -2217,7 +2217,7 @@ export default function IndividualDetailPage() {
           ============================================================ */}
       {activeTab === "ispbsp" && (
         <div className="space-y-4">
-          <ISPandBSP />
+          <ISPandBSP individualId={id} />
         </div>
       )}
     </div>
