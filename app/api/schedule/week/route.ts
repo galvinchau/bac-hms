@@ -1,3 +1,4 @@
+// Redeploy Vercel - revert to local schedule logic
 // app/api/schedule/week/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
