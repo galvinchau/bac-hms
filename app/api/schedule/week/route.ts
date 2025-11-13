@@ -3,6 +3,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+process.env.TZ = "America/New_York";
+
 export const dynamic = "force-dynamic";
 
 // ===== Helpers =====
