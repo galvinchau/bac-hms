@@ -1,22 +1,36 @@
 // components/sidebar/Sidebar.tsx
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { ChevronDown } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 type SidebarProps = {
   onLogoClick?: () => void;
 };
 
-const MENU = [
+type MenuChild = {
+  label: string;
+  href: string;
+};
+
+type MenuItem = {
+  label: string;
+  href?: string;
+  children?: MenuChild[];
+};
+
+const MENU: MenuItem[] = [
   { label: "Programs", href: "/programs" },
- {
-  label: "Services",
-  children: [
-    { label: "New Service", href: "/services/new" },
-    { label: "Search Service", href: "/services/search" },
-  ],
-},
+  {
+    label: "Services",
+    children: [
+      { label: "New Service", href: "/services/new" },
+      { label: "Search Service", href: "/services/search" },
+    ],
+  },
   {
     label: "Individual",
     children: [
@@ -40,13 +54,168 @@ const MENU = [
   { label: "Reports", href: "/reports" },
 ];
 
-const ADMIN = [
+const ADMIN: MenuItem[] = [
   { label: "Manage Users", href: "/admin/users" },
   { label: "Manage User Roles", href: "/admin/roles" },
   { label: "Change Password", href: "/admin/password" },
 ];
 
 export default function Sidebar({ onLogoClick }: SidebarProps) {
+  const pathname = usePathname();
+  const [openParent, setOpenParent] = useState<string | null>(null);
+
+  // Auto open parent when on a child route (including Admin)
+  useEffect(() => {
+    let foundParent: string | null = null;
+
+    MENU.forEach((m) => {
+      if (!m.children) return;
+      const hasActiveChild = m.children.some((c) =>
+        pathname.startsWith(c.href)
+      );
+      if (hasActiveChild) {
+        foundParent = m.label;
+      }
+    });
+
+    const adminHasActive = ADMIN.some((a) =>
+      a.href ? pathname.startsWith(a.href) : false
+    );
+    if (adminHasActive) {
+      foundParent = "Admin";
+    }
+
+    if (foundParent) {
+      setOpenParent(foundParent);
+    }
+  }, [pathname]);
+
+  const toggleParent = (label: string) => {
+    setOpenParent((prev) => (prev === label ? null : label));
+  };
+
+  const renderMainItem = (m: MenuItem) => {
+    // Items without children (Programs, Schedule, Billing, Reports...)
+    if (!m.children && m.href) {
+      const isActive = pathname.startsWith(m.href);
+
+      return (
+        <Link
+          key={m.href}
+          href={m.href}
+          className={`block rounded-xl px-3 py-2 text-base font-medium transition-colors
+            ${
+              isActive
+                ? "bg-bac-panel text-yellow-200"
+                : "text-yellow-300 hover:bg-bac-panel/60 hover:text-yellow-200"
+            }`}
+        >
+          {m.label}
+        </Link>
+      );
+    }
+
+    // Items with children (Services, Individual, Employees)
+    const isOpen = openParent === m.label;
+
+    return (
+      <div key={m.label} className="mb-1">
+        <button
+          type="button"
+          onClick={() => toggleParent(m.label)}
+          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-base font-semibold transition-colors
+            ${
+              isOpen
+                ? "bg-bac-panel text-yellow-200"
+                : "text-yellow-300 hover:bg-bac-panel/60 hover:text-yellow-200"
+            }`}
+        >
+          <span className="font-semibold">{m.label}</span>
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${
+              isOpen ? "rotate-180" : "rotate-0"
+            }`}
+          />
+        </button>
+
+        {isOpen && m.children && (
+          <div className="mt-1 space-y-1 pl-4">
+            {m.children.map((c) => {
+              const isChildActive = pathname.startsWith(c.href);
+              return (
+                <Link
+                  key={c.href}
+                  href={c.href}
+                  className={`block rounded-lg px-3 py-1.5 text-sm italic transition-colors
+                    ${
+                      isChildActive
+                        ? "bg-bac-panel text-yellow-200"
+                        : "text-yellow-300 hover:bg-bac-panel/70 hover:text-yellow-200"
+                    }`}
+                >
+                  {c.label}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAdminChild = (a: MenuItem) => {
+    if (!a.href) return null;
+    const isActive = pathname.startsWith(a.href);
+
+    return (
+      <Link
+        key={a.href}
+        href={a.href}
+        className={`block rounded-lg px-3 py-1.5 text-sm italic transition-colors
+          ${
+            isActive
+              ? "bg-bac-panel text-yellow-200"
+              : "text-yellow-300 hover:bg-bac-panel/70 hover:text-yellow-200"
+          }`}
+      >
+        {a.label}
+      </Link>
+    );
+  };
+
+  const renderAdminSection = () => {
+    const isOpen = openParent === "Admin";
+
+    return (
+      <div className="mt-4 px-2">
+        {/* Admin as parent menu (yellow, bold, slightly bigger) */}
+        <button
+          type="button"
+          onClick={() => toggleParent("Admin")}
+          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-base font-semibold transition-colors
+            ${
+              isOpen
+                ? "bg-bac-panel text-yellow-200"
+                : "text-yellow-300 hover:bg-bac-panel/60 hover:text-yellow-200"
+            }`}
+        >
+          <span className="font-semibold">Admin</span>
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${
+              isOpen ? "rotate-180" : "rotate-0"
+            }`}
+          />
+        </button>
+
+        {isOpen && (
+          <div className="mt-1 space-y-1 pl-4">
+            {ADMIN.map((a) => renderAdminChild(a))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* LOGO + BRAND */}
@@ -60,7 +229,9 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
         >
           <Image src="/Logo.png" alt="Logo" width={28} height={28} />
           <div className="leading-4 text-left">
-            <div className="font-semibold">Blue Angels Care</div>
+            <div className="font-semibold text-yellow-300">
+              Blue Angels Care
+            </div>
             <div className="text-xs text-bac-muted">
               Health Management System
             </div>
@@ -73,51 +244,12 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
         <div className="px-4 text-xs uppercase tracking-wide text-bac-muted mb-2">
           Dashboard
         </div>
+
         <nav className="space-y-1 px-2">
-          {MENU.map((m) =>
-            m.children ? (
-              <div key={m.label} className="mb-1">
-                <div className="px-2 py-1 text-sm text-bac-muted">
-                  {m.label}
-                </div>
-                <div className="ml-2 space-y-1">
-                  {m.children.map((c) => (
-                    <Link
-                      key={c.href}
-                      href={c.href}
-                      className="block px-2 py-1 rounded hover:bg-bac-panel"
-                    >
-                      {c.label}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <Link
-                key={m.href}
-                href={m.href}
-                className="block px-2 py-1 rounded hover:bg-bac-panel"
-              >
-                {m.label}
-              </Link>
-            )
-          )}
+          {MENU.map((m) => renderMainItem(m))}
         </nav>
 
-        <div className="px-4 mt-4 text-xs uppercase tracking-wide text-bac-muted mb-2">
-          Admin
-        </div>
-        <nav className="space-y-1 px-2">
-          {ADMIN.map((a) => (
-            <Link
-              key={a.href}
-              href={a.href}
-              className="block px-2 py-1 rounded hover:bg-bac-panel"
-            >
-              {a.label}
-            </Link>
-          ))}
-        </nav>
+        {renderAdminSection()}
       </div>
     </div>
   );
