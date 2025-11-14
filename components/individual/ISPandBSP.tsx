@@ -101,18 +101,18 @@ export default function ISPandBSP({ individualId }: ISPandBSPProps) {
 
   const handleChange =
     (field: keyof IspBspFormValues) =>
-    (
-      e:
-        | React.ChangeEvent<HTMLInputElement>
-        | React.ChangeEvent<HTMLTextAreaElement>
-        | React.ChangeEvent<HTMLSelectElement>
-    ) => {
-      const value = e.target.value;
-      setForm((prev) => ({
-        ...prev,
-        [field]: value,
-      }));
-    };
+      (
+        e:
+          | React.ChangeEvent<HTMLInputElement>
+          | React.ChangeEvent<HTMLTextAreaElement>
+          | React.ChangeEvent<HTMLSelectElement>
+      ) => {
+        const value = e.target.value;
+        setForm((prev) => ({
+          ...prev,
+          [field]: value,
+        }));
+      };
 
   const boc = form.behaviorsOfConcern || [];
 
@@ -144,14 +144,22 @@ export default function ISPandBSP({ individualId }: ISPandBSPProps) {
         <div className="text-xs text-bac-muted min-h-[1.25rem]">
           {loading && "Loading ISP/BSP data…"}
           {!loading && saving && "Saving ISP/BSP data…"}
-          {!loading && !saving && error && (
+
+          {/* NEW INDIVIDUAL: chưa có id nên chỉ hiển thị hướng dẫn, không báo lỗi */}
+          {!loading && !saving && !individualId && (
+            <span>
+              ISP &amp; BSP will be available after this Individual is created.
+              Please create/save the Individual first, then open it again from
+              “Search Individual”. Galvin!
+            </span>
+          )}
+
+          {/* ĐÃ CÓ individualId: lúc này mới hiển thị error/success thật sự */}
+          {!loading && !saving && individualId && error && (
             <span className="text-red-400">{error}</span>
           )}
-          {!loading && !saving && !error && success && (
+          {!loading && !saving && individualId && !error && success && (
             <span className="text-green-400">{success}</span>
-          )}
-          {!loading && !saving && !error && !success && !individualId && (
-            <span>Please select an Individual to enable saving.</span>
           )}
         </div>
         <button
