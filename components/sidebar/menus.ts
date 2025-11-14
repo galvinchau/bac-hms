@@ -55,7 +55,7 @@ export const MAIN_ITEMS: MenuItem[] = [
 /** ========= ADMIN ITEMS ========= **/
 export const ADMIN_ITEMS: MenuItem[] = [
   { label: "Manage Users", href: "/admin/users" },
-  { label: "Manage User Roles", href: "/admin/roles" },
+  { label: "Manage User Roles", href: "/admin/user-roles" },
   { label: "Change Password", href: "/admin/change-password" },
 ];
 
