@@ -191,6 +191,9 @@ model Employee {
   plannedShifts         ScheduleShift[]       @relation("PlannedDSP")
   actualShifts          ScheduleShift[]       @relation("ActualDSP")
   visits                Visit[]               @relation("VisitDSP")
+
+  // Supervisors cho Admin Users
+  userSupervisors UserSupervisor[]
 }
 
 /**
@@ -294,18 +297,18 @@ model Service {
 // =====================================================
 
 enum ScheduleStatus {
-  NOT_STARTED // chưa đến giờ, chưa có visit
-  IN_PROGRESS // đã check in, chưa check out
-  COMPLETED // có visit đầy đủ, đã đối soát
+  NOT_STARTED   // chưa đến giờ, chưa có visit
+  IN_PROGRESS   // đã check in, chưa check out
+  COMPLETED     // có visit đầy đủ, đã đối soát
   NOT_COMPLETED // có check in nhưng hết ca mà chưa check out
-  CANCELLED // ca bị hủy (thường do Individual)
-  BACKUP_PLAN // ca có backup DSP thay thế DSP gốc
+  CANCELLED     // ca bị hủy (thường do Individual)
+  BACKUP_PLAN   // ca có backup DSP thay thế DSP gốc
 }
 
 enum VisitSource {
-  MOBILE // DSP check in/out từ app điện thoại
+  MOBILE      // DSP check in/out từ app điện thoại
   OFFICE_EDIT // văn phòng nhập / chỉnh tay
-  AUTO_MATCH // hệ thống tự gắn visit với ca schedule
+  AUTO_MATCH  // hệ thống tự gắn visit với ca schedule
 }
 
 enum CancelledBy {
@@ -321,15 +324,15 @@ enum CancelledBy {
 model MasterScheduleTemplate {
   id            String    @id @default(cuid())
   individualId  String
-  name          String? // VD: "Weekday template"
-  effectiveFrom DateTime // ngày bắt đầu áp dụng
+  name          String?   // VD: "Weekday template"
+  effectiveFrom DateTime  // ngày bắt đầu áp dụng
   effectiveTo   DateTime? // null = áp dụng vô thời hạn
   isActive      Boolean   @default(true)
   notes         String?
 
   individual    Individual            @relation(fields: [individualId], references: [id], onDelete: Cascade)
   shifts        MasterTemplateShift[]
-  scheduleWeeks ScheduleWeek[] // <== thêm dòng này để làm đầu kia của relation
+  scheduleWeeks ScheduleWeek[] // đầu kia của relation
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -340,7 +343,7 @@ model MasterScheduleTemplate {
 model MasterTemplateShift {
   id         String @id @default(cuid())
   templateId String
-  dayOfWeek  Int // 0 = Sun, 6 = Sat
+  dayOfWeek  Int    // 0 = Sun, 6 = Sat
   serviceId  String
 
   // Thời gian trong ngày, tính theo phút từ 00:00 (VD: 7h = 420)
@@ -369,7 +372,7 @@ model MasterTemplateShift {
 model ScheduleWeek {
   id                    String   @id @default(cuid())
   individualId          String
-  templateId            String? // generate từ template nào (nếu có)
+  templateId            String?  // generate từ template nào (nếu có)
   weekStart             DateTime // Chủ nhật 00:00
   weekEnd               DateTime // Thứ 7 23:59 hoặc weekStart + 7 ngày
   generatedFromTemplate Boolean  @default(true)
@@ -448,8 +451,8 @@ model Visit {
   source VisitSource @default(MOBILE)
 
   // cache sẵn để report nhanh (tính khi close visit)
-  durationMinutes   Int? // tổng số phút (Out - In, có xử lý qua ngày)
-  units             Int? // số unit 15 phút
+  durationMinutes   Int?    // tổng số phút (Out - In, có xử lý qua ngày)
+  units             Int?    // số unit 15 phút
   isBillable        Boolean @default(true)
   nonBillableReason String?
 
@@ -479,7 +482,7 @@ model ISPAllocation {
   serviceId    String
   payerId      String? // Medicaid, ODP, etc.
 
-  startDate DateTime // ngày bắt đầu ủy quyền
+  startDate DateTime  // ngày bắt đầu ủy quyền
   endDate   DateTime? // ngày kết thúc (hết hợp đồng)
 
   unitsPerWeek         Int? // ISP quy định mỗi tuần bao nhiêu unit
@@ -507,8 +510,94 @@ model IspBspForm {
   individualId String   @unique
   formData     Json
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  individual Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+}
+
+// =====================================================
+//  ADMIN USERS / ROLES / PRIVILEGES
+// =====================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  firstName String
+  lastName  String
+  locked    Boolean  @default(false)
+  userType  String   @default("ADMIN") // ADMIN / COORDINATOR / DSP / ...
+
+  roles       UserRole[]
+  privileges  UserPrivilege[]
+  supervisors UserSupervisor[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admin_users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  code        String   @unique   // vd: "COORDINATOR"
+  name        String              // label hiển thị đẹp
+  description String?
+
+  users UserRole[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admin_roles")
+}
+
+model Privilege {
+  id          String   @id @default(cuid())
+  code        String   @unique   // vd: "CLIENT_ACCESS_MODULE"
+  name        String              // label hiển thị dài
+  description String?
+
+  users UserPrivilege[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admin_privileges")
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  roleId String
+
+  @@unique([userId, roleId])
+
+  @@map("admin_user_roles")
+}
+
+model UserPrivilege {
+  id          String    @id @default(cuid())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  privilege   Privilege @relation(fields: [privilegeId], references: [id], onDelete: Cascade)
+  privilegeId String
+
+  @@unique([userId, privilegeId])
+
+  @@map("admin_user_privileges")
+}
+
+model UserSupervisor {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  supervisor   Employee @relation(fields: [supervisorId], references: [id], onDelete: Cascade)
+  supervisorId String
+
+  @@unique([userId, supervisorId])
+
+  @@map("admin_user_supervisors")
 }
