@@ -7,10 +7,9 @@ export default function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -23,73 +22,48 @@ export default function ChangePasswordPage() {
     }
 
     if (newPassword !== confirmPassword) {
-      setError("New password and confirmation do not match.");
+      setError("New password confirmation does not match.");
       return;
     }
 
-    if (newPassword.length < 8) {
-      setError("New password must be at least 8 characters.");
-      return;
-    }
-
+    // Hiện tại chưa có hệ thống đăng nhập / password thật,
+    // nên form này chỉ làm UI + validate cơ bản.
+    // Sau này khi có auth backend, mình sẽ gọi API đổi mật khẩu ở đây.
     setSaving(true);
     try {
-      // TODO: implement real API when authentication is ready.
-      // For now we just simulate a short delay.
-      await new Promise((resolve) => setTimeout(resolve, 700));
-
-      console.log("Change password requested", {
-        currentPassword,
-        newPassword,
-      });
-
+      await new Promise((resolve) => setTimeout(resolve, 600));
       setSuccess(
-        "Your password change request has been submitted (demo only – backend not implemented yet)."
+        "Password form submitted (demo only). Backend change will be added later."
       );
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch (err: any) {
-      console.error(err);
-      setError("Failed to change password. Please try again.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="p-6 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Change Password</h1>
-      </div>
+    <div className="p-6 max-w-xl">
+      <h1 className="text-2xl font-semibold mb-4">Change Password</h1>
 
-      {/* Alerts */}
+      <p className="text-sm text-bac-muted mb-4">
+        This screen provides the password change form UI. Actual password
+        changes will be connected when the authentication system is enabled.
+      </p>
+
       {error && (
-        <div className="rounded-xl border border-red-500/60 bg-red-500/10 px-3 py-2 text-sm">
+        <div className="mb-3 rounded-xl border border-red-500/60 bg-red-500/10 px-3 py-2 text-sm">
           {error}
         </div>
       )}
       {success && (
-        <div className="rounded-xl border border-bac-green bg-bac-green/10 px-3 py-2 text-sm">
+        <div className="mb-3 rounded-xl border border-bac-green bg-bac-green/10 px-3 py-2 text-sm">
           {success}
         </div>
       )}
 
-      {/* Info note */}
-      <div className="rounded-xl border border-bac-border bg-bac-panel px-4 py-3 text-xs text-bac-muted">
-        <div className="font-semibold mb-1 text-sm text-bac-text">
-          Note
-        </div>
-        <p>
-          This screen currently provides the user interface and validation only.
-          The actual password change logic will be connected once the
-          authentication backend for BAC-HMS is implemented.
-        </p>
-      </div>
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="text-xs font-semibold text-bac-muted uppercase">
             Current Password *
@@ -114,10 +88,6 @@ export default function ChangePasswordPage() {
             onChange={(e) => setNewPassword(e.target.value)}
             autoComplete="new-password"
           />
-          <p className="mt-1 text-[11px] text-bac-muted">
-            Minimum 8 characters. Use a mix of letters, numbers, and symbols
-            for better security.
-          </p>
         </div>
 
         <div>

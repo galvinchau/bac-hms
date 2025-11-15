@@ -532,6 +532,11 @@ model User {
   privileges  UserPrivilege[]
   supervisors UserSupervisor[]
 
+  // ====== NEW: password fields ======
+  passwordHash      String?
+  passwordSalt      String?
+  passwordUpdatedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
