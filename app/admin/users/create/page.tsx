@@ -25,7 +25,8 @@ type Supervisor = {
 type Lookups = {
   roles: Role[];
   privileges: Privilege[];
-  supervisors: Supervisor[];
+  // supervisors vẫn có thể trả về từ API nhưng ta không dùng nữa
+  supervisors?: Supervisor[];
 };
 
 export default function CreateUserPage() {
@@ -45,9 +46,6 @@ export default function CreateUserPage() {
   // Assigned ids
   const [assignedRoleIds, setAssignedRoleIds] = useState<string[]>([]);
   const [assignedPrivilegeIds, setAssignedPrivilegeIds] = useState<string[]>(
-    []
-  );
-  const [assignedSupervisorIds, setAssignedSupervisorIds] = useState<string[]>(
     []
   );
 
@@ -113,7 +111,7 @@ export default function CreateUserPage() {
           userType,
           roleIds: assignedRoleIds,
           privilegeIds: assignedPrivilegeIds,
-          supervisorIds: assignedSupervisorIds,
+          // supervisorIds bỏ hẳn, vì ta không dùng supervisor ở màn này nữa
         }),
       });
 
@@ -135,10 +133,14 @@ export default function CreateUserPage() {
     }
   }
 
+  // ====== FILTER ROLES: bỏ DSP khỏi Available / Assigned ======
+  const allRoles = lookups?.roles ?? [];
+  const rolesWithoutDSP = allRoles.filter((r) => r.code !== "DSP");
+
   const availableRoles =
-    lookups?.roles.filter((r) => !assignedRoleIds.includes(r.id)) ?? [];
+    rolesWithoutDSP.filter((r) => !assignedRoleIds.includes(r.id)) ?? [];
   const assignedRoles =
-    lookups?.roles.filter((r) => assignedRoleIds.includes(r.id)) ?? [];
+    rolesWithoutDSP.filter((r) => assignedRoleIds.includes(r.id)) ?? [];
 
   const availablePrivileges =
     lookups?.privileges.filter((p) => !assignedPrivilegeIds.includes(p.id)) ??
@@ -147,12 +149,7 @@ export default function CreateUserPage() {
     lookups?.privileges.filter((p) => assignedPrivilegeIds.includes(p.id)) ??
     [];
 
-  const availableSupervisors =
-    lookups?.supervisors.filter((s) => !assignedSupervisorIds.includes(s.id)) ??
-    [];
-  const assignedSupervisors =
-    lookups?.supervisors.filter((s) => assignedSupervisorIds.includes(s.id)) ??
-    [];
+  // Supervisors đã bỏ không dùng nữa
 
   return (
     <div className="p-6 space-y-4">
@@ -250,9 +247,8 @@ export default function CreateUserPage() {
             >
               <option value="ADMIN">ADMIN</option>
               <option value="COORDINATOR">COORDINATOR</option>
-              <option value="DSP">DSP</option>
               <option value="STAFF">STAFF</option>
-              {/* sau này anh muốn thêm type nào thì bổ sung ở đây */}
+              {/* Không cho chọn DSP ở đây nữa */}
             </select>
           </div>
         </div>
@@ -390,75 +386,7 @@ export default function CreateUserPage() {
               </div>
             </div>
 
-            {/* SUPERVISORS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs font-semibold text-bac-muted uppercase mb-1">
-                  Available Supervisors
-                </div>
-                <div className="rounded-xl border border-bac-border bg-bac-panel max-h-60 overflow-auto text-sm">
-                  {availableSupervisors.map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between px-3 py-1 border-b border-bac-border/40 last:border-b-0"
-                    >
-                      <span>
-                        {s.code} - {s.name}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-xs underline"
-                        onClick={() =>
-                          setAssignedSupervisorIds((prev) =>
-                            assignItem(prev, s.id)
-                          )
-                        }
-                      >
-                        &gt;&gt;
-                      </button>
-                    </div>
-                  ))}
-                  {availableSupervisors.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No more supervisors.
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-bac-muted uppercase mb-1">
-                  Assigned Supervisors
-                </div>
-                <div className="rounded-xl border border-bac-border bg-bac-panel max-h-60 overflow-auto text-sm">
-                  {assignedSupervisors.map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between px-3 py-1 border-b border-bac-border/40 last:border-b-0"
-                    >
-                      <span>
-                        {s.code} - {s.name}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-xs underline"
-                        onClick={() =>
-                          setAssignedSupervisorIds((prev) =>
-                            unassignItem(prev, s.id)
-                          )
-                        }
-                      >
-                        &lt;&lt;
-                      </button>
-                    </div>
-                  ))}
-                  {assignedSupervisors.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No supervisors assigned.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            {/* SUPERVISORS section đã bỏ hoàn toàn */}
           </>
         )}
 

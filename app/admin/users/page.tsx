@@ -17,16 +17,36 @@ type UserRow = {
 export default function ManageUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+
     fetch("/api/admin/users")
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to load users");
+      .then(async (r) => {
+        if (!r.ok) {
+          const msg = await r.text().catch(() => "");
+          console.error(
+            "GET /api/admin/users error:",
+            r.status,
+            msg || r.statusText
+          );
+          setError(
+            msg || `Failed to load users (status ${r.status}).`
+          );
+          return null;
+        }
         return r.json();
       })
-      .then((data: UserRow[]) => setUsers(data))
+      .then((data: UserRow[] | null) => {
+        if (data) {
+          setUsers(data);
+        }
+      })
       .catch((err) => {
-        console.error(err);
+        console.error("GET /api/admin/users error:", err);
+        setError(err.message || "Failed to load users.");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -37,7 +57,7 @@ export default function ManageUsersPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Manage Users</h1>
 
-        {/* Nút CREATE USER – tạm thời trỏ tới /admin/users/create (sẽ làm bước sau) */}
+        {/* Nút CREATE USER */}
         <Link
           href="/admin/users/create"
           className="px-4 py-2 rounded-xl bg-bac-primary text-white text-sm font-medium hover:opacity-90"
@@ -45,6 +65,13 @@ export default function ManageUsersPage() {
           CREATE USER
         </Link>
       </div>
+
+      {/* Alert lỗi nếu có */}
+      {error && (
+        <div className="rounded-xl border border-red-500/70 bg-red-500/10 px-3 py-2 text-sm">
+          {error}
+        </div>
+      )}
 
       {/* Bảng danh sách */}
       <div className="bg-bac-panel border border-bac-border rounded-2xl overflow-hidden">
@@ -67,6 +94,15 @@ export default function ManageUsersPage() {
                   colSpan={6}
                 >
                   Loading users...
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td
+                  className="px-3 py-4 text-center text-bac-muted"
+                  colSpan={6}
+                >
+                  Failed to load users. Please refresh the page.
                 </td>
               </tr>
             ) : users.length === 0 ? (

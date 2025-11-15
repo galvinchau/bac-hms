@@ -1,11 +1,42 @@
 // app/api/admin/users/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function POST(req: NextRequest) {
+// ===== GET: list all users for Manage Users page =====
+export async function GET() {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: { email: "asc" },
+      include: {
+        roles: {
+          include: {
+            role: true,
+          },
+        },
+      },
+    });
+
+    const payload = users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      locked: u.locked,
+      userType: u.userType,
+      roles: u.roles.map((ur) => ur.role.code),
+    }));
+
+    return NextResponse.json(payload);
+  } catch (err) {
+    console.error("GET /api/admin/users error:", err);
+    return new NextResponse("Internal Server Error", { status: 500 });
+  }
+}
+
+// ===== POST: create new user from Create User screen =====
+export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     const {
       email,
       firstName,
@@ -15,18 +46,8 @@ export async function POST(req: NextRequest) {
       roleIds,
       privilegeIds,
       supervisorIds,
-    } = body as {
-      email: string;
-      firstName: string;
-      lastName: string;
-      locked: boolean;
-      userType: string;
-      roleIds: string[];
-      privilegeIds: string[];
-      supervisorIds: string[];
-    };
+    } = body;
 
-    // ====== Basic validation ======
     if (!email || !firstName || !lastName) {
       return NextResponse.json(
         { error: "Missing required fields." },
@@ -34,10 +55,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check trùng email
     const existing = await prisma.user.findUnique({
       where: { email },
     });
+
     if (existing) {
       return NextResponse.json(
         { error: "This email/username already exists." },
@@ -45,59 +66,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ====== Transaction: create user + gán roles/privileges/supervisors ======
-    const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email,
-          firstName,
-          lastName,
-          locked: !!locked,
-          userType: userType || "ADMIN",
-        },
-      });
-
-      // Roles
-      if (Array.isArray(roleIds) && roleIds.length > 0) {
-        await tx.userRole.createMany({
-          data: roleIds.map((roleId) => ({
-            userId: user.id,
-            roleId,
-          })),
-        });
-      }
-
-      // Privileges
-      if (Array.isArray(privilegeIds) && privilegeIds.length > 0) {
-        await tx.userPrivilege.createMany({
-          data: privilegeIds.map((privilegeId) => ({
-            userId: user.id,
-            privilegeId,
-          })),
-        });
-      }
-
-      // Supervisors
-      if (Array.isArray(supervisorIds) && supervisorIds.length > 0) {
-        await tx.userSupervisor.createMany({
-          data: supervisorIds.map((supervisorId) => ({
-            userId: user.id,
-            supervisorId,
-          })),
-        });
-      }
-
-      return user;
+    const user = await prisma.user.create({
+      data: {
+        email,
+        firstName,
+        lastName,
+        locked: !!locked,
+        userType,
+      },
     });
 
-    return NextResponse.json(
-      {
-        id: result.id,
-        email: result.email,
-      },
-      { status: 201 }
-    );
-  } catch (err: any) {
+    if (Array.isArray(roleIds) && roleIds.length > 0) {
+      await prisma.userRole.createMany({
+        data: roleIds.map((roleId: string) => ({
+          userId: user.id,
+          roleId,
+        })),
+      });
+    }
+
+    if (Array.isArray(privilegeIds) && privilegeIds.length > 0) {
+      await prisma.userPrivilege.createMany({
+        data: privilegeIds.map((privilegeId: string) => ({
+          userId: user.id,
+          privilegeId,
+        })),
+      });
+    }
+
+    if (Array.isArray(supervisorIds) && supervisorIds.length > 0) {
+      await prisma.userSupervisor.createMany({
+        data: supervisorIds.map((supervisorId: string) => ({
+          userId: user.id,
+          supervisorId,
+        })),
+      });
+    }
+
+    return NextResponse.json({ success: true, id: user.id });
+  } catch (err) {
     console.error("POST /api/admin/users error:", err);
     return NextResponse.json(
       { error: "Failed to create user." },
