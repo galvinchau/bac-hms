@@ -2,13 +2,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-type Params = { params: { id: string } };
-
-// GET /api/admin/users/:id  -> load chi tiết user + roles/privileges/supervisors
-export async function GET(_req: NextRequest, { params }: Params) {
+// Helper: lấy id từ URL, ví dụ /api/admin/users/123 => "123"
+function getUserIdFromUrl(req: NextRequest): string | null {
   try {
+    const url = new URL(req.url);
+    const segments = url.pathname.split("/").filter(Boolean);
+    // [..., "api", "admin", "users", "<id>"]
+    const id = segments[segments.length - 1];
+    if (!id || id === "users") return null;
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+// =========================================
+// GET /api/admin/users/:id
+// Load chi tiết user + roles/privileges
+// =========================================
+export async function GET(req: NextRequest) {
+  try {
+    const id = getUserIdFromUrl(req);
+    if (!id) {
+      return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         roles: { include: { role: true } },
         privileges: { include: { privilege: true } },
@@ -44,9 +64,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 }
 
-// PUT /api/admin/users/:id -> update user + gán lại roles/privileges/supervisors
-export async function PUT(req: NextRequest, { params }: Params) {
+// =========================================
+// PUT /api/admin/users/:id
+// Update user + gán lại roles/privileges/supervisors
+// =========================================
+export async function PUT(req: NextRequest) {
   try {
+    const id = getUserIdFromUrl(req);
+    if (!id) {
+      return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+    }
+
     const body = await req.json();
     const {
       email,
@@ -79,7 +107,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const existing = await prisma.user.findFirst({
       where: {
         email,
-        NOT: { id: params.id },
+        NOT: { id },
       },
     });
     if (existing) {
@@ -91,7 +119,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const updated = await prisma.$transaction(async (tx) => {
       const user = await tx.user.update({
-        where: { id: params.id },
+        where: { id },
         data: {
           email,
           firstName,
