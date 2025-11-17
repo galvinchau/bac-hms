@@ -1,17 +1,15 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -22,17 +20,11 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
 
-    try {
-      // TODO: Replace with real authentication later.
-      // For now just simulate success and go to dashboard.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      router.push("/dashboard");
-    } catch (err) {
-      console.error(err);
-      setError("Login failed. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    // TODO: replace with real authentication later.
+    // For now, just redirect to dashboard.
+    setTimeout(() => {
+      window.location.href = "/dashboard";
+    }, 300);
   }
 
   return (
