@@ -1,103 +1,104 @@
-// app/login/page.tsx
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const from = searchParams.get("from") || "/";
-
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    setLoading(true);
+
+    if (!username || !password) {
+      setError("Please enter both username and password.");
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.ok) {
-        setError(data.error || "Invalid username or password.");
-        return;
-      }
-
-      // ✅ Đã set cookie, redirect về trang cũ hoặc "/"
-      router.push(from || "/");
+      // TODO: Replace with real authentication later.
+      // For now just simulate success and go to dashboard.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      router.push("/dashboard");
     } catch (err) {
       console.error(err);
-      setError("Failed to sign in.");
+      setError("Login failed. Please try again.");
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bac-bg">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-2xl border border-bac-border bg-bac-panel px-6 py-8 space-y-4"
-      >
-        <h1 className="text-xl font-semibold text-center">Blue Angels Care</h1>
-        <p className="text-xs text-bac-muted text-center">
-          Health Management System – Sign in
-        </p>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs">
-            {error}
+    <div className="min-h-screen bg-bac-bg flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border border-bac-border bg-bac-panel p-8 shadow-lg">
+        <div className="text-center mb-6">
+          <div className="text-2xl font-semibold text-bac-text">
+            Blue Angels Care
           </div>
-        )}
-
-        <div>
-          <label className="text-xs font-semibold text-bac-muted uppercase">
-            Username / Email
-          </label>
-          <input
-            type="email"
-            className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
-          />
+          <div className="text-sm text-bac-muted mt-1">
+            Health Management System
+          </div>
         </div>
 
-        <div>
-          <label className="text-xs font-semibold text-bac-muted uppercase">
-            Password
-          </label>
-          <input
-            type="password"
-            className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-bac-text">
+              Username
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary"
+              autoComplete="username"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-bac-text">
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary"
+              autoComplete="current-password"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full rounded-xl bg-bac-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {isSubmitting ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+
+        <div className="mt-4 flex items-center justify-between text-xs text-bac-muted">
+          <Link
+            href="/change-password"
+            className="text-bac-primary hover:underline"
+          >
+            Change password
+          </Link>
+          <span>© {new Date().getFullYear()} Blue Angels Care</span>
         </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full mt-2 rounded-xl bg-bac-primary text-white text-sm font-semibold py-2 disabled:opacity-60"
-        >
-          {loading ? "Signing in..." : "SIGN IN"}
-        </button>
-
-        <p className="text-[11px] text-bac-muted text-center">
-          If you forget your password, please contact the system administrator.
-        </p>
-      </form>
+      </div>
     </div>
   );
 }
