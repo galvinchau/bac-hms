@@ -63,8 +63,24 @@ const ADMIN: MenuItem[] = [
 export default function Sidebar({ onLogoClick }: SidebarProps) {
   const pathname = usePathname();
   const [openParent, setOpenParent] = useState<string | null>(null);
+  const [userType, setUserType] = useState<string | null>(null);
 
-  // Auto open parent when on a child route (including Admin)
+  // Lấy thông tin user hiện tại để biết có phải ADMIN không
+  useEffect(() => {
+    const loadMe = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (!res.ok) return;
+        const data = await res.json();
+        setUserType(data.user?.userType ?? null);
+      } catch (err) {
+        console.error("Failed to load current user", err);
+      }
+    };
+    loadMe();
+  }, []);
+
+  // Auto mở group cha nếu đang ở trong child
   useEffect(() => {
     let foundParent: string | null = null;
 
@@ -95,7 +111,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
   };
 
   const renderMainItem = (m: MenuItem) => {
-    // Items without children (Programs, Schedule, Billing, Reports...)
     if (!m.children && m.href) {
       const isActive = pathname.startsWith(m.href);
 
@@ -115,7 +130,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
       );
     }
 
-    // Items with children (Services, Individual, Employees)
     const isOpen = openParent === m.label;
 
     return (
@@ -184,11 +198,13 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
   };
 
   const renderAdminSection = () => {
+    // Nếu không phải ADMIN thì không render menu Admin
+    if (userType !== "ADMIN") return null;
+
     const isOpen = openParent === "Admin";
 
     return (
       <div className="mt-4 px-2">
-        {/* Admin as parent menu (yellow, bold, slightly bigger) */}
         <button
           type="button"
           onClick={() => toggleParent("Admin")}
@@ -220,8 +236,8 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     <div className="h-full flex flex-col">
       {/* LOGO + BRAND */}
       <div className="h-14 flex items-center gap-3 px-4 border-b border-bac-border">
-        <button
-          type="button"
+        <Link
+          href="/dashboard"
           onClick={onLogoClick}
           className="flex items-center gap-3 hover:opacity-90"
           aria-label="Go to dashboard"
@@ -236,7 +252,7 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
               Health Management System
             </div>
           </div>
-        </button>
+        </Link>
       </div>
 
       {/* NAV */}
