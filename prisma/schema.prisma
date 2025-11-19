@@ -606,3 +606,147 @@ model UserSupervisor {
 
   @@map("admin_user_supervisors")
 }
+
+// =====================================================
+//  MEDICATION MODULE (Orders, MAR, Inventory, Incidents)
+// =====================================================
+
+// Loại order: thuốc lịch (Scheduled) hay PRN
+enum MedicationType {
+  SCHEDULED
+  PRN
+}
+
+// Trạng thái order
+enum MedicationOrderStatus {
+  ACTIVE
+  ON_HOLD
+  DISCONTINUED
+}
+
+// Trạng thái từng lần uống/tiêm trong MAR
+enum MedicationAdminStatus {
+  GIVEN
+  REFUSED
+  MISSED
+  HELD
+  LATE
+  ERROR
+}
+
+// Mức độ nghiêm trọng của incident
+enum MedicationIncidentSeverity {
+  LOW
+  MODERATE
+  HIGH
+}
+
+// Trạng thái xử lý incident
+enum MedicationIncidentStatus {
+  OPEN
+  IN_REVIEW
+  CLOSED
+}
+
+/**
+ * MedicationOrder = y lệnh thuốc (đơn thuốc) cho từng Individual
+ */
+model MedicationOrder {
+  id           String                 @id @default(cuid())
+  individualId String                 // link sang Individual qua id (string)
+  medicationName String
+  form         String?                // tablet, capsule, solution...
+  doseValue    Float
+  doseUnit     String                 // mg, ml, tablet...
+  route        String                 // PO, IM, IV, SQ...
+  type         MedicationType
+  frequencyText String?               // BID, TID, QHS...
+  timesOfDay   String[]               // ["08:00","20:00"]
+  startDate    DateTime
+  endDate      DateTime?
+  status       MedicationOrderStatus  @default(ACTIVE)
+
+  prescriberName String?
+  pharmacyName   String?
+  indications    String?              // lý do dùng thuốc
+  allergyFlag    Boolean              @default(false)
+
+  // Relations nội bộ Medication
+  administrations MedicationAdministration[]
+  inventoryItems  MedicationInventory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([individualId, status])
+}
+
+/**
+ * MedicationAdministration = mỗi lần cấp thuốc trong MAR
+ */
+model MedicationAdministration {
+  id                String                @id @default(cuid())
+  orderId           String
+  order             MedicationOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  individualId      String                // lưu thêm để query nhanh
+  scheduledDateTime DateTime
+  actualDateTime    DateTime?
+  status            MedicationAdminStatus
+  reason            String?               // reason/refused/missed...
+  vitalsSummary     String?               // "BP 120/70, HR 76, BG 145"
+  staffId           String?               // id DSP
+  staffName         String?               // tên DSP, cache để không phải join
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([individualId, scheduledDateTime])
+  @@index([orderId, scheduledDateTime])
+}
+
+/**
+ * MedicationInventory = tồn kho thuốc theo từng Individual
+ */
+model MedicationInventory {
+  id             String           @id @default(cuid())
+  orderId        String?
+  order          MedicationOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  individualId   String
+  medicationName String           // cache tên thuốc để xem nhanh
+  isControlled   Boolean          @default(false)
+  currentQuantity Float
+  unit           String           // tablet, ml...
+  minThreshold   Float            @default(0)
+  daysRemaining  Int?
+  lastCountDate  DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([individualId])
+  @@index([individualId, isControlled])
+}
+
+/**
+ * MedicationIncident = lỗi thuốc, Missed dose, Medication error...
+ */
+model MedicationIncident {
+  id             String                    @id @default(cuid())
+  individualId   String
+  individualName String
+  date           DateTime
+  medicationName String?
+  type           String                    // "Missed Dose", "Medication Error", ...
+  severity       MedicationIncidentSeverity
+  status         MedicationIncidentStatus  @default(OPEN)
+  notes          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([individualId, date])
+  @@index([severity])
+  @@index([status])
+}
