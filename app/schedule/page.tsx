@@ -241,6 +241,8 @@ export default function SchedulePage() {
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
   const [editShiftDeleting, setEditShiftDeleting] = useState(false);
+  const [editShiftCheckIn, setEditShiftCheckIn] = useState<string>("");
+  const [editShiftCheckOut, setEditShiftCheckOut] = useState<string>("");
 
   // Modal edit master event
   const [editingMasterShift, setEditingMasterShift] =
@@ -957,12 +959,21 @@ export default function SchedulePage() {
     setEditShiftEnd(formatTime(shift.plannedEnd));
     setEditShiftStatus(shift.status);
     setEditShiftNotes(shift.notes ?? "");
+    const firstVisit = shift.visits[0];
+    setEditShiftCheckIn(firstVisit ? formatTime(firstVisit.checkInAt) : "");
+    setEditShiftCheckOut(
+      firstVisit && firstVisit.checkOutAt
+        ? formatTime(firstVisit.checkOutAt)
+        : ""
+    );
   }
 
   function closeEditShift() {
     setEditingShift(null);
     setEditShiftSaving(false);
     setEditShiftDeleting(false);
+    setEditShiftCheckIn("");
+    setEditShiftCheckOut("");
   }
 
   async function handleSaveShiftEdit() {
@@ -990,24 +1001,66 @@ export default function SchedulePage() {
       endMinutes >= startMinutes ? baseDate : addDays(baseDate, 1);
     const plannedEndIso = makeDate(endBase, endMinutes);
 
+    // Xử lý giờ Check in / Check out (nếu admin nhập)
+    let visitCheckInIso: string | null = null;
+    let visitCheckOutIso: string | null = null;
+    let ciMinutes: number | null = null;
+    let coMinutes: number | null = null;
+
+    if (editShiftCheckIn.trim()) {
+      ciMinutes = parseTimeToMinutes(editShiftCheckIn);
+      if (ciMinutes === null) {
+        setError(
+          "Check in time is not valid. Use HH:MM format (e.g. 07:00)."
+        );
+        return;
+      }
+      visitCheckInIso = makeDate(baseDate, ciMinutes);
+    }
+
+    if (editShiftCheckOut.trim()) {
+      coMinutes = parseTimeToMinutes(editShiftCheckOut);
+      if (coMinutes === null) {
+        setError(
+          "Check out time is not valid. Use HH:MM format (e.g. 14:30)."
+        );
+        return;
+      }
+      const visitEndBase =
+        ciMinutes !== null && coMinutes < ciMinutes
+          ? addDays(baseDate, 1)
+          : baseDate;
+      visitCheckOutIso = makeDate(visitEndBase, coMinutes);
+    }
+
     try {
       setEditShiftSaving(true);
       setError(null);
       setSuccess(null);
 
+      const payload: any = {
+        // gửi kèm shiftId cho thống nhất với backend
+        shiftId: editingShift.id,
+        serviceId: editShiftServiceId || editingShift.service.id,
+        plannedStart: plannedStartIso,
+        plannedEnd: plannedEndIso,
+        status: editShiftStatus,
+        notes: editShiftNotes || null,
+        dspId: editShiftDspId || null,
+      };
+
+      // Chỉ gửi lên nếu admin có nhập giờ Check in/Check out
+      if (visitCheckInIso) {
+        payload.checkInAt = visitCheckInIso;
+      }
+      if (visitCheckOutIso) {
+        payload.checkOutAt = visitCheckOutIso;
+      }
+
       const res = await fetch(`/api/schedule/shift/${editingShift.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // gửi kèm shiftId cho thống nhất với backend
-          shiftId: editingShift.id,
-          serviceId: editShiftServiceId || editingShift.service.id,
-          plannedStart: plannedStartIso,
-          plannedEnd: plannedEndIso,
-          status: editShiftStatus,
-          notes: editShiftNotes || null,
-          dspId: editShiftDspId || null,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -1969,6 +2022,32 @@ export default function SchedulePage() {
                     type="time"
                     value={editShiftEnd}
                     onChange={(e) => setEditShiftEnd(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* NEW: Manual Check in / Check out */}
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Check in
+                  </div>
+                  <input
+                    type="time"
+                    value={editShiftCheckIn}
+                    onChange={(e) => setEditShiftCheckIn(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Check out
+                  </div>
+                  <input
+                    type="time"
+                    value={editShiftCheckOut}
+                    onChange={(e) => setEditShiftCheckOut(e.target.value)}
                     className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
                   />
                 </div>

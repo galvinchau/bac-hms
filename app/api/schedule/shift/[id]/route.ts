@@ -71,54 +71,81 @@ export async function PUT(req: Request, context: any) {
     if (status) data.status = status;
     if ("notes" in body) data.notes = notes ?? null;
 
-    // Cập nhật shift
-    await prisma.scheduleShift.update({
+    // Cập nhật shift, lấy lại bản ghi sau update để dùng cho Visit
+    const updatedShift = await prisma.scheduleShift.update({
       where: { id },
       data,
     });
 
     // Handle Check-in / Check-out → Visit
     if (checkInAt || checkOutAt) {
-      let visit = await prisma.visit.findFirst({
-        where: { shiftId: id },
-        orderBy: { checkInAt: "asc" },
-      });
-
       const checkInDate = checkInAt ? new Date(checkInAt) : undefined;
       const checkOutDate = checkOutAt ? new Date(checkOutAt) : undefined;
 
+      // DSP thực tế cho Visit: ưu tiên actualDsp, nếu chưa có thì plannedDsp
+      const effectiveDspId =
+        updatedShift.actualDspId ?? updatedShift.plannedDspId ?? null;
+
+      if (!effectiveDspId) {
+        // Không có DSP thì không thể tạo Visit được
+        return NextResponse.json(
+          { error: "MISSING_DSP_FOR_VISIT" },
+          { status: 400 }
+        );
+      }
+
+      // Tìm visit gắn với ca này (nếu đã có)
+      let visit = await prisma.visit.findFirst({
+        where: { scheduleShiftId: id }, // ✅ đúng field trong schema
+        orderBy: { checkInAt: "asc" },
+      });
+
       if (!visit) {
+        // Chưa có Visit → tạo mới
         visit = await prisma.visit.create({
           data: {
-            shiftId: id,
+            scheduleShiftId: id,
+            individualId: updatedShift.individualId,
+            dspId: effectiveDspId,
+            serviceId: updatedShift.serviceId,
             checkInAt:
               checkInDate ??
               (plannedStart ? new Date(plannedStart) : new Date()),
             checkOutAt: checkOutDate ?? null,
-            units: 0,
+            source: "OFFICE_EDIT", // enum VisitSource
           },
         });
       } else {
+        // Đã có Visit → cập nhật, đồng thời gắn scheduleShiftId nếu trước đó chưa có
         visit = await prisma.visit.update({
           where: { id: visit.id },
           data: {
+            scheduleShiftId: visit.scheduleShiftId ?? id,
             checkInAt: checkInDate ?? visit.checkInAt,
             checkOutAt: checkOutDate ?? visit.checkOutAt,
+            // Bổ sung thông tin nếu còn trống
+            individualId: visit.individualId ?? updatedShift.individualId,
+            dspId: visit.dspId ?? effectiveDspId,
+            serviceId: visit.serviceId ?? updatedShift.serviceId,
           },
         });
       }
 
-      // Tính lại units nếu đủ in/out
+      // Tính lại durationMinutes + units nếu đủ in/out
       if (visit.checkInAt && visit.checkOutAt) {
         const mins =
           (new Date(visit.checkOutAt).getTime() -
             new Date(visit.checkInAt).getTime()) /
           (1000 * 60);
-        const units = Math.max(0, Math.round(mins / 15));
+        const durationMinutes = Math.max(0, Math.round(mins));
+        const units = Math.max(0, Math.round(durationMinutes / 15));
 
         await prisma.visit.update({
           where: { id: visit.id },
-          data: { units },
+          data: {
+            durationMinutes,
+            units,
+          },
         });
       }
     }
@@ -161,12 +188,11 @@ export async function DELETE(req: Request, context: any) {
   }
 
   try {
-    // Nếu DB đã set ON DELETE CASCADE cho visit.shiftId
-    // thì không cần xoá visit thủ công.
-    // Nếu chưa set, có thể mở lại đoạn dưới:
+    // Nếu DB chưa set ON DELETE CASCADE cho visit.scheduleShiftId
+    // thì có thể mở lại đoạn dưới để xoá Visit trước:
     //
     // await prisma.visit.deleteMany({
-    //   where: { shiftId: id },
+    //   where: { scheduleShiftId: id },
     // });
 
     await prisma.scheduleShift.delete({
