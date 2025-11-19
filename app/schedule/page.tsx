@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 
 // ===== Types =====
 
@@ -243,6 +243,22 @@ export default function SchedulePage() {
   const [editShiftDeleting, setEditShiftDeleting] = useState(false);
   const [editShiftCheckIn, setEditShiftCheckIn] = useState<string>("");
   const [editShiftCheckOut, setEditShiftCheckOut] = useState<string>("");
+
+  // Drag cho modal Edit shift
+  const [isDraggingEditModal, setIsDraggingEditModal] = useState(false);
+  const [editModalOffset, setEditModalOffset] = useState<{
+    x: number;
+    y: number;
+  }>({
+    x: 0,
+    y: 0,
+  });
+  const editModalDragStart = useRef<{
+    mouseX: number;
+    mouseY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
 
   // Modal edit master event
   const [editingMasterShift, setEditingMasterShift] =
@@ -569,6 +585,43 @@ export default function SchedulePage() {
 
     return { maxSlots, slots };
   }, [currentWeek]);
+
+  // Lắng nghe mousemove / mouseup khi đang kéo modal
+  useEffect(() => {
+    function handleMouseMove(e: MouseEvent) {
+      if (!editModalDragStart.current) return;
+      const { mouseX, mouseY, originX, originY } = editModalDragStart.current;
+      const dx = e.clientX - mouseX;
+      const dy = e.clientY - mouseY;
+      setEditModalOffset({ x: originX + dx, y: originY + dy });
+    }
+
+    function handleMouseUp() {
+      editModalDragStart.current = null;
+      setIsDraggingEditModal(false);
+    }
+
+    if (isDraggingEditModal) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingEditModal]);
+
+  function handleEditModalHeaderMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    e.preventDefault();
+    editModalDragStart.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      originX: editModalOffset.x,
+      originY: editModalOffset.y,
+    };
+    setIsDraggingEditModal(true);
+  }
 
   // ---------- Master template editing ----------
 
@@ -1010,9 +1063,7 @@ export default function SchedulePage() {
     if (editShiftCheckIn.trim()) {
       ciMinutes = parseTimeToMinutes(editShiftCheckIn);
       if (ciMinutes === null) {
-        setError(
-          "Check in time is not valid. Use HH:MM format (e.g. 07:00)."
-        );
+        setError("Check in time is not valid. Use HH:MM format (e.g. 07:00).");
         return;
       }
       visitCheckInIso = makeDate(baseDate, ciMinutes);
@@ -1021,9 +1072,7 @@ export default function SchedulePage() {
     if (editShiftCheckOut.trim()) {
       coMinutes = parseTimeToMinutes(editShiftCheckOut);
       if (coMinutes === null) {
-        setError(
-          "Check out time is not valid. Use HH:MM format (e.g. 14:30)."
-        );
+        setError("Check out time is not valid. Use HH:MM format (e.g. 14:30).");
         return;
       }
       const visitEndBase =
@@ -1924,10 +1973,20 @@ export default function SchedulePage() {
       </div>
 
       {/* Modal edit weekly shift */}
+      {/* Modal edit weekly shift (draggable) */}
       {editingShift && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-          <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
-            <div className="flex items-center justify-between mb-3">
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl"
+            style={{
+              transform: `translate(${editModalOffset.x}px, ${editModalOffset.y}px)`,
+              cursor: isDraggingEditModal ? "grabbing" : "default",
+            }}
+          >
+            <div
+              className="flex items-center justify-between mb-3 cursor-move select-none"
+              onMouseDown={handleEditModalHeaderMouseDown}
+            >
               <div>
                 <div className="text-xs text-slate-400 mb-1">
                   Edit shift –{" "}
