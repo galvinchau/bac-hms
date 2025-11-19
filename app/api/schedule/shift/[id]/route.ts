@@ -1,6 +1,7 @@
 // app/api/schedule/shift/[id]/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { VisitSource } from "@prisma/client";
 
 /**
  * Helper: cố gắng lấy shiftId từ cả params lẫn URL (phòng hờ)
@@ -68,88 +69,100 @@ export async function PUT(req: Request, context: any) {
     if (plannedStart) data.plannedStart = new Date(plannedStart);
     if (plannedEnd) data.plannedEnd = new Date(plannedEnd);
 
-    if (status) data.status = status;
+    // ===== AUTO STATUS ƯU TIÊN THEO CHECK IN / OUT =====
+    let autoStatus: string | undefined;
+    if (checkInAt && checkOutAt) {
+      autoStatus = "COMPLETED";
+    } else if (checkInAt && !checkOutAt) {
+      autoStatus = "IN_PROGRESS";
+    }
+
+    if (autoStatus) {
+      data.status = autoStatus;
+    } else if (status) {
+      // chỉ dùng status gửi tay khi không có checkIn/checkOut
+      data.status = status;
+    }
+
     if ("notes" in body) data.notes = notes ?? null;
 
-    // Cập nhật shift, lấy lại bản ghi sau update để dùng cho Visit
+    // Cập nhật shift trước
     const updatedShift = await prisma.scheduleShift.update({
       where: { id },
       data,
     });
 
-    // Handle Check-in / Check-out → Visit
+    // ===== Handle Check-in / Check-out → Visit =====
     if (checkInAt || checkOutAt) {
       const checkInDate = checkInAt ? new Date(checkInAt) : undefined;
       const checkOutDate = checkOutAt ? new Date(checkOutAt) : undefined;
 
-      // DSP thực tế cho Visit: ưu tiên actualDsp, nếu chưa có thì plannedDsp
-      const effectiveDspId =
-        updatedShift.actualDspId ?? updatedShift.plannedDspId ?? null;
+      // Lấy DSP cho visit: ưu tiên actualDsp, nếu không có thì plannedDsp
+      const dspForVisit = updatedShift.actualDspId ?? updatedShift.plannedDspId;
 
-      if (!effectiveDspId) {
-        // Không có DSP thì không thể tạo Visit được
-        return NextResponse.json(
-          { error: "MISSING_DSP_FOR_VISIT" },
-          { status: 400 }
+      if (!dspForVisit) {
+        console.warn(
+          "[Visit OFFICE_EDIT] Skip create because no DSP assigned for shift",
+          id
         );
-      }
-
-      // Tìm visit gắn với ca này (nếu đã có)
-      let visit = await prisma.visit.findFirst({
-        where: { scheduleShiftId: id }, // ✅ đúng field trong schema
-        orderBy: { checkInAt: "asc" },
-      });
-
-      if (!visit) {
-        // Chưa có Visit → tạo mới
-        visit = await prisma.visit.create({
-          data: {
-            scheduleShiftId: id,
-            individualId: updatedShift.individualId,
-            dspId: effectiveDspId,
-            serviceId: updatedShift.serviceId,
-            checkInAt:
-              checkInDate ??
-              (plannedStart ? new Date(plannedStart) : new Date()),
-            checkOutAt: checkOutDate ?? null,
-            source: "OFFICE_EDIT", // enum VisitSource
-          },
-        });
       } else {
-        // Đã có Visit → cập nhật, đồng thời gắn scheduleShiftId nếu trước đó chưa có
-        visit = await prisma.visit.update({
-          where: { id: visit.id },
-          data: {
-            scheduleShiftId: visit.scheduleShiftId ?? id,
-            checkInAt: checkInDate ?? visit.checkInAt,
-            checkOutAt: checkOutDate ?? visit.checkOutAt,
-            // Bổ sung thông tin nếu còn trống
-            individualId: visit.individualId ?? updatedShift.individualId,
-            dspId: visit.dspId ?? effectiveDspId,
-            serviceId: visit.serviceId ?? updatedShift.serviceId,
-          },
+        let visit = await prisma.visit.findFirst({
+          where: { scheduleShiftId: id },
+          orderBy: { checkInAt: "asc" },
         });
-      }
 
-      // Tính lại durationMinutes + units nếu đủ in/out
-      if (visit.checkInAt && visit.checkOutAt) {
-        const mins =
-          (new Date(visit.checkOutAt).getTime() -
-            new Date(visit.checkInAt).getTime()) /
-          (1000 * 60);
-        const durationMinutes = Math.max(0, Math.round(mins));
-        const units = Math.max(0, Math.round(durationMinutes / 15));
+        if (!visit) {
+          // Tạo visit mới
+          visit = await prisma.visit.create({
+            data: {
+              scheduleShiftId: id,
+              individualId: updatedShift.individualId,
+              dspId: dspForVisit,
+              serviceId: updatedShift.serviceId,
+              checkInAt:
+                checkInDate ??
+                (plannedStart ? new Date(plannedStart) : new Date()),
+              checkOutAt: checkOutDate ?? null,
+              source: VisitSource.OFFICE_EDIT,
+              durationMinutes: null,
+              units: null,
+              isBillable: true,
+            },
+          });
+        } else {
+          // Cập nhật visit cũ
+          visit = await prisma.visit.update({
+            where: { id: visit.id },
+            data: {
+              checkInAt: checkInDate ?? visit.checkInAt,
+              checkOutAt: checkOutDate ?? visit.checkOutAt,
+              source: VisitSource.OFFICE_EDIT,
+            },
+          });
+        }
 
-        await prisma.visit.update({
-          where: { id: visit.id },
-          data: {
-            durationMinutes,
-            units,
-          },
-        });
+        // Tính lại duration + units nếu đủ in/out
+        if (visit.checkInAt && visit.checkOutAt) {
+          const mins =
+            (new Date(visit.checkOutAt).getTime() -
+              new Date(visit.checkInAt).getTime()) /
+            (1000 * 60);
+          const safeMinutes = Math.max(0, Math.round(mins));
+          const units = Math.max(0, Math.round(safeMinutes / 15));
+
+          await prisma.visit.update({
+            where: { id: visit.id },
+            data: {
+              durationMinutes: safeMinutes,
+              units,
+              isBillable: true,
+            },
+          });
+        }
       }
     }
 
+    // Lấy lại full shift (kèm relations) trả về FE
     const full = await prisma.scheduleShift.findUnique({
       where: { id },
       include: {
@@ -161,10 +174,7 @@ export async function PUT(req: Request, context: any) {
     });
 
     if (!full) {
-      return NextResponse.json(
-        { error: "SHIFT_NOT_FOUND" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "SHIFT_NOT_FOUND" }, { status: 404 });
     }
 
     return NextResponse.json(full);
@@ -188,13 +198,6 @@ export async function DELETE(req: Request, context: any) {
   }
 
   try {
-    // Nếu DB chưa set ON DELETE CASCADE cho visit.scheduleShiftId
-    // thì có thể mở lại đoạn dưới để xoá Visit trước:
-    //
-    // await prisma.visit.deleteMany({
-    //   where: { scheduleShiftId: id },
-    // });
-
     await prisma.scheduleShift.delete({
       where: { id },
     });
