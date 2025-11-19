@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 /* ================================
    Common Types
@@ -73,7 +73,7 @@ interface IncidentRecord {
 }
 
 /* ================================
-   Mock Data
+   Mock Data (fallback)
 ================================ */
 
 const mockOrders: MedicationOrder[] = [
@@ -276,10 +276,17 @@ const marStatusClass = (status: AdminStatus) => {
 const MedicationPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTab>("OVERVIEW");
 
-  // Shared filters
+  // Global filters
   const [selectedIndividual, setSelectedIndividual] =
     useState<string>("IND-001");
   const [selectedMonth, setSelectedMonth] = useState<string>("2024-11");
+
+  // Data từ API MAR (fallback mock nếu lỗi / chưa có bảng)
+  const [orders, setOrders] = useState<MedicationOrder[]>(mockOrders);
+  const [admins, setAdmins] = useState<MedicationAdmin[]>(mockAdmins);
+  const [marLoading, setMarLoading] = useState(false);
+  const [marError, setMarError] = useState<string | null>(null);
+  const [marWarning, setMarWarning] = useState<string | null>(null);
 
   // Orders tab filters
   const [searchOrders, setSearchOrders] = useState("");
@@ -296,6 +303,7 @@ const MedicationPage: React.FC = () => {
     timeOfDay?: string;
   }>({ open: false });
 
+  // Individual options (tạm lấy từ mock – sau này đổi sang Individuals thật)
   const individualOptions = useMemo(() => {
     const map = new Map<string, string>();
     mockOrders.forEach((o) => map.set(o.individualId, o.individualName));
@@ -307,25 +315,145 @@ const MedicationPage: React.FC = () => {
     individualOptions[0]?.name ??
     "";
 
+  // ======================================
+  // Load MAR data từ API
+  // ======================================
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadMar = async () => {
+      setMarLoading(true);
+      setMarError(null);
+      setMarWarning(null);
+
+      try {
+        const params = new URLSearchParams({
+          individualId: selectedIndividual,
+          month: selectedMonth,
+        });
+
+        const res = await fetch(`/api/medication/mar?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data?.errorDetail || data?.error || res.statusText);
+        }
+
+        // Trường hợp API trả warning (chưa có bảng Medication*)
+        if (!data?.individualId) {
+          setMarWarning(
+            data?.warning ??
+              "Medication MAR tables not created yet. Showing sample data only."
+          );
+
+          const mockOrdersForInd = mockOrders.filter(
+            (o) => o.individualId === selectedIndividual
+          );
+          const mockAdminsForInd = mockAdmins.filter(
+            (a) => a.individualId === selectedIndividual
+          );
+
+          setOrders(mockOrdersForInd);
+          setAdmins(mockAdminsForInd);
+          return;
+        }
+
+        const apiOrders = Array.isArray(data.orders) ? data.orders : [];
+        const apiAdmins = Array.isArray(data.administrations)
+          ? data.administrations
+          : [];
+
+        const mappedOrders: MedicationOrder[] = apiOrders.map((o: any) => ({
+          id: o.id,
+          individualId: o.individualId,
+          individualName:
+            selectedIndividualName || o.individualName || "Individual",
+          medicationName: o.medicationName,
+          doseValue: o.doseValue ?? 0,
+          doseUnit: o.doseUnit ?? "",
+          route: o.route ?? "",
+          type: (o.type as MedicationType) ?? "SCHEDULED",
+          frequencyText: o.frequencyText ?? undefined,
+          timesOfDay: (o.timesOfDay as string[] | null) ?? [],
+          startDate: o.startDate,
+          endDate: o.endDate ?? undefined,
+          status: (o.status as MedicationStatus) ?? "ACTIVE",
+          prescriber: o.prescriberName ?? undefined,
+          pharmacy: o.pharmacyName ?? undefined,
+          indications: o.indications ?? undefined,
+          allergiesFlag: o.allergyFlag ?? false,
+        }));
+
+        const mappedAdmins: MedicationAdmin[] = apiAdmins.map((a: any) => {
+          const order = mappedOrders.find((o) => o.id === a.orderId);
+          return {
+            id: a.id,
+            orderId: a.orderId,
+            individualId: a.individualId,
+            individualName:
+              selectedIndividualName || order?.individualName || "Individual",
+            medicationName:
+              order?.medicationName ?? a.medicationName ?? "Medication",
+            doseValue: order?.doseValue ?? a.doseValue ?? 0,
+            doseUnit: order?.doseUnit ?? a.doseUnit ?? "",
+            route: order?.route ?? a.route ?? "",
+            scheduledDateTime: a.scheduledDateTime,
+            actualDateTime: a.actualDateTime ?? undefined,
+            status: a.status as AdminStatus,
+            reason: a.reason ?? undefined,
+            vitalsSummary: a.vitalsSummary ?? undefined,
+            staffName: a.staffName ?? undefined,
+            notes: a.notes ?? undefined,
+          };
+        });
+
+        setOrders(mappedOrders);
+        setAdmins(mappedAdmins);
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        console.error("[MedicationPage] Load MAR failed:", err);
+        setMarError(err?.message ?? "Failed to load MAR data.");
+
+        // fallback mock cho individual hiện tại
+        const mockOrdersForInd = mockOrders.filter(
+          (o) => o.individualId === selectedIndividual
+        );
+        const mockAdminsForInd = mockAdmins.filter(
+          (a) => a.individualId === selectedIndividual
+        );
+        setOrders(mockOrdersForInd);
+        setAdmins(mockAdminsForInd);
+      } finally {
+        setMarLoading(false);
+      }
+    };
+
+    loadMar();
+
+    return () => controller.abort();
+  }, [selectedIndividual, selectedMonth, selectedIndividualName]);
+
   /* ---------- Overview Metrics ---------- */
 
-  const totalActiveOrders = mockOrders.filter(
-    (o) => o.status === "ACTIVE"
-  ).length;
+  const totalActiveOrders = orders.filter((o) => o.status === "ACTIVE").length;
   const totalControlled = mockInventory.filter((i) => i.isControlled).length;
   const openIncidents = mockIncidents.filter(
     (i) => i.status !== "Closed"
   ).length;
-  const recentPrn = mockAdmins.filter(
+
+  const recentPrn = admins.filter(
     (a) =>
       a.status === "GIVEN" &&
-      mockOrders.find((o) => o.id === a.orderId && o.type === "PRN")
+      orders.some((o) => o.id === a.orderId && o.type === "PRN")
   ).length;
 
   /* ---------- Orders Tab Data ---------- */
 
   const filteredOrders = useMemo(() => {
-    return mockOrders.filter((o) => {
+    return orders.filter((o) => {
       if (selectedIndividual && o.individualId !== selectedIndividual)
         return false;
       if (selectedStatus !== "ALL" && o.status !== selectedStatus) return false;
@@ -339,7 +467,7 @@ const MedicationPage: React.FC = () => {
       }
       return true;
     });
-  }, [selectedIndividual, selectedStatus, selectedType, searchOrders]);
+  }, [orders, selectedIndividual, selectedStatus, selectedType, searchOrders]);
 
   /* ---------- MAR helpers ---------- */
 
@@ -354,19 +482,19 @@ const MedicationPage: React.FC = () => {
   const daysInMonth = getDaysInMonth(selectedMonth);
 
   const marOrders = useMemo(() => {
-    const base = mockOrders.filter(
+    const base = orders.filter(
       (o) => o.individualId === selectedIndividual && o.status === "ACTIVE"
     );
     if (selectedOrderForMar === "ALL") return base;
     return base.filter((o) => o.id === selectedOrderForMar);
-  }, [selectedIndividual, selectedOrderForMar]);
+  }, [orders, selectedIndividual, selectedOrderForMar]);
 
   const getAdminsForCell = (
     orderId: string,
     day: number,
     timeOfDay?: string
   ): MedicationAdmin[] => {
-    return mockAdmins.filter((a) => {
+    return admins.filter((a) => {
       if (a.orderId !== orderId) return false;
       const d = new Date(a.scheduledDateTime);
       if (d.getUTCDate() !== day) return false;
@@ -406,10 +534,10 @@ const MedicationPage: React.FC = () => {
 
   const prnAdmins = useMemo(
     () =>
-      mockAdmins.filter((a) =>
-        mockOrders.some((o) => o.id === a.orderId && o.type === "PRN")
+      admins.filter((a) =>
+        orders.some((o) => o.id === a.orderId && o.type === "PRN")
       ),
-    []
+    [admins, orders]
   );
 
   /* ---------- Inventory Tab Data ---------- */
@@ -472,6 +600,19 @@ const MedicationPage: React.FC = () => {
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
           />
+        </div>
+
+        {/* Trạng thái load MAR */}
+        <div className="flex flex-1 flex-col justify-end gap-1 text-xs">
+          {marLoading && (
+            <span className="text-bac-muted">Loading MAR data...</span>
+          )}
+          {marWarning && !marLoading && (
+            <span className="text-yellow-400">{marWarning}</span>
+          )}
+          {marError && !marLoading && (
+            <span className="text-bac-red">{marError}</span>
+          )}
         </div>
       </div>
 
