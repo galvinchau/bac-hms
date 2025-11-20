@@ -297,18 +297,18 @@ model Service {
 // =====================================================
 
 enum ScheduleStatus {
-  NOT_STARTED   // chưa đến giờ, chưa có visit
-  IN_PROGRESS   // đã check in, chưa check out
-  COMPLETED     // có visit đầy đủ, đã đối soát
+  NOT_STARTED // chưa đến giờ, chưa có visit
+  IN_PROGRESS // đã check in, chưa check out
+  COMPLETED // có visit đầy đủ, đã đối soát
   NOT_COMPLETED // có check in nhưng hết ca mà chưa check out
-  CANCELLED     // ca bị hủy (thường do Individual)
-  BACKUP_PLAN   // ca có backup DSP thay thế DSP gốc
+  CANCELLED // ca bị hủy (thường do Individual)
+  BACKUP_PLAN // ca có backup DSP thay thế DSP gốc
 }
 
 enum VisitSource {
-  MOBILE      // DSP check in/out từ app điện thoại
+  MOBILE // DSP check in/out từ app điện thoại
   OFFICE_EDIT // văn phòng nhập / chỉnh tay
-  AUTO_MATCH  // hệ thống tự gắn visit với ca schedule
+  AUTO_MATCH // hệ thống tự gắn visit với ca schedule
 }
 
 enum CancelledBy {
@@ -324,8 +324,8 @@ enum CancelledBy {
 model MasterScheduleTemplate {
   id            String    @id @default(cuid())
   individualId  String
-  name          String?   // VD: "Weekday template"
-  effectiveFrom DateTime  // ngày bắt đầu áp dụng
+  name          String? // VD: "Weekday template"
+  effectiveFrom DateTime // ngày bắt đầu áp dụng
   effectiveTo   DateTime? // null = áp dụng vô thời hạn
   isActive      Boolean   @default(true)
   notes         String?
@@ -343,7 +343,7 @@ model MasterScheduleTemplate {
 model MasterTemplateShift {
   id         String @id @default(cuid())
   templateId String
-  dayOfWeek  Int    // 0 = Sun, 6 = Sat
+  dayOfWeek  Int // 0 = Sun, 6 = Sat
   serviceId  String
 
   // Thời gian trong ngày, tính theo phút từ 00:00 (VD: 7h = 420)
@@ -372,7 +372,7 @@ model MasterTemplateShift {
 model ScheduleWeek {
   id                    String   @id @default(cuid())
   individualId          String
-  templateId            String?  // generate từ template nào (nếu có)
+  templateId            String? // generate từ template nào (nếu có)
   weekStart             DateTime // Chủ nhật 00:00
   weekEnd               DateTime // Thứ 7 23:59 hoặc weekStart + 7 ngày
   generatedFromTemplate Boolean  @default(true)
@@ -451,8 +451,8 @@ model Visit {
   source VisitSource @default(MOBILE)
 
   // cache sẵn để report nhanh (tính khi close visit)
-  durationMinutes   Int?    // tổng số phút (Out - In, có xử lý qua ngày)
-  units             Int?    // số unit 15 phút
+  durationMinutes   Int? // tổng số phút (Out - In, có xử lý qua ngày)
+  units             Int? // số unit 15 phút
   isBillable        Boolean @default(true)
   nonBillableReason String?
 
@@ -482,7 +482,7 @@ model ISPAllocation {
   serviceId    String
   payerId      String? // Medicaid, ODP, etc.
 
-  startDate DateTime  // ngày bắt đầu ủy quyền
+  startDate DateTime // ngày bắt đầu ủy quyền
   endDate   DateTime? // ngày kết thúc (hết hợp đồng)
 
   unitsPerWeek         Int? // ISP quy định mỗi tuần bao nhiêu unit
@@ -506,8 +506,8 @@ model ISPAllocation {
 // =====================================================
 
 model IspBspForm {
-  id           String   @id @default(cuid())
-  individualId String   @unique
+  id           String @id @default(cuid())
+  individualId String @unique
   formData     Json
 
   createdAt DateTime @default(now())
@@ -521,12 +521,12 @@ model IspBspForm {
 // =====================================================
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
+  id        String  @id @default(cuid())
+  email     String  @unique
   firstName String
   lastName  String
-  locked    Boolean  @default(false)
-  userType  String   @default("ADMIN") // ADMIN / COORDINATOR / DSP / ...
+  locked    Boolean @default(false)
+  userType  String  @default("ADMIN") // ADMIN / COORDINATOR / DSP / ...
 
   roles       UserRole[]
   privileges  UserPrivilege[]
@@ -544,9 +544,9 @@ model User {
 }
 
 model Role {
-  id          String   @id @default(cuid())
-  code        String   @unique   // vd: "COORDINATOR"
-  name        String              // label hiển thị đẹp
+  id          String  @id @default(cuid())
+  code        String  @unique // vd: "COORDINATOR"
+  name        String // label hiển thị đẹp
   description String?
 
   users UserRole[]
@@ -558,9 +558,9 @@ model Role {
 }
 
 model Privilege {
-  id          String   @id @default(cuid())
-  code        String   @unique   // vd: "CLIENT_ACCESS_MODULE"
-  name        String              // label hiển thị dài
+  id          String  @id @default(cuid())
+  code        String  @unique // vd: "CLIENT_ACCESS_MODULE"
+  name        String // label hiển thị dài
   description String?
 
   users UserPrivilege[]
@@ -579,7 +579,6 @@ model UserRole {
   roleId String
 
   @@unique([userId, roleId])
-
   @@map("admin_user_roles")
 }
 
@@ -591,7 +590,6 @@ model UserPrivilege {
   privilegeId String
 
   @@unique([userId, privilegeId])
-
   @@map("admin_user_privileges")
 }
 
@@ -603,7 +601,6 @@ model UserSupervisor {
   supervisorId String
 
   @@unique([userId, supervisorId])
-
   @@map("admin_user_supervisors")
 }
 
@@ -652,24 +649,24 @@ enum MedicationIncidentStatus {
  * MedicationOrder = y lệnh thuốc (đơn thuốc) cho từng Individual
  */
 model MedicationOrder {
-  id           String                 @id @default(cuid())
-  individualId String                 // link sang Individual qua id (string)
+  id             String                @id @default(cuid())
+  individualId   String // link sang Individual qua id (string)
   medicationName String
-  form         String?                // tablet, capsule, solution...
-  doseValue    Float
-  doseUnit     String                 // mg, ml, tablet...
-  route        String                 // PO, IM, IV, SQ...
-  type         MedicationType
-  frequencyText String?               // BID, TID, QHS...
-  timesOfDay   String[]               // ["08:00","20:00"]
-  startDate    DateTime
-  endDate      DateTime?
-  status       MedicationOrderStatus  @default(ACTIVE)
+  form           String? // tablet, capsule, solution...
+  doseValue      Float
+  doseUnit       String // mg, ml, tablet...
+  route          String // PO, IM, IV, SQ...
+  type           MedicationType
+  frequencyText  String? // “BID”, “QHS”…
+  timesOfDay     String[]              @default([])
+  startDate      DateTime
+  endDate        DateTime?
+  status         MedicationOrderStatus @default(ACTIVE)
 
   prescriberName String?
   pharmacyName   String?
-  indications    String?              // lý do dùng thuốc
-  allergyFlag    Boolean              @default(false)
+  indications    String? // lý do dùng thuốc
+  allergyFlag    Boolean @default(false)
 
   // Relations nội bộ Medication
   administrations MedicationAdministration[]
@@ -685,18 +682,18 @@ model MedicationOrder {
  * MedicationAdministration = mỗi lần cấp thuốc trong MAR
  */
 model MedicationAdministration {
-  id                String                @id @default(cuid())
-  orderId           String
-  order             MedicationOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id      String          @id @default(cuid())
+  orderId String
+  order   MedicationOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  individualId      String                // lưu thêm để query nhanh
+  individualId      String // lưu thêm để query nhanh
   scheduledDateTime DateTime
   actualDateTime    DateTime?
   status            MedicationAdminStatus
-  reason            String?               // reason/refused/missed...
-  vitalsSummary     String?               // "BP 120/70, HR 76, BG 145"
-  staffId           String?               // id DSP
-  staffName         String?               // tên DSP, cache để không phải join
+  reason            String? // reason/refused/missed...
+  vitalsSummary     String? // "BP 120/70, HR 76, BG 145"
+  staffId           String? // id DSP
+  staffName         String? // tên DSP, cache để không phải join
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -709,21 +706,21 @@ model MedicationAdministration {
  * MedicationInventory = tồn kho thuốc theo từng Individual
  */
 model MedicationInventory {
-  id             String           @id @default(cuid())
-  orderId        String?
-  order          MedicationOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  id      String           @id @default(cuid())
+  orderId String?
+  order   MedicationOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
-  individualId   String
-  medicationName String           // cache tên thuốc để xem nhanh
-  isControlled   Boolean          @default(false)
+  individualId    String
+  medicationName  String // cache tên thuốc để xem nhanh
+  isControlled    Boolean   @default(false)
   currentQuantity Float
-  unit           String           // tablet, ml...
-  minThreshold   Float            @default(0)
-  daysRemaining  Int?
-  lastCountDate  DateTime?
+  unit            String // tablet, ml...
+  minThreshold    Float     @default(0)
+  daysRemaining   Int?
+  lastCountDate   DateTime?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([individualId])
   @@index([individualId, isControlled])
@@ -733,18 +730,18 @@ model MedicationInventory {
  * MedicationIncident = lỗi thuốc, Missed dose, Medication error...
  */
 model MedicationIncident {
-  id             String                    @id @default(cuid())
+  id             String                     @id @default(cuid())
   individualId   String
   individualName String
   date           DateTime
   medicationName String?
-  type           String                    // "Missed Dose", "Medication Error", ...
+  type           String // "Missed Dose", "Medication Error", ...
   severity       MedicationIncidentSeverity
-  status         MedicationIncidentStatus  @default(OPEN)
+  status         MedicationIncidentStatus   @default(OPEN)
   notes          String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([individualId, date])
   @@index([severity])

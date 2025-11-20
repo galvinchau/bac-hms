@@ -72,6 +72,12 @@ interface IncidentRecord {
   status: "Open" | "In Review" | "Closed";
 }
 
+interface IndividualOption {
+  id: string;
+  name: string;
+  code?: string;
+}
+
 /* ================================
    Mock Data (fallback)
 ================================ */
@@ -281,6 +287,13 @@ const MedicationPage: React.FC = () => {
     useState<string>("IND-001");
   const [selectedMonth, setSelectedMonth] = useState<string>("2024-11");
 
+  // Individuals (real data)
+  const [individualOptions, setIndividualOptions] = useState<IndividualOption[]>(
+    []
+  );
+  const [individualLoading, setIndividualLoading] = useState(false);
+  const [individualError, setIndividualError] = useState<string | null>(null);
+
   // Data từ API MAR (fallback mock nếu lỗi / chưa có bảng)
   const [orders, setOrders] = useState<MedicationOrder[]>(mockOrders);
   const [admins, setAdmins] = useState<MedicationAdmin[]>(mockAdmins);
@@ -303,12 +316,93 @@ const MedicationPage: React.FC = () => {
     timeOfDay?: string;
   }>({ open: false });
 
-  // Individual options (tạm lấy từ mock – sau này đổi sang Individuals thật)
-  const individualOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    mockOrders.forEach((o) => map.set(o.individualId, o.individualName));
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  // ======================================
+  // Load Individuals từ API (dùng data thật)
+  // ======================================
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadIndividuals = async () => {
+      setIndividualLoading(true);
+      setIndividualError(null);
+
+      try {
+        // Backend anh có thể làm route này:
+        // GET /api/medication/individuals -> trả về danh sách Individual cho Medication
+        const res = await fetch("/api/medication/individuals", {
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          throw new Error(
+            `Failed to load individuals: ${res.status} ${res.statusText}`
+          );
+        }
+
+        const data = await res.json();
+
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+        const mapped: IndividualOption[] = list.map((p: any) => {
+          const fullName = [p.firstName, p.middleName, p.lastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+
+          return {
+            id: p.id,
+            name: fullName || p.code || "Individual",
+            code: p.code ?? undefined,
+          };
+        });
+
+        if (mapped.length === 0) {
+          // Nếu API trả rỗng, fallback mock
+          const map = new Map<string, string>();
+          mockOrders.forEach((o) => map.set(o.individualId, o.individualName));
+          const fallback = Array.from(map.entries()).map(([id, name]) => ({
+            id,
+            name,
+          }));
+          setIndividualOptions(fallback);
+        } else {
+          setIndividualOptions(mapped);
+        }
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        console.error("[MedicationPage] Load individuals failed:", err);
+        setIndividualError(err?.message ?? "Failed to load individuals.");
+
+        // Fallback: dùng individual từ mockOrders như trước đây
+        const map = new Map<string, string>();
+        mockOrders.forEach((o) => map.set(o.individualId, o.individualName));
+        const fallback = Array.from(map.entries()).map(([id, name]) => ({
+          id,
+          name,
+        }));
+        setIndividualOptions(fallback);
+      } finally {
+        setIndividualLoading(false);
+      }
+    };
+
+    loadIndividuals();
+
+    return () => controller.abort();
   }, []);
+
+  // Khi đã có danh sách individuals, nếu selectedIndividual không nằm trong list thì auto chọn cái đầu
+  useEffect(() => {
+    if (!individualOptions.length) return;
+    const exists = individualOptions.some((i) => i.id === selectedIndividual);
+    if (!selectedIndividual || !exists) {
+      setSelectedIndividual(individualOptions[0].id);
+    }
+  }, [individualOptions, selectedIndividual]);
 
   const selectedIndividualName =
     individualOptions.find((i) => i.id === selectedIndividual)?.name ??
@@ -431,7 +525,9 @@ const MedicationPage: React.FC = () => {
       }
     };
 
-    loadMar();
+    if (selectedIndividual) {
+      loadMar();
+    }
 
     return () => controller.abort();
   }, [selectedIndividual, selectedMonth, selectedIndividualName]);
@@ -585,7 +681,8 @@ const MedicationPage: React.FC = () => {
           >
             {individualOptions.map((i) => (
               <option key={i.id} value={i.id}>
-                {i.name} ({i.id})
+                {i.name}
+                {i.code ? ` (${i.code})` : ""}
               </option>
             ))}
           </select>
@@ -602,8 +699,14 @@ const MedicationPage: React.FC = () => {
           />
         </div>
 
-        {/* Trạng thái load MAR */}
+        {/* Trạng thái load MAR + Individuals */}
         <div className="flex flex-1 flex-col justify-end gap-1 text-xs">
+          {individualLoading && (
+            <span className="text-bac-muted">Loading individuals...</span>
+          )}
+          {individualError && !individualLoading && (
+            <span className="text-bac-red">{individualError}</span>
+          )}
           {marLoading && (
             <span className="text-bac-muted">Loading MAR data...</span>
           )}

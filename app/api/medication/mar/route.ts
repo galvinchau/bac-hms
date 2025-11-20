@@ -12,6 +12,14 @@ function isMissingTableError(err: any) {
 }
 
 /**
+ * Nếu PrismaClient chưa có model Medication* (chưa migrate/generate),
+ * tránh gọi .findMany trên undefined.
+ */
+function hasMedicationModels(p: any) {
+  return p && p.medicationOrder && p.medicationAdministration;
+}
+
+/**
  * GET /api/medication/mar?individualId=...&month=YYYY-MM
  */
 export async function GET(req: NextRequest) {
@@ -24,6 +32,23 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { error: "Missing required query param: individualId" },
         { status: 400 }
+      );
+    }
+
+    const prismaAny = prisma as any;
+
+    // Nếu PrismaClient chưa có model Medication*, trả về warning + data rỗng
+    if (!hasMedicationModels(prismaAny)) {
+      return NextResponse.json(
+        {
+          month: null,
+          individualId: null,
+          orders: [],
+          administrations: [],
+          warning:
+            "Medication models not found in Prisma client. Please run `npx prisma migrate dev` to create and generate Medication tables.",
+        },
+        { status: 200 }
       );
     }
 
@@ -46,7 +71,7 @@ export async function GET(req: NextRequest) {
     const startOfMonth = new Date(Date.UTC(year, monthNum - 1, 1, 0, 0, 0));
     const startOfNextMonth = new Date(Date.UTC(year, monthNum, 1, 0, 0, 0));
 
-    const orders = await prisma.medicationOrder.findMany({
+    const orders = await prismaAny.medicationOrder.findMany({
       where: {
         individualId,
         status: "ACTIVE" as any,
@@ -56,7 +81,7 @@ export async function GET(req: NextRequest) {
       orderBy: [{ medicationName: "asc" }, { startDate: "asc" }],
     });
 
-    const administrations = await prisma.medicationAdministration.findMany({
+    const administrations = await prismaAny.medicationAdministration.findMany({
       where: {
         individualId,
         scheduledDateTime: {
@@ -74,7 +99,7 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     console.error("[GET /api/medication/mar] Error:", err);
 
-    // ⚠️ Nếu chưa tạo bảng Medication*, trả về data rỗng cho phép FE tiếp tục chạy
+    // ⚠️ Nếu chưa tạo bảng Medication* bên DB → trả về warning + rỗng
     if (isMissingTableError(err)) {
       return NextResponse.json(
         {
@@ -130,7 +155,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const order = await prisma.medicationOrder.findUnique({
+    const prismaAny = prisma as any;
+
+    // Nếu PrismaClient chưa có model Medication* → không cho lưu
+    if (!hasMedicationModels(prismaAny)) {
+      return NextResponse.json(
+        {
+          error:
+            "Medication models not generated yet. Please run `npx prisma migrate dev` before saving MAR.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const order = await prismaAny.medicationOrder.findUnique({
       where: { id: orderId },
     });
 
@@ -193,12 +231,12 @@ export async function POST(req: NextRequest) {
     let admin;
 
     if (id) {
-      admin = await prisma.medicationAdministration.update({
+      admin = await prismaAny.medicationAdministration.update({
         where: { id },
         data,
       });
     } else {
-      admin = await prisma.medicationAdministration.create({
+      admin = await prismaAny.medicationAdministration.create({
         data,
       });
     }
