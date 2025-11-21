@@ -288,9 +288,9 @@ const MedicationPage: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<string>("2024-11");
 
   // Individuals (real data)
-  const [individualOptions, setIndividualOptions] = useState<IndividualOption[]>(
-    []
-  );
+  const [individualOptions, setIndividualOptions] = useState<
+    IndividualOption[]
+  >([]);
   const [individualLoading, setIndividualLoading] = useState(false);
   const [individualError, setIndividualError] = useState<string | null>(null);
 
