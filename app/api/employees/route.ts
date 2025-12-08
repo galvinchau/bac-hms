@@ -1,5 +1,7 @@
+// web/app/api/employees/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sendMobileUserWelcomeEmail } from "@/lib/mailer";
 
 /**
  * Generate an Employee display ID like: BAC-E-2025-001
@@ -107,8 +109,26 @@ export async function POST(req: Request) {
           typeof data.sendPolicyUpdates === "boolean"
             ? data.sendPolicyUpdates
             : true,
+
+        // Mobile user flag
+        isMobileUser: !!data.isMobileUser,
       },
     });
+
+    // 🔔 Nếu là Mobile user thì gửi email chào mừng
+    try {
+      if (employee.isMobileUser && employee.email) {
+        await sendMobileUserWelcomeEmail({
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          email: employee.email,
+          employeeId: employee.employeeId,
+        });
+      }
+    } catch (mailErr) {
+      console.error("Failed to send mobile user email:", mailErr);
+      // không throw để tránh làm fail việc tạo employee
+    }
 
     return NextResponse.json(employee, { status: 201 });
   } catch (error) {

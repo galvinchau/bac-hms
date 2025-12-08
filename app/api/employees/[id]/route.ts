@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import nodemailer from "nodemailer";
 
 // Helper: chọn điều kiện where từ param (có thể là id hoặc employeeId)
 function buildWhereFromParam(param: string) {
@@ -9,6 +10,74 @@ function buildWhereFromParam(param: string) {
   }
   // Mặc định là khoá kỹ thuật id (cuid)
   return { id: param };
+}
+
+/**
+ * Gửi email khi bật Mobile user
+ */
+async function sendMobileAccessEmail(employee: any) {
+  const {
+    SMTP_HOST,
+    SMTP_PORT,
+    SMTP_USER,
+    SMTP_PASS,
+    EMAIL_FROM,
+    MOBILE_APP_LOGIN_URL,
+  } = process.env;
+
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !EMAIL_FROM) {
+    console.warn("[MobileEmail] SMTP env not fully configured, skip email.");
+    return;
+  }
+
+  if (!employee.email) {
+    console.warn("[MobileEmail] Employee has no email, skip sending.");
+    return;
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS,
+    },
+  });
+
+  const loginUrl =
+    MOBILE_APP_LOGIN_URL || "https://blueangelscare.org/mobile-login";
+
+  const fullName = `${employee.firstName ?? ""} ${
+    employee.lastName ?? ""
+  }`.trim();
+
+  const html = `
+    <p>Hello ${fullName || "there"},</p>
+
+    <p>Your mobile access for <b>Blue Angels Care</b> has been activated.</p>
+
+    <ul>
+      <li><b>Employee ID:</b> ${employee.employeeId}</li>
+      <li><b>Login email:</b> ${SMTP_USER}</li>
+    </ul>
+
+    <p>Please click the link below to open the mobile login screen and sign in:</p>
+    <p><a href="${loginUrl}">${loginUrl}</a></p>
+
+    <p>If this message was not intended for you or you have trouble logging in,
+    please contact the Blue Angels Care office.</p>
+
+    <p>Thank you,<br/>
+    Blue Angels Care Support Team</p>
+  `;
+
+  await transporter.sendMail({
+    from: EMAIL_FROM,
+    to: employee.email,
+    subject: "Blue Angels Care - Mobile App Access",
+    html,
+  });
 }
 
 /**
@@ -55,6 +124,7 @@ export async function GET(
 /**
  * PUT /api/employees/:id
  * Update employee theo id hoặc employeeId (tuỳ param).
+ * Nếu isMobileUser chuyển từ FALSE -> TRUE thì gửi email kích hoạt.
  */
 export async function PUT(
   req: Request,
@@ -71,8 +141,24 @@ export async function PUT(
     }
 
     const where = buildWhereFromParam(id);
+
+    // Lấy trạng thái cũ trước khi update
+    const existing = await prisma.employee.findFirst({ where });
+    if (!existing) {
+      return NextResponse.json(
+        { message: "Employee not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await req.json();
     const data = body || {};
+
+    // Tính giá trị mới của isMobileUser
+    const newIsMobileUser =
+      typeof data.isMobileUser === "boolean"
+        ? data.isMobileUser
+        : existing.isMobileUser;
 
     const employee = await prisma.employee.update({
       where, // { id: ... } hoặc { employeeId: ... }
@@ -144,8 +230,20 @@ export async function PUT(
           typeof data.sendPolicyUpdates === "boolean"
             ? data.sendPolicyUpdates
             : true,
+
+        // ✅ Mobile User (giá trị mới đã tính ở trên)
+        isMobileUser: newIsMobileUser,
       },
     });
+
+    // Nếu từ FALSE -> TRUE thì gửi email (nhưng không chặn lỗi)
+    if (!existing.isMobileUser && newIsMobileUser) {
+      try {
+        await sendMobileAccessEmail(employee);
+      } catch (emailErr) {
+        console.error("Failed to send mobile access email (edit):", emailErr);
+      }
+    }
 
     return NextResponse.json(employee);
   } catch (error) {

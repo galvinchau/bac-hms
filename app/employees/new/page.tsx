@@ -60,6 +60,9 @@ interface EmployeeFormValues {
   sendScheduleChanges: boolean;
   sendPayrollUpdates: boolean;
   sendPolicyUpdates: boolean;
+
+  // Mobile access
+  isMobileUser: boolean;
 }
 
 const initialValues: EmployeeFormValues = {
@@ -114,6 +117,9 @@ const initialValues: EmployeeFormValues = {
   sendScheduleChanges: true,
   sendPayrollUpdates: true,
   sendPolicyUpdates: true,
+
+  // Mobile access
+  isMobileUser: false,
 };
 
 export default function NewEmployeePage() {
@@ -1022,6 +1028,23 @@ export default function NewEmployeePage() {
                 </label>
               </div>
             </div>
+          </section>
+
+          {/* Mobile user */}
+          <section className="rounded-2xl border border-bac-border bg-bac-panel p-4 shadow">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="isMobileUser"
+                checked={formValues.isMobileUser}
+                onChange={handleCheckboxChange}
+                className="h-4 w-4 rounded border-bac-border bg-bac-bg"
+              />
+              <span>Mobile user</span>
+            </label>
+            <p className="mt-1 text-xs text-bac-muted">
+              Check this if this employee should have access to the mobile app.
+            </p>
           </section>
 
           {/* Bottom actions */}

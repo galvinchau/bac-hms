@@ -60,6 +60,9 @@ interface EmployeeFormValues {
   sendScheduleChanges: boolean;
   sendPayrollUpdates: boolean;
   sendPolicyUpdates: boolean;
+
+  // Mobile access
+  isMobileUser: boolean;
 }
 
 const emptyValues: EmployeeFormValues = {
@@ -103,6 +106,7 @@ const emptyValues: EmployeeFormValues = {
   sendScheduleChanges: true,
   sendPayrollUpdates: true,
   sendPolicyUpdates: true,
+  isMobileUser: false,
 };
 
 export default function EditEmployeePage() {
@@ -174,6 +178,7 @@ export default function EditEmployeePage() {
           sendScheduleChanges: emp.sendScheduleChanges ?? true,
           sendPayrollUpdates: emp.sendPayrollUpdates ?? true,
           sendPolicyUpdates: emp.sendPolicyUpdates ?? true,
+          isMobileUser: emp.isMobileUser ?? false,
         };
 
         setFormValues(values);
@@ -474,7 +479,7 @@ export default function EditEmployeePage() {
                   <option value="High school">High school / GED</option>
                   <option value="College">College / Associate</option>
                   <option value="Bachelor">Bachelor&apos;s degree</option>
-                  <option value="Master">Master&apos;s degree</option>
+                  <option value="Master">Master&aposs degree</option>
                   <option value="Doctorate">Doctorate</option>
                   <option value="Other">Other</option>
                 </select>
@@ -1097,6 +1102,23 @@ export default function EditEmployeePage() {
                 </label>
               </div>
             </div>
+          </section>
+
+          {/* Mobile user */}
+          <section className="rounded-2xl border border-bac-border bg-bac-panel p-4 shadow">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="isMobileUser"
+                checked={formValues.isMobileUser}
+                onChange={handleCheckboxChange}
+                className="h-4 w-4 rounded border-bac-border bg-bac-bg"
+              />
+              <span>Mobile user</span>
+            </label>
+            <p className="mt-1 text-xs text-bac-muted">
+              Check this if this employee should have access to the mobile app.
+            </p>
           </section>
 
           {/* Bottom actions */}

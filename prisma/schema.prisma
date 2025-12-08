@@ -183,6 +183,8 @@ model Employee {
   sendPayrollUpdates  Boolean @default(true)
   sendPolicyUpdates   Boolean @default(true)
 
+  isMobileUser Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
