@@ -1,4 +1,4 @@
-// components/sidebar/Sidebar.tsx
+// web/components/sidebar/Sidebar.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -46,12 +46,17 @@ const MENU: MenuItem[] = [
     ],
   },
   { label: "Schedule", href: "/schedule" },
-  { label: "Visited Maintenance", href: "/visited" },
+  { label: "Visited Maintenance", href: "/visited-maintenance" },
   { label: "Medication", href: "/medication" },
   { label: "FireDrill", href: "/firedrill" },
   { label: "Billing", href: "/billing" },
   { label: "Authorizations", href: "/authorizations" },
-  { label: "Reports", href: "/reports" },
+
+  // Reports -> child
+  {
+    label: "Reports",
+    children: [{ label: "Daily Notes", href: "/reports/daily-notes" }],
+  },
 ];
 
 const ADMIN: MenuItem[] = [
@@ -65,7 +70,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
   const [openParent, setOpenParent] = useState<string | null>(null);
   const [userType, setUserType] = useState<string | null>(null);
 
-  // Lấy thông tin user hiện tại để biết có phải ADMIN không
   useEffect(() => {
     const loadMe = async () => {
       try {
@@ -80,7 +84,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     loadMe();
   }, []);
 
-  // Auto mở group cha nếu đang ở trong child
   useEffect(() => {
     let foundParent: string | null = null;
 
@@ -89,21 +92,15 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
       const hasActiveChild = m.children.some((c) =>
         pathname.startsWith(c.href)
       );
-      if (hasActiveChild) {
-        foundParent = m.label;
-      }
+      if (hasActiveChild) foundParent = m.label;
     });
 
     const adminHasActive = ADMIN.some((a) =>
       a.href ? pathname.startsWith(a.href) : false
     );
-    if (adminHasActive) {
-      foundParent = "Admin";
-    }
+    if (adminHasActive) foundParent = "Admin";
 
-    if (foundParent) {
-      setOpenParent(foundParent);
-    }
+    if (foundParent) setOpenParent(foundParent);
   }, [pathname]);
 
   const toggleParent = (label: string) => {
@@ -198,7 +195,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
   };
 
   const renderAdminSection = () => {
-    // Nếu không phải ADMIN thì không render menu Admin
     if (userType !== "ADMIN") return null;
 
     const isOpen = openParent === "Admin";
@@ -234,7 +230,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* LOGO + BRAND */}
       <div className="h-14 flex items-center gap-3 px-4 border-b border-bac-border">
         <Link
           href="/dashboard"
@@ -255,16 +250,13 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
         </Link>
       </div>
 
-      {/* NAV */}
       <div className="flex-1 overflow-y-auto py-3">
         <div className="px-4 text-xs uppercase tracking-wide text-bac-muted mb-2">
           Dashboard
         </div>
-
         <nav className="space-y-1 px-2">
           {MENU.map((m) => renderMainItem(m))}
         </nav>
-
         {renderAdminSection()}
       </div>
     </div>

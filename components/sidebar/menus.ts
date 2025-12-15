@@ -3,7 +3,7 @@
 export type MenuItem = {
   label: string;
   href?: string;
-  icon?: string; // optional: name for lucide-react icon if you use it in Sidebar
+  icon?: string;
   children?: MenuItem[];
   exact?: boolean;
 };
@@ -25,7 +25,6 @@ export const MAIN_ITEMS: MenuItem[] = [
     ],
   },
 
-  // Individual có 2 menu con theo yêu cầu
   {
     label: "Individual",
     children: [
@@ -34,7 +33,6 @@ export const MAIN_ITEMS: MenuItem[] = [
     ],
   },
 
-  // Employees: group với New / Search
   {
     label: "Employees",
     children: [
@@ -49,7 +47,12 @@ export const MAIN_ITEMS: MenuItem[] = [
   { label: "FireDrill", href: "/firedrill" },
   { label: "Billing", href: "/billing" },
   { label: "Authorizations", href: "/authorizations" },
-  { label: "Reports", href: "/reports" },
+
+  // Reports parent -> children
+  {
+    label: "Reports",
+    children: [{ label: "Daily Notes", href: "/reports/daily-notes" }],
+  },
 ];
 
 /** ========= ADMIN ITEMS ========= **/
@@ -59,7 +62,6 @@ export const ADMIN_ITEMS: MenuItem[] = [
   { label: "Change Password", href: "/admin/change-password" },
 ];
 
-/** ========= OPTIONAL GROUPED EXPORT (nếu Sidebar có dùng) ========= **/
 export const dashboardSection: MenuSection = {
   title: "DASHBOARD",
   items: MAIN_ITEMS,
