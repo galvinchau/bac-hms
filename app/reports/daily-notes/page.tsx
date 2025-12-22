@@ -1,41 +1,43 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type DailyNoteItem = {
   id: string;
-  date: string;
+  date: string; // ISO
+
   individualId: string;
   individualName: string;
+
   staffId: string;
   staffName: string | null;
+
   serviceCode: string;
   serviceName: string;
+
   scheduleStart: string;
   scheduleEnd: string;
   visitStart: string | null;
   visitEnd: string | null;
+
   mileage: number | null;
   isCanceled: boolean;
 
-  // ✅ New (preferred)
-  staffReportDocFileId?: string | null;
-  staffReportPdfFileId?: string | null;
-  individualReportDocFileId?: string | null;
-  individualReportPdfFileId?: string | null;
-
-  // ✅ Legacy fallback (older API)
-  staffReportFileId: string | null;
-  individualReportFileId: string | null;
+  // paths (optional; can be null)
+  staffReportDocPath?: string | null;
+  staffReportPdfPath?: string | null;
+  individualReportDocPath?: string | null;
+  individualReportPdfPath?: string | null;
 };
 
-type ApiResponse = {
-  items: DailyNoteItem[];
-};
+type ApiResponse = { items: DailyNoteItem[] };
 
-type ViewMode = "all" | "staff" | "individual";
+type Option = { value: string; label: string };
 
 export default function DailyNotesReportPage() {
+  const router = useRouter();
+
   const [items, setItems] = useState<DailyNoteItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,9 +45,15 @@ export default function DailyNotesReportPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  const [viewMode, setViewMode] = useState<ViewMode>("all");
+  const [staffId, setStaffId] = useState("ALL");
+  const [individualId, setIndividualId] = useState("ALL");
 
-  async function loadData(params?: { from?: string; to?: string }) {
+  async function loadData(params?: {
+    from?: string;
+    to?: string;
+    staffId?: string;
+    individualId?: string;
+  }) {
     try {
       setLoading(true);
       setError(null);
@@ -53,6 +61,11 @@ export default function DailyNotesReportPage() {
       const qs = new URLSearchParams();
       if (params?.from) qs.set("from", params.from);
       if (params?.to) qs.set("to", params.to);
+
+      if (params?.staffId && params.staffId !== "ALL")
+        qs.set("staffId", params.staffId);
+      if (params?.individualId && params.individualId !== "ALL")
+        qs.set("individualId", params.individualId);
 
       const res = await fetch(
         `/api/reports/daily-notes${qs.toString() ? `?${qs.toString()}` : ""}`,
@@ -83,138 +96,131 @@ export default function DailyNotesReportPage() {
     loadData();
   }, []);
 
+  // Build dropdown options from currently loaded items (fast + simple)
+  const staffOptions: Option[] = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const it of items) {
+      const name = it.staffName ?? "—";
+      if (it.staffId) map.set(it.staffId, name);
+    }
+    const opts = Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return [{ value: "ALL", label: "ALL" }, ...opts];
+  }, [items]);
+
+  const individualOptions: Option[] = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const it of items) {
+      if (it.individualId) map.set(it.individualId, it.individualName);
+    }
+    const opts = Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return [{ value: "ALL", label: "ALL" }, ...opts];
+  }, [items]);
+
   function handleApplyFilter() {
     loadData({
       from: fromDate || undefined,
       to: toDate || undefined,
+      staffId,
+      individualId,
     });
   }
 
-  const visibleItems = useMemo(() => {
-    return items.filter((item) => {
-      const staffHas =
-        !!item.staffReportDocFileId ||
-        !!item.staffReportPdfFileId ||
-        !!item.staffReportFileId;
-
-      const individualHas =
-        !!item.individualReportDocFileId ||
-        !!item.individualReportPdfFileId ||
-        !!item.individualReportFileId;
-
-      if (viewMode === "staff") return staffHas;
-      if (viewMode === "individual") return individualHas;
-      return true;
-    });
-  }, [items, viewMode]);
-
-  function driveViewUrl(fileId: string) {
-    return `https://drive.google.com/file/d/${fileId}/view`;
+  function formatDateOnly(iso: string) {
+    if (!iso) return "";
+    return iso.slice(0, 10);
   }
 
-  function renderDocPdfLinks(opts: {
-    docId?: string | null;
-    pdfId?: string | null;
-    // legacy fallback (assume it's PDF)
-    legacySingleId?: string | null;
-  }) {
-    const docId = opts.docId ?? null;
-    const pdfId = opts.pdfId ?? null;
-    const legacyPdfId = opts.legacySingleId ?? null;
+  // Direct download base (client side)
+  const DOWNLOAD_BASE =
+    process.env.NEXT_PUBLIC_BAC_API_BASE_URL || "http://127.0.0.1:3333";
 
-    const finalPdfId = pdfId || legacyPdfId;
+  function downloadUrl(dailyNoteId: string, type: "staff-doc" | "staff-pdf") {
+    return `${DOWNLOAD_BASE}/reports/daily-notes/${dailyNoteId}/download/${type}`;
+  }
 
-    if (!docId && !finalPdfId) {
-      return <span className="text-slate-500">—</span>;
-    }
-
+  function renderDocPdfLinks(dailyNoteId: string) {
     return (
-      <div className="flex items-center gap-2 whitespace-nowrap">
-        {docId ? (
-          <a
-            href={driveViewUrl(docId)}
-            target="_blank"
-            rel="noreferrer"
-            className="text-bac-primary underline underline-offset-2 hover:text-bac-green"
-            title="Open DOC"
-          >
-            DOC
-          </a>
-        ) : (
-          <span className="text-slate-600">DOC</span>
-        )}
-
+      <div
+        className="flex items-center gap-2 whitespace-nowrap"
+        onClick={(e) => e.stopPropagation()} // IMPORTANT: keep row click working
+      >
+        <a
+          href={downloadUrl(dailyNoteId, "staff-doc")}
+          className="text-bac-primary underline underline-offset-2 hover:text-bac-green"
+          title="Download DOC"
+        >
+          DOC
+        </a>
         <span className="text-slate-600">|</span>
-
-        {finalPdfId ? (
-          <a
-            href={driveViewUrl(finalPdfId)}
-            target="_blank"
-            rel="noreferrer"
-            className="text-bac-primary underline underline-offset-2 hover:text-bac-green"
-            title="Open PDF"
-          >
-            PDF
-          </a>
-        ) : (
-          <span className="text-slate-600">PDF</span>
-        )}
+        <a
+          href={downloadUrl(dailyNoteId, "staff-pdf")}
+          className="text-bac-primary underline underline-offset-2 hover:text-bac-green"
+          title="Download PDF"
+        >
+          PDF
+        </a>
       </div>
     );
   }
 
+  function openPreview(id: string) {
+    router.push(`/reports/daily-notes/${id}`);
+  }
+
   return (
     <div className="px-6 py-6 space-y-6">
-      {/* TITLE + view mode */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">
-            Daily Notes Report
-          </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            View and search Daily Notes submitted from BAC Mobile.
-          </p>
-        </div>
-
-        {/* View mode toggle */}
-        <div className="inline-flex rounded-full bg-slate-800 p-1 text-xs">
-          <button
-            className={`px-4 py-1 rounded-full transition ${
-              viewMode === "all"
-                ? "bg-bac-primary text-white"
-                : "text-slate-300 hover:text-white"
-            }`}
-            onClick={() => setViewMode("all")}
-          >
-            All
-          </button>
-          <button
-            className={`px-4 py-1 rounded-full transition ${
-              viewMode === "staff"
-                ? "bg-bac-primary text-white"
-                : "text-slate-300 hover:text-white"
-            }`}
-            onClick={() => setViewMode("staff")}
-          >
-            Staff Reports
-          </button>
-          <button
-            className={`px-4 py-1 rounded-full transition ${
-              viewMode === "individual"
-                ? "bg-bac-primary text-white"
-                : "text-slate-300 hover:text-white"
-            }`}
-            onClick={() => setViewMode("individual")}
-          >
-            Individual Reports
-          </button>
-        </div>
+      {/* TITLE */}
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold text-white">
+          Daily Notes Report
+        </h1>
+        <p className="text-sm text-slate-400">
+          View and search Daily Notes submitted from BAC Mobile.
+        </p>
       </div>
 
       {/* FILTER BAR */}
       <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end">
+          <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-4">
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                DSP (Staff)
+              </label>
+              <select
+                value={staffId}
+                onChange={(e) => setStaffId(e.target.value)}
+                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+              >
+                {staffOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Individual
+              </label>
+              <select
+                value={individualId}
+                onChange={(e) => setIndividualId(e.target.value)}
+                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+              >
+                {individualOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex flex-col">
               <label className="mb-1 text-xs font-medium text-slate-300">
                 From date
@@ -223,7 +229,7 @@ export default function DailyNotesReportPage() {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
               />
             </div>
 
@@ -235,7 +241,7 @@ export default function DailyNotesReportPage() {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
               />
             </div>
           </div>
@@ -269,8 +275,7 @@ export default function DailyNotesReportPage() {
                 <th className="px-3 py-2 text-left">Visit (Start–End)</th>
                 <th className="px-3 py-2 text-left">Mileage</th>
                 <th className="px-3 py-2 text-left">Canceled?</th>
-                <th className="px-3 py-2 text-left">Staff Report</th>
-                <th className="px-3 py-2 text-left">Individual Report</th>
+                <th className="px-3 py-2 text-left">Report</th>
               </tr>
             </thead>
 
@@ -278,7 +283,7 @@ export default function DailyNotesReportPage() {
               {loading && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={9}
                     className="px-3 py-4 text-center text-slate-300"
                   >
                     Loading...
@@ -286,10 +291,10 @@ export default function DailyNotesReportPage() {
                 </tr>
               )}
 
-              {!loading && visibleItems.length === 0 && (
+              {!loading && items.length === 0 && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={9}
                     className="px-3 py-4 text-center text-slate-400"
                   >
                     No data.
@@ -298,35 +303,23 @@ export default function DailyNotesReportPage() {
               )}
 
               {!loading &&
-                visibleItems.map((item) => (
+                items.map((item) => (
                   <tr
                     key={item.id}
-                    className="border-t border-slate-800 odd:bg-slate-950 even:bg-slate-900/70 hover:bg-slate-800/70"
+                    onClick={() => openPreview(item.id)}
+                    className="cursor-pointer border-t border-slate-800 odd:bg-slate-950 even:bg-slate-900/70 hover:bg-slate-800/70"
+                    title="Click to open Daily Note preview"
                   >
                     <td className="px-3 py-2 text-slate-100 whitespace-nowrap">
-                      {item.date}
+                      {formatDateOnly(item.date)}
                     </td>
 
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col">
-                        <span className="text-[13px] font-medium text-slate-100">
-                          {item.individualName}
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          {item.individualId}
-                        </span>
-                      </div>
+                    <td className="px-3 py-2 text-[13px] font-medium text-slate-100">
+                      {item.individualName}
                     </td>
 
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col">
-                        <span className="text-[13px] font-medium text-slate-100">
-                          {item.staffName ?? "—"}
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          {item.staffId}
-                        </span>
-                      </div>
+                    <td className="px-3 py-2 text-[13px] font-medium text-slate-100">
+                      {item.staffName ?? "—"}
                     </td>
 
                     <td className="px-3 py-2">
@@ -366,21 +359,7 @@ export default function DailyNotesReportPage() {
                       </span>
                     </td>
 
-                    <td className="px-3 py-2">
-                      {renderDocPdfLinks({
-                        docId: item.staffReportDocFileId,
-                        pdfId: item.staffReportPdfFileId,
-                        legacySingleId: item.staffReportFileId,
-                      })}
-                    </td>
-
-                    <td className="px-3 py-2">
-                      {renderDocPdfLinks({
-                        docId: item.individualReportDocFileId,
-                        pdfId: item.individualReportPdfFileId,
-                        legacySingleId: item.individualReportFileId,
-                      })}
-                    </td>
+                    <td className="px-3 py-2">{renderDocPdfLinks(item.id)}</td>
                   </tr>
                 ))}
             </tbody>

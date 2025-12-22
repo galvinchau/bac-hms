@@ -1,36 +1,39 @@
-﻿// web/app/api/reports/daily-notes/route.ts
+// C:\bac-hms\web\app\api\reports\daily-notes\[id]\route.ts
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-function buildUrl(base: string, path: string, search: URLSearchParams) {
+function buildUrl(base: string, path: string) {
   const baseClean = base.replace(/\/+$/, "");
   const pathClean = path.startsWith("/") ? path : `/${path}`;
-  const qs = search.toString();
-  return `${baseClean}${pathClean}${qs ? `?${qs}` : ""}`;
+  return `${baseClean}${pathClean}`;
 }
 
-export async function GET(req: Request) {
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> | { id: string } }
+) {
   try {
-    const url = new URL(req.url);
+    // ✅ Next.js (newer) may provide params as a Promise
+    const rawParams: any = (ctx as any)?.params;
+    const params =
+      typeof rawParams?.then === "function" ? await rawParams : rawParams;
 
-    const from = url.searchParams.get("from") ?? "";
-    const to = url.searchParams.get("to") ?? "";
-    const staffId = url.searchParams.get("staffId") ?? "";
-    const individualId = url.searchParams.get("individualId") ?? "";
+    const id = params?.id;
+    if (!id) {
+      return NextResponse.json({ message: "Missing id" }, { status: 400 });
+    }
 
     const API_BASE =
       process.env.BAC_API_BASE_URL ||
       process.env.NEXT_PUBLIC_BAC_API_BASE_URL ||
       "http://127.0.0.1:3333";
 
-    const search = new URLSearchParams();
-    if (from) search.set("from", from);
-    if (to) search.set("to", to);
-    if (staffId) search.set("staffId", staffId);
-    if (individualId) search.set("individualId", individualId);
-
-    const target = buildUrl(API_BASE, "/reports/daily-notes", search);
+    // GET /reports/daily-notes/:id
+    const target = buildUrl(
+      API_BASE,
+      `/reports/daily-notes/${encodeURIComponent(id)}`
+    );
 
     let upstreamRes: Response;
     try {
@@ -44,7 +47,6 @@ export async function GET(req: Request) {
         {
           message: "Failed to reach upstream (fetch failed)",
           upstream: target,
-          hint: "Check bac-api is running and listening on the expected port (usually 3333).",
           error: err?.message ?? String(err),
         },
         { status: 502 }
