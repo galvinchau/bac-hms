@@ -1,6 +1,7 @@
+// Web\app\reports\daily-notes\[id]\page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 type DailyNoteDetail = {
@@ -58,6 +59,9 @@ export default function DailyNotePreviewPage() {
   const [dn, setDn] = useState<DailyNoteDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Keep last good data to prevent “flash then disappear”
+  const lastGoodRef = useRef<DailyNoteDetail | null>(null);
+
   const DOWNLOAD_BASE =
     process.env.NEXT_PUBLIC_BAC_API_BASE_URL || "http://127.0.0.1:3333";
 
@@ -66,7 +70,7 @@ export default function DailyNotePreviewPage() {
     return `${DOWNLOAD_BASE}/reports/daily-notes/${id}/download/${type}`;
   }
 
-  // SAMPLE fallback (layout review)
+  // SAMPLE fallback (layout review only)
   const SAMPLE: DailyNoteDetail = useMemo(
     () => ({
       id: "SAMPLE_ID",
@@ -119,6 +123,9 @@ export default function DailyNotePreviewPage() {
   );
 
   useEffect(() => {
+    if (!id) return;
+
+    const ac = new AbortController();
     let mounted = true;
 
     async function load() {
@@ -126,10 +133,9 @@ export default function DailyNotePreviewPage() {
         setLoading(true);
         setError(null);
 
-        if (!id) throw new Error("Missing id in URL");
-
         const res = await fetch(`/api/reports/daily-notes/${id}`, {
           cache: "no-store",
+          signal: ac.signal,
         });
 
         if (!res.ok) {
@@ -144,12 +150,31 @@ export default function DailyNotePreviewPage() {
         const data = (await res.json()) as DailyNoteDetail;
 
         if (!mounted) return;
+
+        // Save last good
+        lastGoodRef.current = data;
         setDn(data);
       } catch (e: any) {
-        console.error(e);
+        // Ignore abort (happens in dev/strict mode rerenders)
+        const msg = e?.message ?? "Failed to load Daily Note detail";
+        const isAbort =
+          e?.name === "AbortError" ||
+          String(msg).toLowerCase().includes("aborted");
+
         if (!mounted) return;
-        setError(e?.message ?? "Failed to load Daily Note detail");
-        setDn(SAMPLE); // still show layout
+        if (isAbort) return;
+
+        console.error(e);
+        setError(msg);
+
+        // ✅ IMPORTANT:
+        // Do NOT overwrite real data with SAMPLE.
+        // Only use SAMPLE if we have no last-good data at all.
+        if (lastGoodRef.current) {
+          setDn(lastGoodRef.current);
+        } else {
+          setDn(SAMPLE);
+        }
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -157,8 +182,10 @@ export default function DailyNotePreviewPage() {
     }
 
     load();
+
     return () => {
       mounted = false;
+      ac.abort();
     };
   }, [id, SAMPLE]);
 
@@ -198,15 +225,49 @@ export default function DailyNotePreviewPage() {
   const cancelReason = safeStr(
     model.cancelReason || payload.cancelReason || ""
   );
+
+  // ✅ Outcome: accept more keys (some payloads might store different field name)
   const outcomeText = safeStr(
-    pick(payload, ["outcomeText", "OutcomeText"], "")
+    pick(
+      payload,
+      [
+        "outcomeText",
+        "OutcomeText",
+        "outcome",
+        "Outcome",
+        "outcomeStatement",
+        "OutcomeStatement",
+      ],
+      ""
+    )
   );
 
+  // ✅ Address: accept more keys
   const address1 = safeStr(
-    pick(payload, ["patientAddress1", "PatientAddress1"], "")
+    pick(
+      payload,
+      [
+        "patientAddress1",
+        "PatientAddress1",
+        "individualAddress1",
+        "IndividualAddress1",
+        "address1",
+      ],
+      ""
+    )
   );
   const address2 = safeStr(
-    pick(payload, ["patientAddress2", "PatientAddress2"], "")
+    pick(
+      payload,
+      [
+        "patientAddress2",
+        "PatientAddress2",
+        "individualAddress2",
+        "IndividualAddress2",
+        "address2",
+      ],
+      ""
+    )
   );
 
   const supportsDuringService = safeStr(
@@ -245,10 +306,8 @@ export default function DailyNotePreviewPage() {
   );
 
   function onPrint() {
-    // ✅ Print isolation: hide entire app shell, show only preview pages
     document.body.classList.add("dn-printing");
     window.print();
-    // remove after print dialog closes
     setTimeout(() => document.body.classList.remove("dn-printing"), 300);
   }
 
@@ -271,7 +330,7 @@ export default function DailyNotePreviewPage() {
           {loading && <p className="mt-2 text-xs text-slate-400">Loading...</p>}
           {error && (
             <div className="mt-3 rounded-lg border border-red-500/60 bg-red-950/60 px-3 py-2 text-xs text-red-200">
-              Error (layout still shown using SAMPLE): {error}
+              Error: {error}
             </div>
           )}
         </div>
@@ -704,14 +763,11 @@ export default function DailyNotePreviewPage() {
 
       {/* ✅ Print isolation styles */}
       <style jsx global>{`
-        /* When user clicks Print, we add body.dn-printing */
         @media print {
-          /* Hide entire app shell by default */
           body.dn-printing * {
             visibility: hidden !important;
           }
 
-          /* Only show preview pages */
           body.dn-printing .dn-print-root,
           body.dn-printing .dn-print-root * {
             visibility: visible !important;
@@ -724,7 +780,6 @@ export default function DailyNotePreviewPage() {
             width: 100% !important;
           }
 
-          /* Page breaks */
           body.dn-printing .dn-page {
             page-break-after: always;
             break-after: page;
@@ -737,7 +792,6 @@ export default function DailyNotePreviewPage() {
             break-after: auto;
           }
 
-          /* Ensure white background */
           body.dn-printing {
             background: white !important;
           }
