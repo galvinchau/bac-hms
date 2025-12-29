@@ -77,6 +77,10 @@ type PreviewData = {
 
   STAFF_SIGNATURE?: string;
   INDIVIDUAL_SIGNATURE?: string;
+
+  // ✅ NEW: data URLs for Preview <img/>
+  StaffSignatureDataUrl?: string;
+  IndividualSignatureDataUrl?: string;
 };
 
 function safeStr(v: any) {
@@ -91,6 +95,10 @@ function isoDateOnly(iso?: string) {
 
 function sanitizeForDisplay(s: string) {
   return s || "—";
+}
+
+function isDataUrlImage(s: string) {
+  return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(s || "");
 }
 
 export default function DailyNotePreviewPage() {
@@ -171,6 +179,8 @@ export default function DailyNotePreviewPage() {
       DinnerOffered: "Yes",
       STAFF_SIGNATURE: "",
       INDIVIDUAL_SIGNATURE: "",
+      StaffSignatureDataUrl: "",
+      IndividualSignatureDataUrl: "",
     }),
     []
   );
@@ -204,9 +214,7 @@ export default function DailyNotePreviewPage() {
         // 2) Load preview (template-mapped data) ✅ this is what DOC/PDF uses
         const res2 = await fetch(
           `/api/reports/daily-notes/${id}/preview?type=staff`,
-          {
-            cache: "no-store",
-          }
+          { cache: "no-store" }
         );
 
         if (!res2.ok) {
@@ -303,6 +311,21 @@ export default function DailyNotePreviewPage() {
   const dinnerTime = safeStr(prev.DinnerTime);
   const dinnerHad = safeStr(prev.DinnerHad);
   const dinnerOffered = safeStr(prev.DinnerOffered);
+
+  // ✅ SIGNATURE URLS:
+  // Prefer preview new fields, fallback to detail.payload (prevents "lost signature" in preview)
+  const staffSigUrl =
+    safeStr(prev.StaffSignatureDataUrl) ||
+    safeStr(
+      detail.payload?.dspSignature || detail.payload?.staffSignature || ""
+    );
+  const individualSigUrl =
+    safeStr(prev.IndividualSignatureDataUrl) ||
+    safeStr(
+      detail.payload?.individualSignature ||
+        detail.payload?.clientSignature ||
+        ""
+    );
 
   function onPrint() {
     document.body.classList.add("dn-printing");
@@ -739,11 +762,34 @@ export default function DailyNotePreviewPage() {
                   <tr>
                     <td className="w-1/2 border border-black p-2 align-top">
                       <div className="font-semibold">Staff Signature:</div>
-                      <div className="mt-8 border-b border-black" />
+
+                      <div className="mt-2 min-h-[52px]">
+                        {isDataUrlImage(staffSigUrl) ? (
+                          <img
+                            src={staffSigUrl}
+                            alt="Staff Signature"
+                            className="h-[48px] max-w-[260px] object-contain"
+                          />
+                        ) : null}
+                      </div>
+
+                      <div className="mt-2 border-b border-black" />
                     </td>
+
                     <td className="w-1/2 border border-black p-2 align-top">
                       <div className="font-semibold">Individual Signature:</div>
-                      <div className="mt-8 border-b border-black" />
+
+                      <div className="mt-2 min-h-[52px]">
+                        {isDataUrlImage(individualSigUrl) ? (
+                          <img
+                            src={individualSigUrl}
+                            alt="Individual Signature"
+                            className="h-[48px] max-w-[260px] object-contain"
+                          />
+                        ) : null}
+                      </div>
+
+                      <div className="mt-2 border-b border-black" />
                     </td>
                   </tr>
                 </tbody>
