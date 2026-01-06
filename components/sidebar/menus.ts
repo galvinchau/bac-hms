@@ -46,6 +46,11 @@ export const MAIN_ITEMS: MenuItem[] = [
   { label: "Medication", href: "/medication" },
   { label: "FireDrill", href: "/firedrill" },
   { label: "Billing", href: "/billing" },
+
+  // ✅ NEW MENUS (Option 1 - Locked)
+  { label: "Payroll", href: "/payroll" },
+  { label: "Time Keeping", href: "/time-keeping" },
+
   { label: "Authorizations", href: "/authorizations" },
 
   // Reports parent -> children
