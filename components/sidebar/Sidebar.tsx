@@ -1,7 +1,7 @@
 // web/components/sidebar/Sidebar.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ChevronDown } from "lucide-react";
@@ -9,6 +9,23 @@ import { usePathname } from "next/navigation";
 
 type SidebarProps = {
   onLogoClick?: () => void;
+};
+
+type MeResponse = {
+  user?: {
+    id?: string;
+    email?: string | null;
+    userType?: string | null; // e.g. "ADMIN" | "HR" | "DSP" | "STAFF" ...
+  } | null;
+  employee?: {
+    staffId: string;
+    firstName: string;
+    lastName: string;
+    position: string; // mapped from Employee.role
+    address: string;
+    phone: string;
+    email: string;
+  } | null;
 };
 
 type MenuChild = {
@@ -49,15 +66,16 @@ const MENU: MenuItem[] = [
   { label: "Visited Maintenance", href: "/visited-maintenance" },
   { label: "Medication", href: "/medication" },
   { label: "FireDrill", href: "/firedrill" },
-  { label: "Billing", href: "/billing" },
 
-  // ✅ NEW MENUS (Option 1 - Locked)
+  // 🔒 Admin-only (menu)
+  { label: "Billing", href: "/billing" },
   { label: "Payroll", href: "/payroll" },
+
+  // ✅ Office/Admin/HR can see
   { label: "Time Keeping", href: "/time-keeping" },
 
   { label: "Authorizations", href: "/authorizations" },
 
-  // Reports -> child
   {
     label: "Reports",
     children: [{ label: "Daily Notes", href: "/reports/daily-notes" }],
@@ -70,18 +88,39 @@ const ADMIN: MenuItem[] = [
   { label: "Change Password", href: "/admin/password" },
 ];
 
+function norm(s?: string | null) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function isOfficeRole(roleOrPosition?: string | null) {
+  const r = norm(roleOrPosition);
+  // You can tighten this later if needed
+  return (
+    r === "office staff" ||
+    r === "office" ||
+    r.includes("office") ||
+    r.includes("admin assistant")
+  );
+}
+
 export default function Sidebar({ onLogoClick }: SidebarProps) {
   const pathname = usePathname();
   const [openParent, setOpenParent] = useState<string | null>(null);
+
   const [userType, setUserType] = useState<string | null>(null);
+  const [employeePosition, setEmployeePosition] = useState<string | null>(null);
 
   useEffect(() => {
     const loadMe = async () => {
       try {
-        const res = await fetch("/api/auth/me");
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
         if (!res.ok) return;
-        const data = await res.json();
-        setUserType(data.user?.userType ?? null);
+        const data = (await res.json()) as MeResponse;
+
+        setUserType((data.user?.userType ?? null) as any);
+        setEmployeePosition((data.employee?.position ?? null) as any);
       } catch (err) {
         console.error("Failed to load current user", err);
       }
@@ -89,10 +128,35 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     loadMe();
   }, []);
 
+  const isAdmin = userType === "ADMIN";
+  const isHR = userType === "HR";
+
+  // ✅ This is the key fix:
+  // Time Keeping visible if ADMIN/HR OR Employee role/position is Office Staff
+  const canSeeTimeKeeping = useMemo(() => {
+    if (isAdmin || isHR) return true;
+    return isOfficeRole(employeePosition);
+  }, [isAdmin, isHR, employeePosition]);
+
+  function canSeeMenuItem(m: MenuItem) {
+    // Hide admin-only menus unless ADMIN
+    if (m.href === "/billing" || m.href === "/payroll") return isAdmin;
+
+    // Time Keeping visible to ADMIN/HR/Office Staff (via employee.position)
+    if (m.href === "/time-keeping") return canSeeTimeKeeping;
+
+    return true;
+  }
+
+  const VISIBLE_MENU = useMemo(() => {
+    return MENU.filter(canSeeMenuItem);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userType, employeePosition, canSeeTimeKeeping]);
+
   useEffect(() => {
     let foundParent: string | null = null;
 
-    MENU.forEach((m) => {
+    VISIBLE_MENU.forEach((m) => {
       if (!m.children) return;
       const hasActiveChild = m.children.some((c) =>
         pathname.startsWith(c.href)
@@ -106,7 +170,7 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     if (adminHasActive) foundParent = "Admin";
 
     if (foundParent) setOpenParent(foundParent);
-  }, [pathname]);
+  }, [pathname, userType, employeePosition, VISIBLE_MENU]);
 
   const toggleParent = (label: string) => {
     setOpenParent((prev) => (prev === label ? null : label));
@@ -200,7 +264,8 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
   };
 
   const renderAdminSection = () => {
-    if (userType !== "ADMIN") return null;
+    // 🔒 Admin section itself should only be visible to ADMIN
+    if (!isAdmin) return null;
 
     const isOpen = openParent === "Admin";
 
@@ -259,9 +324,9 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
         <div className="px-4 text-xs uppercase tracking-wide text-bac-muted mb-2">
           Dashboard
         </div>
-        <nav className="space-y-1 px-2">
-          {MENU.map((m) => renderMainItem(m))}
-        </nav>
+
+        <nav className="space-y-1 px-2">{VISIBLE_MENU.map(renderMainItem)}</nav>
+
         {renderAdminSection()}
       </div>
     </div>

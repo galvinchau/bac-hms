@@ -45,15 +45,16 @@ export const MAIN_ITEMS: MenuItem[] = [
   { label: "Visited Maintenance", href: "/visited-maintenance" },
   { label: "Medication", href: "/medication" },
   { label: "FireDrill", href: "/firedrill" },
-  { label: "Billing", href: "/billing" },
 
-  // ✅ NEW MENUS (Option 1 - Locked)
+  // 🔒 ADMIN only (menu visibility)
+  { label: "Billing", href: "/billing" },
   { label: "Payroll", href: "/payroll" },
+
+  // ✅ Visible to ADMIN / HR / Office Staff (by employee.role)
   { label: "Time Keeping", href: "/time-keeping" },
 
   { label: "Authorizations", href: "/authorizations" },
 
-  // Reports parent -> children
   {
     label: "Reports",
     children: [{ label: "Daily Notes", href: "/reports/daily-notes" }],

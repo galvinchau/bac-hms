@@ -1,9 +1,12 @@
 import { PrismaClient } from "@prisma/client";
+import crypto from "crypto";
+
 const prisma = new PrismaClient();
 
 async function main() {
   console.log("Seeding roles & privileges...");
 
+  // ✅ Direction A: System User Types
   const roles = [
     {
       code: "ADMIN",
@@ -13,28 +16,56 @@ async function main() {
     {
       code: "COORDINATOR",
       name: "Coordinator",
-      description: "Manage individuals & schedules",
+      description: "Coordination access",
+    },
+    {
+      code: "OFFICE",
+      name: "Office",
+      description: "Office access (Time Keeping, ops)",
     },
     {
       code: "DSP",
       name: "Direct Support Professional",
       description: "DSP-level access",
     },
+    {
+      code: "HR",
+      name: "HR",
+      description: "HR access (Employees/HR + Time Keeping)",
+    },
   ];
 
+  // ✅ Privileges (fine-grained API rights)
   const privileges = [
-    { code: "VIEW_INDIVIDUALS", name: "View Individuals", description: "" },
-    { code: "EDIT_INDIVIDUALS", name: "Edit Individuals", description: "" },
-    { code: "VIEW_SCHEDULE", name: "View Schedule", description: "" },
-    { code: "EDIT_SCHEDULE", name: "Edit Schedule", description: "" },
-    { code: "VIEW_PAYROLL", name: "View Payroll", description: "" },
-    { code: "EDIT_PAYROLL", name: "Edit Payroll", description: "" },
+    { code: "VIEW_INDIVIDUALS", name: "Individuals - View", description: "" },
+    {
+      code: "EDIT_INDIVIDUALS",
+      name: "Individuals - Add/Update",
+      description: "",
+    },
+
+    { code: "VIEW_SCHEDULE", name: "Schedule - View", description: "" },
+    { code: "EDIT_SCHEDULE", name: "Schedule - Add/Update", description: "" },
+
+    { code: "VIEW_PAYROLL", name: "Payroll - View", description: "" },
+    { code: "EDIT_PAYROLL", name: "Payroll - Add/Update", description: "" },
+
+    // ✅ NEW: Time Keeping (match UI style)
+    { code: "VIEW_TIMEKEEPING", name: "Time Keeping - View", description: "" },
+    {
+      code: "EDIT_TIMEKEEPING",
+      name: "Time Keeping - Add/Update",
+      description: "",
+    },
   ];
 
   for (const r of roles) {
     await prisma.role.upsert({
       where: { code: r.code },
-      update: {},
+      update: {
+        name: r.name,
+        description: r.description,
+      },
       create: {
         id: crypto.randomUUID(),
         code: r.code,
@@ -47,7 +78,10 @@ async function main() {
   for (const p of privileges) {
     await prisma.privilege.upsert({
       where: { code: p.code },
-      update: {},
+      update: {
+        name: p.name,
+        description: p.description,
+      },
       create: {
         id: crypto.randomUUID(),
         code: p.code,

@@ -2,45 +2,73 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// ✅ Direction A: "Manage User Roles" should list ONLY valid User Types.
+// This endpoint now returns "system roles" = user types (not HR/payroll positions).
+
+const VALID_USER_TYPES = [
+  "ADMIN",
+  "COORDINATOR",
+  "OFFICE",
+  "DSP",
+  "HR",
+] as const;
+
+function labelFor(code: string) {
+  switch (code) {
+    case "ADMIN":
+      return {
+        name: "Admin",
+        description: "Full access to Admin, Billing, Payroll.",
+      };
+    case "COORDINATOR":
+      return {
+        name: "Coordinator",
+        description: "Coordination access (no Admin super powers).",
+      };
+    case "OFFICE":
+      return {
+        name: "Office",
+        description: "Office access (Time Keeping, ops screens).",
+      };
+    case "DSP":
+      return {
+        name: "DSP",
+        description: "DSP access (no Admin/Billing/Payroll).",
+      };
+    case "HR":
+      return {
+        name: "HR",
+        description: "HR access (Employee/HR + Time Keeping).",
+      };
+    default:
+      return { name: code, description: "" };
+  }
+}
+
 export async function GET() {
   try {
-    // 1) Lấy danh sách role nhưng chỉ giữ ADMIN + COORDINATOR
-    const roles = await prisma.role.findMany({
-      where: {
-        code: {
-          in: ["ADMIN", "COORDINATOR"],
-        },
-      },
-      orderBy: {
-        code: "asc",
-      },
-    });
-
-    // 2) GroupBy User theo userType để đếm số user mỗi loại
+    // Count users per userType
     const userGroups = await prisma.user.groupBy({
       by: ["userType"],
-      _count: {
-        _all: true,
-      },
+      _count: { _all: true },
     });
 
     const userCountByType: Record<string, number> = {};
     for (const g of userGroups) {
-      // g.userType là string (ADMIN / COORDINATOR / DSP / STAFF ...)
-      if (g.userType) {
-        userCountByType[g.userType] = g._count._all;
-      }
+      if (g.userType) userCountByType[g.userType] = g._count._all;
     }
 
-    // 3) Map ra dữ liệu trả về cho UI
-    const result = roles.map((r) => ({
-      id: r.id,
-      code: r.code,
-      name: r.name,
-      description: r.description ?? "",
-      // Nếu chưa có user nào type = role.code thì cho = 0
-      userCount: userCountByType[r.code] ?? 0,
-    }));
+    // Return ONLY valid user types
+    const result = VALID_USER_TYPES.map((code) => {
+      const meta = labelFor(code);
+      return {
+        id: code, // ✅ stable id for UI (not DB role id)
+        code,
+        name: meta.name,
+        description: meta.description,
+        userCount: userCountByType[code] ?? 0,
+      };
+    });
 
     return NextResponse.json(result);
   } catch (err) {

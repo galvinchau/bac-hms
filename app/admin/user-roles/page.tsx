@@ -1,7 +1,7 @@
 // app/admin/user-roles/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type RoleRow = {
   id: string;
@@ -10,6 +10,15 @@ type RoleRow = {
   description: string | null;
   userCount: number;
 };
+
+// Direction A system order
+const SYSTEM_ORDER = ["ADMIN", "COORDINATOR", "OFFICE", "DSP", "HR"] as const;
+
+function normalizeCode(code: string) {
+  // legacy
+  if (code === "STAFF") return "OFFICE";
+  return code;
+}
 
 export default function ManageUserRolesPage() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
@@ -37,8 +46,29 @@ export default function ManageUserRolesPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // 🔹 ẨN ROLE DSP KHỎI BẢNG (không đụng tới DB)
-  const visibleRoles = roles.filter((r) => r.code !== "DSP");
+  const visibleRoles = useMemo(() => {
+    // Normalize + remove STAFF (legacy) to avoid confusion
+    const normalized = roles
+      .map((r) => ({
+        ...r,
+        code: normalizeCode(r.code),
+      }))
+      .filter((r) => r.code !== "STAFF");
+
+    // Sort to system order first; unknown codes go to bottom
+    const orderIndex = new Map<string, number>(
+      SYSTEM_ORDER.map((c, i) => [c, i])
+    );
+
+    normalized.sort((a, b) => {
+      const ai = orderIndex.has(a.code) ? orderIndex.get(a.code)! : 999;
+      const bi = orderIndex.has(b.code) ? orderIndex.get(b.code)! : 999;
+      if (ai !== bi) return ai - bi;
+      return a.code.localeCompare(b.code);
+    });
+
+    return normalized;
+  }, [roles]);
 
   return (
     <div className="p-6 space-y-4">
@@ -48,8 +78,9 @@ export default function ManageUserRolesPage() {
       </div>
 
       <p className="text-sm text-bac-muted max-w-2xl">
-        Roles determine the high-level access level for each user (e.g. ADMIN,
-        COORDINATOR, DSP). This screen is read-only for now.
+        Roles here represent{" "}
+        <span className="font-semibold">system user types</span> (ADMIN,
+        COORDINATOR, OFFICE, DSP, HR). This screen is read-only for now.
       </p>
 
       {error && (
@@ -90,7 +121,7 @@ export default function ManageUserRolesPage() {
             ) : (
               visibleRoles.map((r) => (
                 <tr
-                  key={r.id}
+                  key={`${r.id}-${r.code}`}
                   className="border-t border-bac-border hover:bg-bac-bg/40"
                 >
                   <td className="px-3 py-2 uppercase text-xs font-semibold">
@@ -109,7 +140,7 @@ export default function ManageUserRolesPage() {
       </div>
 
       <p className="text-xs text-bac-muted">
-        Note: Roles are linked to users via the Admin &gt; Manage Users screen.
+        Note: Users are assigned a system User Type via Admin &gt; Manage Users.
       </p>
     </div>
   );

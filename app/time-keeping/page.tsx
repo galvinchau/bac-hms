@@ -1,3 +1,4 @@
+// web/app/time-keeping/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -6,7 +7,7 @@ type MeResponse = {
   user?: {
     id?: string;
     email?: string | null;
-    userType?: string | null; // "ADMIN" | "OFFICE" | "HR"
+    userType?: string | null; // "ADMIN" | "OFFICE" | "HR" | "STAFF" | ...
   } | null;
 
   employee?: EmployeeProfile | null;
@@ -170,12 +171,30 @@ function safeJson<T>(x: any, fallback: T): T {
   }
 }
 
+function isOfficePosition(position?: string | null) {
+  const p = (position || "").trim().toLowerCase();
+  // Accept: "Office Staff", "Office", "Office Manager", etc.
+  return p.includes("office");
+}
+
+type Ctx = {
+  userEmail: string;
+  userType: string;
+  userId: string;
+};
+
 export default function TimeKeepingPage() {
   const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
 
   const [meLoading, setMeLoading] = useState(true);
   const [meError, setMeError] = useState<string | null>(null);
+
+  const [meUser, setMeUser] = useState<{
+    id?: string;
+    email?: string | null;
+    userType?: string | null;
+  } | null>(null);
 
   const [userType, setUserType] = useState<string | null>(null);
   const [employee, setEmployee] = useState<EmployeeProfile | null>(null);
@@ -244,7 +263,6 @@ export default function TimeKeepingPage() {
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const filteredWeeklyApprovals = useMemo(() => {
-    // backend can filter too, but we keep client-side filter as extra safety
     const q = approvalSearch.trim().toLowerCase();
 
     return weeklyApprovals.filter((r) => {
@@ -306,20 +324,48 @@ export default function TimeKeepingPage() {
     setModalError(null);
   }
 
+  // ======== Context helpers (fix admin@local) ========
+  function getCtxOrThrow(): Ctx {
+    const email = (meUser?.email || "").toString().trim();
+    const id = (meUser?.id || "").toString().trim();
+    const type = (meUser?.userType || userType || "").toString().trim();
+
+    if (!email) {
+      throw new Error(
+        'Missing userEmail context. Please re-login ("/api/auth/me" must return user.email).'
+      );
+    }
+
+    return {
+      userEmail: email,
+      userId: id || email, // fallback: use email
+      userType: type || "OFFICE",
+    };
+  }
+
+  function appendCtxToSearchParams(qs: URLSearchParams, ctx: Ctx) {
+    // Backend accepts query fallback: userEmail/userType/userId
+    qs.set("userEmail", ctx.userEmail);
+    qs.set("userType", ctx.userType);
+    qs.set("userId", ctx.userId);
+    return qs;
+  }
+
   async function apiAdminListWeekly() {
     if (!isApprover) return;
     setApprovalLoading(true);
     setApprovalError(null);
 
     try {
+      const ctx = getCtxOrThrow();
+
       const qs = new URLSearchParams({
         from: weekStartISO,
         to: weekEndISO,
         q: approvalSearch.trim(),
         status: approvalStatusFilter,
-        // fallback (controller allows), but service should validate from headers too
-        userType: userType || "",
       });
+      appendCtxToSearchParams(qs, ctx);
 
       const res = await fetch(`${API_BASE}/time-keeping/admin/weekly?${qs}`, {
         method: "GET",
@@ -336,7 +382,6 @@ export default function TimeKeepingPage() {
 
       const json = (await res.json()) as any;
 
-      // Accept either: array or {rows:[...]}
       const arr: any[] = Array.isArray(json)
         ? json
         : Array.isArray(json?.rows)
@@ -374,10 +419,13 @@ export default function TimeKeepingPage() {
     setModalError(null);
 
     try {
+      const ctx = getCtxOrThrow();
+
       const qs = new URLSearchParams({
         from: weekStartISO,
         to: weekEndISO,
       });
+      appendCtxToSearchParams(qs, ctx);
 
       const res = await fetch(
         `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
@@ -399,7 +447,6 @@ export default function TimeKeepingPage() {
 
       const json = (await res.json()) as any;
 
-      // Support either {row, attendance} or a flat row
       const row = (json?.row ?? json) as any;
       const attendance = (json?.attendance ?? []) as any[];
 
@@ -450,6 +497,7 @@ export default function TimeKeepingPage() {
 
     setModalBusy("SAVE_ADJUST");
     try {
+      const ctx = getCtxOrThrow();
       const adjustedMinutes = Math.round(n * 60);
 
       const res = await fetch(
@@ -465,6 +513,10 @@ export default function TimeKeepingPage() {
             to: weekEndISO,
             adjustedMinutes,
             reason: adjustReason || "",
+            // ✅ ctx (fix approvedBy)
+            userEmail: ctx.userEmail,
+            userType: ctx.userType,
+            userId: ctx.userId,
           }),
         }
       );
@@ -476,7 +528,6 @@ export default function TimeKeepingPage() {
         );
       }
 
-      // Refresh list + detail
       await apiAdminListWeekly();
       await openReview(activeApproval);
     } catch (e: any) {
@@ -492,6 +543,8 @@ export default function TimeKeepingPage() {
 
     setModalBusy("APPROVE");
     try {
+      const ctx = getCtxOrThrow();
+
       const res = await fetch(
         `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
           activeApproval.staffId
@@ -504,6 +557,10 @@ export default function TimeKeepingPage() {
             from: weekStartISO,
             to: weekEndISO,
             reason: adjustReason || "",
+            // ✅ ctx
+            userEmail: ctx.userEmail,
+            userType: ctx.userType,
+            userId: ctx.userId,
           }),
         }
       );
@@ -533,6 +590,8 @@ export default function TimeKeepingPage() {
 
     setModalBusy("UNLOCK");
     try {
+      const ctx = getCtxOrThrow();
+
       const res = await fetch(
         `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
           activeApproval.staffId
@@ -545,6 +604,10 @@ export default function TimeKeepingPage() {
             from: weekStartISO,
             to: weekEndISO,
             reason: adjustReason,
+            // ✅ ctx
+            userEmail: ctx.userEmail,
+            userType: ctx.userType,
+            userId: ctx.userId,
           }),
         }
       );
@@ -571,29 +634,51 @@ export default function TimeKeepingPage() {
     try {
       const res = await fetch("/api/auth/me", { cache: "no-store" });
       if (!res.ok) throw new Error("Not authenticated.");
+
       const data = (await res.json()) as MeResponse;
 
-      const t = data.user?.userType ?? null;
-      setUserType(t);
+      setMeUser(data.user ?? null);
 
-      // DSP must NOT access
-      if (t !== "ADMIN" && t !== "OFFICE" && t !== "HR") {
-        throw new Error(
-          "Access denied. Time Keeping is for Office staff only."
-        );
-      }
+      const tRaw = data.user?.userType ?? null;
+      const t = (tRaw || "").toString().trim().toUpperCase();
+      setUserType(t || null);
 
       // Employee profile MUST come from /api/auth/me (avoid 404 /employees/me)
-      if (!data.employee?.staffId) {
+      const emp = data.employee ?? null;
+      if (!emp?.staffId) {
         throw new Error(
-          "Employee profile not found. Please ensure this office user is linked to an Employee record."
+          "Employee profile not found. Please ensure this user is linked to an Employee record."
         );
       }
 
-      setEmployee(data.employee);
+      // ✅ NEW RULE:
+      // Allow Time Keeping if:
+      // - ADMIN/HR (always)
+      // - OR Employee.position contains "Office" (Office Staff / Office Manager / ...)
+      const officeByPosition = isOfficePosition(emp.position);
+      const allowed = t === "ADMIN" || t === "HR" || officeByPosition;
+
+      if (!allowed) {
+        const pos = emp.position || "-";
+        const ut = t || "-";
+        throw new Error(
+          `Access denied. Time Keeping is for Office staff only. (userType=${ut}, position=${pos})`
+        );
+      }
+
+      // ✅ Must have email for ctx
+      const email = (data.user?.email || "").toString().trim();
+      if (!email) {
+        throw new Error(
+          "Missing user email in session. Please re-login so /api/auth/me returns user.email."
+        );
+      }
+
+      setEmployee(emp);
     } catch (e: any) {
       setMeError(e?.message || "Failed to load current user.");
       setEmployee(null);
+      setMeUser(null);
     } finally {
       setMeLoading(false);
     }
@@ -605,11 +690,14 @@ export default function TimeKeepingPage() {
     setBusy("REFRESH");
 
     try {
+      const ctx = getCtxOrThrow();
+
       const qs = new URLSearchParams({
         staffId: staffId.trim(),
         from: weekStartISO,
         to: weekEndISO,
       });
+      appendCtxToSearchParams(qs, ctx);
 
       const [sRes, rRes] = await Promise.all([
         fetch(`${API_BASE}/time-keeping/status?${qs.toString()}`, {
@@ -655,6 +743,7 @@ export default function TimeKeepingPage() {
     setBusy("CHECKIN");
 
     try {
+      const ctx = getCtxOrThrow();
       const loc = await getBrowserLocation();
 
       const res = await fetch(`${API_BASE}/time-keeping/check-in`, {
@@ -668,6 +757,10 @@ export default function TimeKeepingPage() {
           accuracy: loc.accuracy,
           source: "WEB",
           clientTime: new Date().toISOString(),
+          // ✅ ctx
+          userEmail: ctx.userEmail,
+          userType: ctx.userType,
+          userId: ctx.userId,
         }),
       });
 
@@ -689,6 +782,7 @@ export default function TimeKeepingPage() {
     setBusy("CHECKOUT");
 
     try {
+      const ctx = getCtxOrThrow();
       const loc = await getBrowserLocation();
 
       const res = await fetch(`${API_BASE}/time-keeping/check-out`, {
@@ -702,6 +796,10 @@ export default function TimeKeepingPage() {
           accuracy: loc.accuracy,
           source: "WEB",
           clientTime: new Date().toISOString(),
+          // ✅ ctx
+          userEmail: ctx.userEmail,
+          userType: ctx.userType,
+          userId: ctx.userId,
         }),
       });
 
@@ -730,7 +828,6 @@ export default function TimeKeepingPage() {
   }, [employee?.staffId, weekStartISO, weekEndISO]);
 
   useEffect(() => {
-    // load approval list when approver + week changes
     if (!isApprover) return;
     apiAdminListWeekly();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -748,6 +845,22 @@ export default function TimeKeepingPage() {
     const end = new Date(weekEndISO);
     return isWeekendDay(start) || isWeekendDay(end);
   }, [weekStartISO, weekEndISO]);
+
+  // ✅ helper: convert approvedBy email -> display name (if it is the current logged-in approver)
+  function getApprovedByDisplay(approvedByEmail?: string | null) {
+    const email = (approvedByEmail || "").toLowerCase().trim();
+    const myEmail = (meUser?.email || "").toLowerCase().trim();
+
+    if (email && myEmail && email === myEmail) {
+      const fn = (employee?.firstName || "").trim();
+      const ln = (employee?.lastName || "").trim();
+      const full = `${fn} ${ln}`.trim();
+      if (full) return full;
+    }
+
+    // fallback (keep old behavior)
+    return approvedByEmail || "-";
+  }
 
   return (
     <div className="min-h-screen bg-bac-bg text-bac-text">
@@ -1152,7 +1265,7 @@ export default function TimeKeepingPage() {
                     <th className="py-3 pr-3">Final</th>
                     <th className="py-3 pr-3">Flags</th>
                     <th className="py-3 pr-3">Status</th>
-                    <th className="py-3 pr-3">Approved</th>
+                    <th className="py-3 pr-3">Approved by</th>
                     <th className="py-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -1213,10 +1326,14 @@ export default function TimeKeepingPage() {
                             </span>
                           </td>
 
+                          {/* ✅ ONLY CHANGE HERE: "Approved by" + show First/Last name when possible */}
                           <td className="py-3 pr-3 text-xs text-bac-muted">
                             {r.status === "APPROVED" ? (
                               <>
-                                <div>{r.approvedBy || "-"}</div>
+                                <div className="font-medium text-bac-text">
+                                  Approved by
+                                </div>
+                                <div>{getApprovedByDisplay(r.approvedBy)}</div>
                                 <div>{fmtDateTimeMMDD(r.approvedAt)}</div>
                               </>
                             ) : (

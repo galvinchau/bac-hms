@@ -1,17 +1,17 @@
 // app/admin/users/[id]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-type Role = { id: string; code: string; name: string };
 type Privilege = { id: string; code: string; name: string };
 type Supervisor = { id: string; code: string; name: string };
+type UserTypeLookup = { code: string; name: string; description?: string };
 
 type Lookups = {
-  roles: Role[];
   privileges: Privilege[];
   supervisors: Supervisor[];
+  userTypes?: UserTypeLookup[];
 };
 
 type LoadedUser = {
@@ -21,10 +21,23 @@ type LoadedUser = {
   lastName: string;
   locked: boolean;
   userType: string;
-  roles: Role[];
   privileges: Privilege[];
   supervisors: Supervisor[];
 };
+
+const FALLBACK_USER_TYPES: UserTypeLookup[] = [
+  { code: "ADMIN", name: "Admin" },
+  { code: "COORDINATOR", name: "Coordinator" },
+  { code: "OFFICE", name: "Office" },
+  { code: "DSP", name: "DSP" },
+  { code: "HR", name: "HR" },
+];
+
+// legacy UI normalization
+function normalizeUserTypeUi(input: string): string {
+  if (input === "STAFF") return "OFFICE";
+  return input || "ADMIN";
+}
 
 export default function EditUserPage() {
   const router = useRouter();
@@ -40,7 +53,6 @@ export default function EditUserPage() {
   const [userType, setUserType] = useState("ADMIN");
 
   const [lookups, setLookups] = useState<Lookups | null>(null);
-  const [assignedRoleIds, setAssignedRoleIds] = useState<string[]>([]);
   const [assignedPrivilegeIds, setAssignedPrivilegeIds] = useState<string[]>(
     []
   );
@@ -90,9 +102,8 @@ export default function EditUserPage() {
         setFirstName(userData.firstName);
         setLastName(userData.lastName);
         setLocked(userData.locked);
-        setUserType(userData.userType || "ADMIN");
+        setUserType(normalizeUserTypeUi(userData.userType || "ADMIN"));
 
-        setAssignedRoleIds(userData.roles.map((r) => r.id));
         setAssignedPrivilegeIds(userData.privileges.map((p) => p.id));
         setAssignedSupervisorIds(userData.supervisors.map((s) => s.id));
       } catch (err: any) {
@@ -103,9 +114,7 @@ export default function EditUserPage() {
       }
     }
 
-    if (userId) {
-      loadAll();
-    }
+    if (userId) loadAll();
   }, [userId]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -132,8 +141,7 @@ export default function EditUserPage() {
           firstName,
           lastName,
           locked,
-          userType,
-          roleIds: assignedRoleIds,
+          userType: normalizeUserTypeUi(userType),
           privilegeIds: assignedPrivilegeIds,
           supervisorIds: assignedSupervisorIds,
         }),
@@ -145,9 +153,7 @@ export default function EditUserPage() {
       }
 
       setSuccess("User updated successfully.");
-      setTimeout(() => {
-        router.push("/admin/users");
-      }, 1000);
+      setTimeout(() => router.push("/admin/users"), 800);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Failed to update user.");
@@ -156,10 +162,14 @@ export default function EditUserPage() {
     }
   }
 
-  const availableRoles =
-    lookups?.roles.filter((r) => !assignedRoleIds.includes(r.id)) ?? [];
-  const assignedRoles =
-    lookups?.roles.filter((r) => assignedRoleIds.includes(r.id)) ?? [];
+  const userTypeOptions = useMemo(() => {
+    const list = lookups?.userTypes?.length
+      ? lookups.userTypes
+      : FALLBACK_USER_TYPES;
+    return list
+      .filter((x) => x.code !== "STAFF")
+      .map((x) => ({ ...x, code: normalizeUserTypeUi(x.code) }));
+  }, [lookups]);
 
   const availablePrivileges =
     lookups?.privileges.filter((p) => !assignedPrivilegeIds.includes(p.id)) ??
@@ -202,7 +212,6 @@ export default function EditUserPage() {
             <input
               type="email"
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm"
-              placeholder="Enter Username/Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="off"
@@ -215,7 +224,6 @@ export default function EditUserPage() {
             <input
               type="email"
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm"
-              placeholder="Confirm Username/Email"
               value={emailConfirm}
               onChange={(e) => setEmailConfirm(e.target.value)}
               autoComplete="off"
@@ -223,7 +231,7 @@ export default function EditUserPage() {
           </div>
         </div>
 
-        {/* Last / First / Locked / UserType */}
+        {/* Name / Locked / UserType */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="text-xs font-semibold text-bac-muted uppercase">
@@ -245,20 +253,15 @@ export default function EditUserPage() {
               onChange={(e) => setFirstName(e.target.value)}
             />
           </div>
-          <div className="flex items-end gap-2">
-            <label className="text-xs font-semibold text-bac-muted uppercase">
-              Locked
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={locked}
+                onChange={(e) => setLocked(e.target.checked)}
+              />
+              <span>Lock account</span>
             </label>
-            <div className="flex items-center gap-2 mt-1">
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={locked}
-                  onChange={(e) => setLocked(e.target.checked)}
-                />
-                <span>Lock account</span>
-              </label>
-            </div>
           </div>
           <div>
             <label className="text-xs font-semibold text-bac-muted uppercase">
@@ -266,14 +269,18 @@ export default function EditUserPage() {
             </label>
             <select
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm"
-              value={userType}
-              onChange={(e) => setUserType(e.target.value)}
+              value={normalizeUserTypeUi(userType)}
+              onChange={(e) => setUserType(normalizeUserTypeUi(e.target.value))}
             >
-              <option value="ADMIN">ADMIN</option>
-              <option value="COORDINATOR">COORDINATOR</option>
-              <option value="DSP">DSP</option>
-              <option value="STAFF">STAFF</option>
+              {userTypeOptions.map((ut) => (
+                <option key={ut.code} value={ut.code}>
+                  {ut.code}
+                </option>
+              ))}
             </select>
+            <div className="mt-1 text-[11px] text-bac-muted">
+              User Type controls system access (menus + API).
+            </div>
           </div>
         </div>
 
@@ -281,68 +288,6 @@ export default function EditUserPage() {
           <div className="text-sm text-bac-muted">Loading data...</div>
         ) : (
           <>
-            {/* ROLES */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs font-semibold text-bac-muted uppercase mb-1">
-                  Available Roles
-                </div>
-                <div className="rounded-xl border border-bac-border bg-bac-panel max-h-60 overflow-auto text-sm">
-                  {availableRoles.map((r) => (
-                    <div
-                      key={r.id}
-                      className="flex items-center justify-between px-3 py-1 border-b border-bac-border/40 last:border-b-0"
-                    >
-                      <span>{r.code}</span>
-                      <button
-                        type="button"
-                        className="text-xs underline"
-                        onClick={() =>
-                          setAssignedRoleIds((prev) => assignItem(prev, r.id))
-                        }
-                      >
-                        &gt;&gt;
-                      </button>
-                    </div>
-                  ))}
-                  {availableRoles.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No more roles.
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-bac-muted uppercase mb-1">
-                  Assigned Roles
-                </div>
-                <div className="rounded-xl border border-bac-border bg-bac-panel max-h-60 overflow-auto text-sm">
-                  {assignedRoles.map((r) => (
-                    <div
-                      key={r.id}
-                      className="flex items-center justify-between px-3 py-1 border-b border-bac-border/40 last:border-b-0"
-                    >
-                      <span>{r.code}</span>
-                      <button
-                        type="button"
-                        className="text-xs underline"
-                        onClick={() =>
-                          setAssignedRoleIds((prev) => unassignItem(prev, r.id))
-                        }
-                      >
-                        &lt;&lt;
-                      </button>
-                    </div>
-                  ))}
-                  {assignedRoles.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No roles assigned.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
             {/* PRIVILEGES */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -369,11 +314,6 @@ export default function EditUserPage() {
                       </button>
                     </div>
                   ))}
-                  {availablePrivileges.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No more privileges.
-                    </div>
-                  )}
                 </div>
               </div>
               <div>
@@ -400,11 +340,6 @@ export default function EditUserPage() {
                       </button>
                     </div>
                   ))}
-                  {assignedPrivileges.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No privileges assigned.
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -437,11 +372,6 @@ export default function EditUserPage() {
                       </button>
                     </div>
                   ))}
-                  {availableSupervisors.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No more supervisors.
-                    </div>
-                  )}
                 </div>
               </div>
               <div>
@@ -470,18 +400,12 @@ export default function EditUserPage() {
                       </button>
                     </div>
                   ))}
-                  {assignedSupervisors.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-bac-muted">
-                      No supervisors assigned.
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
           </>
         )}
 
-        {/* Buttons */}
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="button"

@@ -2,12 +2,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// ✅ Direction A: userType is source of truth for permissions/menus.
+// Roles are aligned to userType (optional legacy mapping) to avoid confusion.
+
+const VALID_USER_TYPES = [
+  "ADMIN",
+  "COORDINATOR",
+  "OFFICE",
+  "DSP",
+  "HR",
+] as const;
+type ValidUserType = (typeof VALID_USER_TYPES)[number];
+
+function isValidUserType(x: any): x is ValidUserType {
+  return (
+    typeof x === "string" && (VALID_USER_TYPES as readonly string[]).includes(x)
+  );
+}
+
 // Helper: lấy id từ URL, ví dụ /api/admin/users/123 => "123"
 function getUserIdFromUrl(req: NextRequest): string | null {
   try {
     const url = new URL(req.url);
     const segments = url.pathname.split("/").filter(Boolean);
-    // [..., "api", "admin", "users", "<id>"]
     const id = segments[segments.length - 1];
     if (!id || id === "users") return null;
     return id;
@@ -18,7 +35,6 @@ function getUserIdFromUrl(req: NextRequest): string | null {
 
 // =========================================
 // GET /api/admin/users/:id
-// Load chi tiết user + roles/privileges
 // =========================================
 export async function GET(req: NextRequest) {
   try {
@@ -46,8 +62,13 @@ export async function GET(req: NextRequest) {
       firstName: user.firstName,
       lastName: user.lastName,
       locked: user.locked,
+
+      // ✅ Source of truth:
       userType: user.userType,
+
+      // legacy (keep returning for now, but UI should not use it to decide menus)
       roles: user.roles.map((ur) => ur.role),
+
       privileges: user.privileges.map((up) => up.privilege),
       supervisors: user.supervisors.map((us) => ({
         id: us.supervisor.id,
@@ -66,7 +87,8 @@ export async function GET(req: NextRequest) {
 
 // =========================================
 // PUT /api/admin/users/:id
-// Update user + gán lại roles/privileges/supervisors
+// Update user + privileges + supervisors
+// ✅ Roles are auto-aligned to userType (Direction A)
 // =========================================
 export async function PUT(req: NextRequest) {
   try {
@@ -82,7 +104,8 @@ export async function PUT(req: NextRequest) {
       lastName,
       locked,
       userType,
-      roleIds,
+      // roleIds is accepted but will NOT be trusted in Direction A
+      roleIds: _roleIds,
       privilegeIds,
       supervisorIds,
     } = body as {
@@ -91,7 +114,7 @@ export async function PUT(req: NextRequest) {
       lastName: string;
       locked: boolean;
       userType: string;
-      roleIds: string[];
+      roleIds?: string[];
       privilegeIds: string[];
       supervisorIds: string[];
     };
@@ -103,12 +126,13 @@ export async function PUT(req: NextRequest) {
       );
     }
 
+    const normalizedUserType: ValidUserType = isValidUserType(userType)
+      ? userType
+      : "ADMIN";
+
     // check trùng email với user khác
     const existing = await prisma.user.findFirst({
-      where: {
-        email,
-        NOT: { id },
-      },
+      where: { email, NOT: { id } },
     });
     if (existing) {
       return NextResponse.json(
@@ -125,7 +149,7 @@ export async function PUT(req: NextRequest) {
           firstName,
           lastName,
           locked: !!locked,
-          userType: userType || "ADMIN",
+          userType: normalizedUserType,
         },
       });
 
@@ -134,13 +158,21 @@ export async function PUT(req: NextRequest) {
       await tx.userPrivilege.deleteMany({ where: { userId: user.id } });
       await tx.userSupervisor.deleteMany({ where: { userId: user.id } });
 
-      // set mới
-      if (Array.isArray(roleIds) && roleIds.length > 0) {
-        await tx.userRole.createMany({
-          data: roleIds.map((roleId) => ({ userId: user.id, roleId })),
+      // ✅ Direction A: Roles are derived from userType (optional legacy mapping).
+      // If Role table has matching codes (ADMIN/COORDINATOR/OFFICE/DSP/HR),
+      // we will attach exactly 1 role = userType. If not found, no roles attached.
+      const roleMatch = await tx.role.findFirst({
+        where: { code: normalizedUserType },
+        select: { id: true },
+      });
+
+      if (roleMatch?.id) {
+        await tx.userRole.create({
+          data: { userId: user.id, roleId: roleMatch.id },
         });
       }
 
+      // privileges
       if (Array.isArray(privilegeIds) && privilegeIds.length > 0) {
         await tx.userPrivilege.createMany({
           data: privilegeIds.map((privilegeId) => ({
@@ -150,6 +182,7 @@ export async function PUT(req: NextRequest) {
         });
       }
 
+      // supervisors
       if (Array.isArray(supervisorIds) && supervisorIds.length > 0) {
         await tx.userSupervisor.createMany({
           data: supervisorIds.map((supervisorId) => ({

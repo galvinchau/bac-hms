@@ -5,7 +5,7 @@ import { getSessionFromRequest } from "./lib/auth/session";
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Bỏ qua static, _next, tất cả API (để API tự trả 401, không redirect)
+  // Skip static, _next, and all API routes (API returns 401 itself)
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
@@ -14,17 +14,16 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Các trang public (chỉ có /login)
+  // Public pages
   if (pathname === "/login") {
     const user = getSessionFromRequest(req);
-    // Đã đăng nhập mà vẫn vào /login thì đẩy về dashboard
     if (user) {
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
     return NextResponse.next();
   }
 
-  // Các trang còn lại: yêu cầu phải có session
+  // Require session for all other pages
   const user = getSessionFromRequest(req);
   if (!user) {
     const url = new URL("/login", req.url);
@@ -32,15 +31,19 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Chặn /admin/** nếu không phải ADMIN
-  if (pathname.startsWith("/admin") && user.userType !== "ADMIN") {
+  // ✅ ADMIN-only areas (block direct URL access)
+  const adminOnlyPrefixes = ["/admin", "/payroll", "/billing"];
+  if (
+    adminOnlyPrefixes.some((p) => pathname.startsWith(p)) &&
+    user.userType !== "ADMIN"
+  ) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
   return NextResponse.next();
 }
 
-// Áp dụng cho mọi route trừ static/_next (đã lọc ở trên)
+// Apply to all routes except static assets
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
