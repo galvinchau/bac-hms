@@ -130,6 +130,36 @@ function clampNonNeg(n: number) {
   return n;
 }
 
+function format2(n: number) {
+  return Number.isFinite(n) ? n.toFixed(2) : "";
+}
+
+function normalizeDecimalInputString(s: string) {
+  // allow typing "", ".", "29.", "29.7", "29.75"
+  // strip invalid chars except one dot
+  const raw = (s ?? "").toString();
+  if (!raw) return "";
+  let out = "";
+  let dot = false;
+  for (const ch of raw) {
+    if (ch >= "0" && ch <= "9") out += ch;
+    else if (ch === "." && !dot) {
+      out += ".";
+      dot = true;
+    }
+  }
+  return out;
+}
+
+function parseAndFormat2(s: string): { value: number | null; text: string } {
+  const t = (s || "").trim();
+  if (!t || t === ".") return { value: null, text: "" };
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return { value: null, text: "" };
+  const fixed = n.toFixed(2);
+  return { value: Number(fixed), text: fixed };
+}
+
 // ✅ Payroll formula (UI reference; backend must match)
 function computeExtrasPay(r: PayrollRow) {
   const rate = Number.isFinite(r.rate) ? r.rate : 0;
@@ -179,8 +209,28 @@ function computeExtrasPay(r: PayrollRow) {
 }
 
 export default function PayrollPage() {
-  const API_BASE =
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+  // ✅ FIX: robust API base resolution
+  const API_BASE = useMemo(() => {
+    const envBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "")
+      .toString()
+      .trim()
+      .replace(/\/$/, "");
+
+    if (envBase) return envBase;
+
+    // client-side fallback for local dev
+    if (typeof window !== "undefined") {
+      const host = window.location.hostname;
+      const proto = window.location.protocol;
+      if (host === "localhost" || host === "127.0.0.1") {
+        // common Nest port (adjust if yours differs)
+        return `${proto}//${host}:4000`;
+      }
+    }
+
+    // empty => we will show a clear error before calling fetch
+    return "";
+  }, []);
 
   // Tabs
   const [tab, setTab] = useState<"RUN" | "RATES">("RUN");
@@ -239,6 +289,11 @@ export default function PayrollPage() {
     "ALL"
   );
   const [showSensitive, setShowSensitive] = useState(false);
+
+  // ✅ NEW: keep editable text so user can type decimals naturally
+  const [rateDraft, setRateDraft] = useState<
+    Record<string, { rate: string; trainingRate: string; mileageRate: string }>
+  >({});
 
   const [error, setError] = useState<string | null>(null);
 
@@ -308,11 +363,21 @@ export default function PayrollPage() {
     });
   }, [employees, empQ, empRoleFilter]);
 
+  function requireApiBaseOrThrow() {
+    if (!API_BASE) {
+      throw new Error(
+        "API base is not configured. Set NEXT_PUBLIC_API_BASE_URL (e.g. http://localhost:4000) or ensure local fallback is correct."
+      );
+    }
+  }
+
   async function generatePayroll() {
     setError(null);
     setIsGenerating(true);
 
     try {
+      requireApiBaseOrThrow();
+
       // POST /payroll/generate { from, to }
       const res = await fetch(`${API_BASE}/payroll/generate`, {
         method: "POST",
@@ -351,21 +416,13 @@ export default function PayrollPage() {
     }
   }
 
-  // ===============================
-  // DOC EXPORT TEMPLATE (LANDSCAPE)
-  // Columns MUST match Payroll Details table:
-  // Employee, SSN#, Type, Rate, Hours, OT Hours,
-  // Training hour, Sick hour, Holiday hour, PTO hour, Mileage,
-  // Regular Pay, OT Pay, Extras Pay, Total
-  // ===============================
-
   async function exportDoc() {
     if (!run) return;
     setError(null);
 
     try {
-      // POST /payroll/export/doc { runId, weeklyExtras, periodFrom, periodTo, staffTypeFilter }
-      // ✅ Include weeklyExtras so DOC can include Training/Sick/Holiday/PTO/Mileage columns & totals.
+      requireApiBaseOrThrow();
+
       const res = await fetch(`${API_BASE}/payroll/export/doc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -405,7 +462,8 @@ export default function PayrollPage() {
     setError(null);
 
     try {
-      // POST /payroll/export/pdf { runId, weeklyExtras, periodFrom, periodTo, staffTypeFilter }
+      requireApiBaseOrThrow();
+
       const res = await fetch(`${API_BASE}/payroll/export/pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -444,6 +502,8 @@ export default function PayrollPage() {
     setError(null);
     setIsLoadingEmployees(true);
     try {
+      requireApiBaseOrThrow();
+
       // GET /payroll/employees
       const res = await fetch(`${API_BASE}/payroll/employees`, {
         method: "GET",
@@ -460,16 +520,26 @@ export default function PayrollPage() {
       const json = (await res.json()) as EmployeePayrollLite[];
       const arr = Array.isArray(json) ? json : [];
 
-      // ensure defaults
-      setEmployees(
-        arr.map((e) => ({
-          ...e,
+      const normalized = arr.map((e) => ({
+        ...e,
+        trainingRate: typeof e.trainingRate === "number" ? e.trainingRate : 10,
+        mileageRate: typeof e.mileageRate === "number" ? e.mileageRate : 0.3,
+      }));
+
+      setEmployees(normalized);
+
+      // ✅ initialize drafts with 2-decimal strings
+      const nextDraft: typeof rateDraft = {};
+      for (const e of normalized) {
+        nextDraft[e.employeeId] = {
+          rate: typeof e.rate === "number" ? format2(e.rate) : "",
           trainingRate:
-            typeof e.trainingRate === "number" ? e.trainingRate : 10,
-          // ✅ Mileage reimbursement default = $0.30/mile
-          mileageRate: typeof e.mileageRate === "number" ? e.mileageRate : 0.3,
-        }))
-      );
+            typeof e.trainingRate === "number" ? format2(e.trainingRate) : "",
+          mileageRate:
+            typeof e.mileageRate === "number" ? format2(e.mileageRate) : "",
+        };
+      }
+      setRateDraft(nextDraft);
     } catch (e: any) {
       setError(e?.message || "Load employees failed");
     } finally {
@@ -478,30 +548,114 @@ export default function PayrollPage() {
   }
 
   function updateRateLocal(employeeId: string, rateText: string) {
-    const rate = toNumberOrNull(rateText);
+    const cleaned = normalizeDecimalInputString(rateText);
+    setRateDraft((prev) => ({
+      ...prev,
+      [employeeId]: {
+        rate: cleaned,
+        trainingRate: prev[employeeId]?.trainingRate ?? "",
+        mileageRate: prev[employeeId]?.mileageRate ?? "",
+      },
+    }));
+
+    const rate = toNumberOrNull(cleaned);
     setEmployees((prev) =>
       prev.map((e) => (e.employeeId === employeeId ? { ...e, rate } : e))
     );
   }
 
+  function blurRate(employeeId: string) {
+    const cur = rateDraft[employeeId]?.rate ?? "";
+    const { value, text } = parseAndFormat2(cur);
+
+    setRateDraft((prev) => ({
+      ...prev,
+      [employeeId]: {
+        rate: text,
+        trainingRate: prev[employeeId]?.trainingRate ?? "",
+        mileageRate: prev[employeeId]?.mileageRate ?? "",
+      },
+    }));
+
+    setEmployees((prev) =>
+      prev.map((e) => (e.employeeId === employeeId ? { ...e, rate: value } : e))
+    );
+  }
+
   function updateTrainingRateLocal(employeeId: string, rateText: string) {
-    const r = toNumberOrNull(rateText);
+    const cleaned = normalizeDecimalInputString(rateText);
+    setRateDraft((prev) => ({
+      ...prev,
+      [employeeId]: {
+        rate: prev[employeeId]?.rate ?? "",
+        trainingRate: cleaned,
+        mileageRate: prev[employeeId]?.mileageRate ?? "",
+      },
+    }));
+
+    const r = toNumberOrNull(cleaned);
     setEmployees((prev) =>
       prev.map((e) =>
-        e.employeeId === employeeId
-          ? { ...e, trainingRate: r === null ? null : r }
-          : e
+        e.employeeId === employeeId ? { ...e, trainingRate: r } : e
+      )
+    );
+  }
+
+  function blurTrainingRate(employeeId: string) {
+    const cur = rateDraft[employeeId]?.trainingRate ?? "";
+    const { value, text } = parseAndFormat2(cur);
+
+    setRateDraft((prev) => ({
+      ...prev,
+      [employeeId]: {
+        rate: prev[employeeId]?.rate ?? "",
+        trainingRate: text,
+        mileageRate: prev[employeeId]?.mileageRate ?? "",
+      },
+    }));
+
+    setEmployees((prev) =>
+      prev.map((e) =>
+        e.employeeId === employeeId ? { ...e, trainingRate: value } : e
       )
     );
   }
 
   function updateMileageRateLocal(employeeId: string, rateText: string) {
-    const r = toNumberOrNull(rateText);
+    const cleaned = normalizeDecimalInputString(rateText);
+    setRateDraft((prev) => ({
+      ...prev,
+      [employeeId]: {
+        rate: prev[employeeId]?.rate ?? "",
+        trainingRate: prev[employeeId]?.trainingRate ?? "",
+        mileageRate: cleaned,
+      },
+    }));
+
+    const r = toNumberOrNull(cleaned);
     setEmployees((prev) =>
       prev.map((e) =>
-        e.employeeId === employeeId
-          ? { ...e, mileageRate: r === null ? null : r }
-          : e
+        e.employeeId === employeeId ? { ...e, mileageRate: r } : e
+      )
+    );
+  }
+
+  function blurMileageRate(employeeId: string) {
+    const cur = rateDraft[employeeId]?.mileageRate ?? "";
+    const { value, text } = parseAndFormat2(cur);
+
+    setRateDraft((prev) => ({
+      ...prev,
+      [employeeId]: {
+        rate: prev[employeeId]?.rate ?? "",
+        trainingRate: prev[employeeId]?.trainingRate ?? "",
+        mileageRate: text,
+      },
+    }));
+
+    setEmployees((prev) =>
+      prev.map((e) =>
+        e.employeeId === employeeId ? { ...e, mileageRate: value } : e
       )
     );
   }
@@ -511,7 +665,8 @@ export default function PayrollPage() {
     setIsSavingRates(true);
 
     try {
-      // POST /payroll/rates/upsert { items: [{ employeeId, rate, trainingRate, mileageRate }] }
+      requireApiBaseOrThrow();
+
       const payload: SaveRatesPayload = {
         items: employees.map((e) => ({
           employeeId: e.employeeId,
@@ -539,15 +694,25 @@ export default function PayrollPage() {
         employees?: EmployeePayrollLite[];
       };
       if (json?.employees && Array.isArray(json.employees)) {
-        setEmployees(
-          json.employees.map((e) => ({
-            ...e,
+        const normalized = json.employees.map((e) => ({
+          ...e,
+          trainingRate:
+            typeof e.trainingRate === "number" ? e.trainingRate : 10,
+          mileageRate: typeof e.mileageRate === "number" ? e.mileageRate : 0.3,
+        }));
+        setEmployees(normalized);
+
+        const nextDraft: typeof rateDraft = {};
+        for (const e of normalized) {
+          nextDraft[e.employeeId] = {
+            rate: typeof e.rate === "number" ? format2(e.rate) : "",
             trainingRate:
-              typeof e.trainingRate === "number" ? e.trainingRate : 10,
+              typeof e.trainingRate === "number" ? format2(e.trainingRate) : "",
             mileageRate:
-              typeof e.mileageRate === "number" ? e.mileageRate : 0.3,
-          }))
-        );
+              typeof e.mileageRate === "number" ? format2(e.mileageRate) : "",
+          };
+        }
+        setRateDraft(nextDraft);
       }
     } catch (e: any) {
       setError(e?.message || "Save rates failed");
@@ -581,7 +746,8 @@ export default function PayrollPage() {
 
   return (
     <div className="min-h-screen bg-bac-bg text-bac-text">
-      <div className="mx-auto max-w-6xl px-4 py-6">
+      +{" "}
+      <div className="mx-auto w-full px-4 py-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold">Payroll</h1>
@@ -589,6 +755,12 @@ export default function PayrollPage() {
               Weekly payroll (Sun–Sat). Office uses Time Keeping. DSP uses
               Schedule/Visits. OT is 1.5× after 40 hours. Rates are managed here
               (not in Employee Profile).
+            </p>
+            <p className="mt-1 text-xs text-bac-muted">
+              API Base:{" "}
+              <span className="text-bac-text font-medium">
+                {API_BASE || "(not set)"}
+              </span>
             </p>
           </div>
 
@@ -661,6 +833,13 @@ export default function PayrollPage() {
                 Formula: OT = 1.5× rate; Sick = 1.0× rate; Holiday = 2.0× rate;
                 PTO = 1.0× rate; Training = trainingRate; Mileage = mileageRate.
               </div>
+              {!API_BASE ? (
+                <div className="mt-2 text-bac-red">
+                  Warning: NEXT_PUBLIC_API_BASE_URL is not set and local
+                  fallback could not determine API. Set it (example:
+                  http://localhost:4000).
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -839,7 +1018,7 @@ export default function PayrollPage() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className="w-full min-w-max text-left text-sm whitespace-nowrap">
                   <thead className="text-xs text-bac-muted">
                     <tr className="border-b border-bac-border">
                       <th className="px-4 py-3">Employee</th>
@@ -856,13 +1035,11 @@ export default function PayrollPage() {
                       <th className="px-4 py-3">Holiday hour</th>
                       <th className="px-4 py-3">PTO hour</th>
 
-                      {/* ✅ NEW */}
                       <th className="px-4 py-3">Mileage</th>
 
                       <th className="px-4 py-3">Regular Pay</th>
                       <th className="px-4 py-3">OT Pay</th>
 
-                      {/* ✅ Helpful columns for Taxer */}
                       <th className="px-4 py-3">Extras Pay</th>
 
                       <th className="px-4 py-3">Total</th>
@@ -917,7 +1094,6 @@ export default function PayrollPage() {
                               {r.otHours.toFixed(2)}
                             </td>
 
-                            {/* Weekly extras inputs */}
                             <td className="px-4 py-3">
                               <input
                                 defaultValue={String(ex.trainingHours || 0)}
@@ -971,7 +1147,6 @@ export default function PayrollPage() {
                               />
                             </td>
 
-                            {/* ✅ mileage */}
                             <td className="px-4 py-3">
                               <input
                                 defaultValue={String(ex.mileage || 0)}
@@ -1130,87 +1305,107 @@ export default function PayrollPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredEmployees.map((e) => (
-                        <tr
-                          key={e.employeeId}
-                          className="border-b border-bac-border"
-                        >
-                          <td className="px-4 py-3">
-                            <div className="font-medium">{e.employeeId}</div>
-                            {e.staffType ? (
-                              <div className="mt-1 inline-flex rounded-full border border-bac-border bg-bac-bg px-2 py-0.5 text-[10px] text-bac-muted">
-                                {e.staffType}
-                              </div>
+                      filteredEmployees.map((e) => {
+                        const d = rateDraft[e.employeeId] || {
+                          rate:
+                            typeof e.rate === "number" ? format2(e.rate) : "",
+                          trainingRate:
+                            typeof e.trainingRate === "number"
+                              ? format2(e.trainingRate)
+                              : "",
+                          mileageRate:
+                            typeof e.mileageRate === "number"
+                              ? format2(e.mileageRate)
+                              : "",
+                        };
+
+                        return (
+                          <tr
+                            key={e.employeeId}
+                            className="border-b border-bac-border"
+                          >
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{e.employeeId}</div>
+                              {e.staffType ? (
+                                <div className="mt-1 inline-flex rounded-full border border-bac-border bg-bac-bg px-2 py-0.5 text-[10px] text-bac-muted">
+                                  {e.staffType}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3">
+                              {fmtOrDash(e.firstName)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {fmtOrDash(e.lastName)}
+                            </td>
+                            <td className="px-4 py-3">{fmtOrDash(e.role)}</td>
+                            <td className="px-4 py-3">{fmtOrDash(e.phone)}</td>
+                            <td className="px-4 py-3">{fmtOrDash(e.email)}</td>
+
+                            {/* ✅ Rate: allows 29.75 typing, formats on blur */}
+                            <td className="px-4 py-3">
+                              <input
+                                inputMode="decimal"
+                                value={d.rate}
+                                onChange={(ev) =>
+                                  updateRateLocal(e.employeeId, ev.target.value)
+                                }
+                                onBlur={() => blurRate(e.employeeId)}
+                                placeholder="e.g. 29.75"
+                                className="h-9 w-28 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+
+                            {/* ✅ TrainingRate: allows 10.15 typing, formats on blur */}
+                            <td className="px-4 py-3">
+                              <input
+                                inputMode="decimal"
+                                value={d.trainingRate}
+                                onChange={(ev) =>
+                                  updateTrainingRateLocal(
+                                    e.employeeId,
+                                    ev.target.value
+                                  )
+                                }
+                                onBlur={() => blurTrainingRate(e.employeeId)}
+                                placeholder="e.g. 10.15"
+                                className="h-9 w-28 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+
+                            {/* ✅ MileageRate: format 2 decimals on blur */}
+                            <td className="px-4 py-3">
+                              <input
+                                inputMode="decimal"
+                                value={d.mileageRate}
+                                onChange={(ev) =>
+                                  updateMileageRateLocal(
+                                    e.employeeId,
+                                    ev.target.value
+                                  )
+                                }
+                                onBlur={() => blurMileageRate(e.employeeId)}
+                                placeholder="e.g. 0.30"
+                                className="h-9 w-32 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+
+                            {showSensitive ? (
+                              <>
+                                <td className="px-4 py-3">
+                                  {fmtDateOrDash(e.dob)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {fmtOrDash(e.ssn)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {formatAddress(e)}
+                                </td>
+                              </>
                             ) : null}
-                          </td>
-                          <td className="px-4 py-3">
-                            {fmtOrDash(e.firstName)}
-                          </td>
-                          <td className="px-4 py-3">{fmtOrDash(e.lastName)}</td>
-                          <td className="px-4 py-3">{fmtOrDash(e.role)}</td>
-                          <td className="px-4 py-3">{fmtOrDash(e.phone)}</td>
-                          <td className="px-4 py-3">{fmtOrDash(e.email)}</td>
-
-                          <td className="px-4 py-3">
-                            <input
-                              value={
-                                typeof e.rate === "number" ? String(e.rate) : ""
-                              }
-                              onChange={(ev) =>
-                                updateRateLocal(e.employeeId, ev.target.value)
-                              }
-                              placeholder="e.g. 18.50"
-                              className="h-9 w-28 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-                            />
-                          </td>
-
-                          <td className="px-4 py-3">
-                            <input
-                              value={
-                                typeof e.trainingRate === "number"
-                                  ? String(e.trainingRate)
-                                  : ""
-                              }
-                              onChange={(ev) =>
-                                updateTrainingRateLocal(
-                                  e.employeeId,
-                                  ev.target.value
-                                )
-                              }
-                              placeholder="default 10"
-                              className="h-9 w-28 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-                            />
-                          </td>
-
-                          <td className="px-4 py-3">
-                            <input
-                              value={
-                                typeof e.mileageRate === "number"
-                                  ? String(e.mileageRate)
-                                  : ""
-                              }
-                              onChange={(ev) =>
-                                updateMileageRateLocal(
-                                  e.employeeId,
-                                  ev.target.value
-                                )
-                              }
-                              placeholder="default 0.30"
-                              className="h-9 w-32 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-                            />
-                          </td>
-
-                          {showSensitive ? (
-                            <>
-                              <td className="px-4 py-3">
-                                {fmtDateOrDash(e.dob)}
-                              </td>
-                              <td className="px-4 py-3">{fmtOrDash(e.ssn)}</td>
-                              <td className="px-4 py-3">{formatAddress(e)}</td>
-                            </>
-                          ) : null}
-                        </tr>
-                      ))
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

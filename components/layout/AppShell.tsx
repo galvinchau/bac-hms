@@ -1,8 +1,8 @@
 // components/layout/AppShell.tsx
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "@/components/sidebar/Sidebar";
 
 type MeUser = {
@@ -14,11 +14,12 @@ type MeUser = {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   const [me, setMe] = useState<MeUser | null>(null);
   const [logoutLoading, setLogoutLoading] = useState(false);
 
-  // ===== 1. Load thông tin user đang đăng nhập =====
+  // ===== 1) Load current user info =====
   useEffect(() => {
     let cancelled = false;
 
@@ -26,10 +27,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
         if (!res.ok) return;
+
         const data = await res.json().catch(() => null);
         if (!data || cancelled) return;
 
-        // Tùy cấu trúc API, nhưng thường là { user: {...} }
+        // Usually { user: {...} }, but also support direct object
         const user: MeUser = data.user ?? data;
         setMe(user);
       } catch (err) {
@@ -38,7 +40,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     loadMe();
-
     return () => {
       cancelled = true;
     };
@@ -49,7 +50,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ? `${me?.firstName ?? ""} ${me?.lastName ?? ""}`.trim()
       : me?.email) ?? "";
 
-  // ===== 2. Hàm logout (dùng cho cả nút Log out & auto-logout) =====
+  // ===== 2) Logout (used by button + auto-logout) =====
   const handleLogout = useCallback(
     async (silent: boolean = false) => {
       try {
@@ -70,25 +71,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     [router]
   );
 
-  // ===== 3. Auto-logout sau 30 phút không hoạt động =====
+  // ===== 3) Auto-logout after 30 minutes inactivity =====
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const INACTIVITY_MS = 30 * 60 * 1000; // 30 phút
+    const INACTIVITY_MS = 30 * 60 * 1000; // 30 minutes
 
     const resetTimer = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        // silent = true => không cần loading spinner, chỉ logout
+        // silent = true => no spinner, just logout
         handleLogout(true);
       }, INACTIVITY_MS);
     };
 
-    // Các event được coi là "hoạt động" của user
     const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
-
     events.forEach((evt) => window.addEventListener(evt, resetTimer));
-    // Khởi tạo timer ngay khi vào app
     resetTimer();
 
     return () => {
@@ -97,10 +95,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [handleLogout]);
 
-  // ===== 4. Render layout =====
+  // ===== 4) Full-width override for wide-table pages (Payroll + Time Keeping) =====
+  const isFullWidthPage = useMemo(() => {
+    if (!pathname) return false;
+
+    const fullWidthPrefixes = ["/payroll", "/time-keeping"];
+
+    return fullWidthPrefixes.some(
+      (p) => pathname === p || pathname.startsWith(p + "/")
+    );
+  }, [pathname]);
+
+  const contentContainerClass = isFullWidthPage
+    ? "w-full"
+    : "mx-auto w-full max-w-6xl";
+
+  // ===== 5) Render layout =====
   return (
     <div className="min-h-screen flex bg-bac-bg text-bac-text">
-      {/* LEFT SIDEBAR (single instance app-wide) */}
+      {/* LEFT SIDEBAR */}
       <aside className="w-64 border-r border-bac-border">
         <Sidebar onLogoClick={() => router.push("/dashboard")} />
       </aside>
@@ -109,7 +122,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 flex flex-col">
         {/* TOPBAR */}
         <div className="h-12 flex items-center justify-end gap-3 px-4 border-b border-bac-border text-sm">
-          {/* Tên user đang login */}
+          {/* Logged-in user */}
           {displayName && (
             <div className="flex items-center gap-2 text-bac-muted">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-bac-panel border border-bac-border text-xs font-semibold uppercase">
@@ -124,7 +137,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {/* Nút Log out */}
+          {/* Logout button */}
           <button
             type="button"
             onClick={() => handleLogout(false)}
@@ -136,7 +149,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* PAGE CONTENT */}
-        <div className="p-4 flex-1 overflow-auto">{children}</div>
+        <div className="p-4 flex-1 overflow-auto">
+          <div className={contentContainerClass}>{children}</div>
+        </div>
       </main>
     </div>
   );
