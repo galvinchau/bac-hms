@@ -1,4 +1,3 @@
-// web/app/time-keeping/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -14,7 +13,7 @@ type MeResponse = {
 };
 
 type EmployeeProfile = {
-  staffId: string; // should be Employee.employeeId (BAC-E-...)
+  staffId: string; // Employee.employeeId (BAC-E-...)
   firstName: string;
   lastName: string;
   position: string;
@@ -57,8 +56,14 @@ type AttendanceRow = {
   flags: string[];
 };
 
-// ======== Approval types (REAL API) ========
 type ApprovalStatus = "PENDING" | "APPROVED";
+
+type DailySummaryRow = {
+  date: string; // YYYY-MM-DD
+  computedMinutes: number;
+  adjustedMinutes: number | null;
+  resultMinutes: number;
+};
 
 type WeeklyApprovalRow = {
   staffId: string;
@@ -66,13 +71,19 @@ type WeeklyApprovalRow = {
   position: string;
 
   computedMinutes: number;
-  adjustedMinutes: number | null;
+  adjustedMinutes: number | null; // legacy
+  finalMinutes: number;
 
   status: ApprovalStatus;
-  approvedBy?: string | null; // email
-  approvedAt?: string | null; // iso
+  approvedBy?: string | null; // email (legacy)
+  approvedByName?: string | null; // ✅ NEW
+  approvedAt?: string | null;
 
   flagsCount: number;
+
+  // detail-only
+  daily?: DailySummaryRow[];
+  totalAfterAdjustedMinutes?: number;
 };
 
 type WeeklyDetailResponse = {
@@ -112,14 +123,16 @@ function fmtNum(n?: number | null, digits = 6) {
   return n.toFixed(digits);
 }
 
-function minutesToHHMM(mins?: number | null) {
+// ✅ Show minutes as "1h 09m"
+function minutesToHhMm(mins?: number | null) {
   if (mins === null || mins === undefined) return "-";
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  return `${h}h ${m}m`;
+  return `${h}h ${pad2(m)}m`;
 }
 
-function minutesToHours(mins: number) {
+function minutesToHoursDecimal(mins?: number | null) {
+  if (mins === null || mins === undefined) return 0;
   return mins / 60;
 }
 
@@ -158,11 +171,6 @@ function chipClass(status: ApprovalStatus) {
     : "border-bac-border bg-bac-panel text-yellow-200";
 }
 
-function isWeekendDay(d: Date) {
-  const day = d.getDay(); // Sun=0
-  return day === 0 || day === 6;
-}
-
 function safeJson<T>(x: any, fallback: T): T {
   try {
     return x as T;
@@ -173,7 +181,6 @@ function safeJson<T>(x: any, fallback: T): T {
 
 function isOfficePosition(position?: string | null) {
   const p = (position || "").trim().toLowerCase();
-  // Accept: "Office Staff", "Office", "Office Manager", etc.
   return p.includes("office");
 }
 
@@ -182,6 +189,31 @@ type Ctx = {
   userType: string;
   userId: string;
 };
+
+function parseAdjustInputToMinutes(s: string): number | null {
+  const t = (s || "").trim();
+  if (!t) return null;
+
+  // Accept HH:MM or H:MM
+  const m = t.match(/^(\d{1,2})\s*:\s*(\d{1,2})$/);
+  if (m) {
+    const hh = Number(m[1]);
+    const mm = Number(m[2]);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || mm < 0)
+      return null;
+    return hh * 60 + mm;
+  }
+
+  // Accept decimal hours like "1.25"
+  const n = Number(t);
+  if (Number.isFinite(n) && n >= 0) return Math.round(n * 60);
+
+  return null;
+}
+
+function formatISOToMMDD(d: string) {
+  return fmtDateMMDDFromYYYYMMDD(d);
+}
 
 export default function TimeKeepingPage() {
   const API_BASE =
@@ -231,11 +263,6 @@ export default function TimeKeepingPage() {
   const totalMinutes = useMemo(() => {
     return rows.reduce((sum, r) => sum + (r.totalMinutes || 0), 0);
   }, [rows]);
-
-  const totalHours = useMemo(() => {
-    const hrs = totalMinutes / 60;
-    return Number.isFinite(hrs) ? hrs : 0;
-  }, [totalMinutes]);
 
   function getTodayLabel(): string {
     const base = status?.serverTime ? new Date(status.serverTime) : new Date();
@@ -288,8 +315,8 @@ export default function TimeKeepingPage() {
     );
 
     const final = filteredWeeklyApprovals.reduce((sum, r) => {
-      const finalMin = r.adjustedMinutes ?? r.computedMinutes;
-      return sum + finalMin;
+      const finalMin = r.finalMinutes ?? r.computedMinutes;
+      return sum + (finalMin || 0);
     }, 0);
 
     const pending = filteredWeeklyApprovals.filter(
@@ -302,12 +329,14 @@ export default function TimeKeepingPage() {
     return { computed, final, pending, approved };
   }, [filteredWeeklyApprovals]);
 
-  // Modal state (REAL)
+  // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [activeApproval, setActiveApproval] =
     useState<WeeklyApprovalRow | null>(null);
   const [activeAttendance, setActiveAttendance] = useState<AttendanceRow[]>([]);
-  const [adjustedHoursInput, setAdjustedHoursInput] = useState<string>("");
+  const [dailyAdjustInputs, setDailyAdjustInputs] = useState<
+    Record<string, string>
+  >({});
   const [adjustReason, setAdjustReason] = useState<string>("");
   const [modalBusy, setModalBusy] = useState<
     "LOAD" | "SAVE_ADJUST" | "APPROVE" | "UNLOCK" | null
@@ -318,13 +347,12 @@ export default function TimeKeepingPage() {
     setModalOpen(false);
     setActiveApproval(null);
     setActiveAttendance([]);
-    setAdjustedHoursInput("");
+    setDailyAdjustInputs({});
     setAdjustReason("");
     setModalBusy(null);
     setModalError(null);
   }
 
-  // ======== Context helpers (fix admin@local) ========
   function getCtxOrThrow(): Ctx {
     const email = (meUser?.email || "").toString().trim();
     const id = (meUser?.id || "").toString().trim();
@@ -338,13 +366,12 @@ export default function TimeKeepingPage() {
 
     return {
       userEmail: email,
-      userId: id || email, // fallback: use email
+      userId: id || email,
       userType: type || "OFFICE",
     };
   }
 
   function appendCtxToSearchParams(qs: URLSearchParams, ctx: Ctx) {
-    // Backend accepts query fallback: userEmail/userType/userId
     qs.set("userEmail", ctx.userEmail);
     qs.set("userType", ctx.userType);
     qs.set("userId", ctx.userId);
@@ -387,6 +414,7 @@ export default function TimeKeepingPage() {
         : Array.isArray(json?.rows)
         ? json.rows
         : [];
+
       const mapped: WeeklyApprovalRow[] = arr.map((x) => ({
         staffId: String(x.staffId ?? ""),
         name: String(x.name ?? x.staffName ?? ""),
@@ -396,8 +424,10 @@ export default function TimeKeepingPage() {
           x.adjustedMinutes === null || x.adjustedMinutes === undefined
             ? null
             : Number(x.adjustedMinutes),
+        finalMinutes: Number(x.finalMinutes ?? x.computedMinutes ?? 0),
         status: (String(x.status ?? "PENDING") as ApprovalStatus) || "PENDING",
         approvedBy: (x.approvedBy ?? x.approvedByEmail ?? null) as any,
+        approvedByName: (x.approvedByName ?? null) as any,
         approvedAt: (x.approvedAt ?? null) as any,
         flagsCount: Number(x.flagsCount ?? 0),
       }));
@@ -415,6 +445,7 @@ export default function TimeKeepingPage() {
     setModalOpen(true);
     setActiveApproval(r);
     setActiveAttendance([]);
+    setDailyAdjustInputs({});
     setModalBusy("LOAD");
     setModalError(null);
 
@@ -445,9 +476,9 @@ export default function TimeKeepingPage() {
         );
       }
 
-      const json = (await res.json()) as any;
+      const json = (await res.json()) as WeeklyDetailResponse;
 
-      const row = (json?.row ?? json) as any;
+      const row = (json?.row ?? (json as any)) as any;
       const attendance = (json?.attendance ?? []) as any[];
 
       const rowMapped: WeeklyApprovalRow = {
@@ -459,24 +490,44 @@ export default function TimeKeepingPage() {
           row.adjustedMinutes === null || row.adjustedMinutes === undefined
             ? null
             : Number(row.adjustedMinutes),
+        finalMinutes: Number(row.finalMinutes ?? r.finalMinutes ?? 0),
+        totalAfterAdjustedMinutes: Number(row.totalAfterAdjustedMinutes ?? 0),
         status: (String(row.status ?? r.status) as ApprovalStatus) || "PENDING",
         approvedBy: (row.approvedBy ??
           row.approvedByEmail ??
           r.approvedBy ??
           null) as any,
+        approvedByName: (row.approvedByName ?? r.approvedByName ?? null) as any,
         approvedAt: (row.approvedAt ?? r.approvedAt ?? null) as any,
         flagsCount: Number(row.flagsCount ?? r.flagsCount ?? 0),
+        daily: Array.isArray(row.daily) ? (row.daily as any) : [],
       };
 
       const attMapped: AttendanceRow[] = Array.isArray(attendance)
         ? attendance.map((x) => safeJson<AttendanceRow>(x, x))
         : [];
 
+      // init inputs from daily
+      const initInputs: Record<string, string> = {};
+      (rowMapped.daily || []).forEach((d) => {
+        if (d.adjustedMinutes === null || d.adjustedMinutes === undefined) {
+          initInputs[d.date] = "";
+        } else {
+          initInputs[d.date] = minutesToHhMm(Number(d.adjustedMinutes)).replace(
+            "h ",
+            ":"
+          ); // rough display
+          // Better: show HH:MM
+          const mins = Number(d.adjustedMinutes);
+          const hh = Math.floor(mins / 60);
+          const mm = mins % 60;
+          initInputs[d.date] = `${hh}:${pad2(mm)}`;
+        }
+      });
+
       setActiveApproval(rowMapped);
       setActiveAttendance(attMapped);
-
-      const finalMin = rowMapped.adjustedMinutes ?? rowMapped.computedMinutes;
-      setAdjustedHoursInput((finalMin / 60).toFixed(2));
+      setDailyAdjustInputs(initInputs);
       setAdjustReason("");
     } catch (e: any) {
       setModalError(e?.message || "Failed to load detail.");
@@ -489,16 +540,26 @@ export default function TimeKeepingPage() {
     if (!activeApproval) return;
     setModalError(null);
 
-    const n = Number(adjustedHoursInput);
-    if (!Number.isFinite(n) || n < 0) {
-      setModalError("Adjusted hours must be a number >= 0.");
-      return;
+    const daily = activeApproval.daily || [];
+    const payloadDaily: Array<{ date: string; minutes: number | null }> = [];
+
+    for (const d of daily) {
+      const raw = dailyAdjustInputs[d.date] ?? "";
+      const mins = parseAdjustInputToMinutes(raw);
+      if (raw.trim() && mins === null) {
+        setModalError(
+          `Invalid Adjust value for ${formatISOToMMDD(
+            d.date
+          )}. Use HH:MM (e.g. 0:45) or decimal (e.g. 1.25).`
+        );
+        return;
+      }
+      payloadDaily.push({ date: d.date, minutes: mins });
     }
 
     setModalBusy("SAVE_ADJUST");
     try {
       const ctx = getCtxOrThrow();
-      const adjustedMinutes = Math.round(n * 60);
 
       const res = await fetch(
         `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
@@ -511,9 +572,8 @@ export default function TimeKeepingPage() {
           body: JSON.stringify({
             from: weekStartISO,
             to: weekEndISO,
-            adjustedMinutes,
+            dailyAdjustments: payloadDaily,
             reason: adjustReason || "",
-            // ✅ ctx (fix approvedBy)
             userEmail: ctx.userEmail,
             userType: ctx.userType,
             userId: ctx.userId,
@@ -557,7 +617,6 @@ export default function TimeKeepingPage() {
             from: weekStartISO,
             to: weekEndISO,
             reason: adjustReason || "",
-            // ✅ ctx
             userEmail: ctx.userEmail,
             userType: ctx.userType,
             userId: ctx.userId,
@@ -604,7 +663,6 @@ export default function TimeKeepingPage() {
             from: weekStartISO,
             to: weekEndISO,
             reason: adjustReason,
-            // ✅ ctx
             userEmail: ctx.userEmail,
             userType: ctx.userType,
             userId: ctx.userId,
@@ -626,7 +684,7 @@ export default function TimeKeepingPage() {
     }
   }
 
-  // ======== Auth/profile loader (NO /employees/me) ========
+  // ======== Auth/profile loader ========
   async function loadMeAndEmployee() {
     setMeLoading(true);
     setMeError(null);
@@ -643,7 +701,6 @@ export default function TimeKeepingPage() {
       const t = (tRaw || "").toString().trim().toUpperCase();
       setUserType(t || null);
 
-      // Employee profile MUST come from /api/auth/me (avoid 404 /employees/me)
       const emp = data.employee ?? null;
       if (!emp?.staffId) {
         throw new Error(
@@ -651,10 +708,6 @@ export default function TimeKeepingPage() {
         );
       }
 
-      // ✅ NEW RULE:
-      // Allow Time Keeping if:
-      // - ADMIN/HR (always)
-      // - OR Employee.position contains "Office" (Office Staff / Office Manager / ...)
       const officeByPosition = isOfficePosition(emp.position);
       const allowed = t === "ADMIN" || t === "HR" || officeByPosition;
 
@@ -666,7 +719,6 @@ export default function TimeKeepingPage() {
         );
       }
 
-      // ✅ Must have email for ctx
       const email = (data.user?.email || "").toString().trim();
       if (!email) {
         throw new Error(
@@ -757,7 +809,6 @@ export default function TimeKeepingPage() {
           accuracy: loc.accuracy,
           source: "WEB",
           clientTime: new Date().toISOString(),
-          // ✅ ctx
           userEmail: ctx.userEmail,
           userType: ctx.userType,
           userId: ctx.userId,
@@ -796,7 +847,6 @@ export default function TimeKeepingPage() {
           accuracy: loc.accuracy,
           source: "WEB",
           clientTime: new Date().toISOString(),
-          // ✅ ctx
           userEmail: ctx.userEmail,
           userType: ctx.userType,
           userId: ctx.userId,
@@ -840,27 +890,20 @@ export default function TimeKeepingPage() {
     weekStartISO
   )} → ${fmtDateMMDDFromYYYYMMDD(weekEndISO)} (Sun–Sat)`;
 
-  const weekIsWeekend = useMemo(() => {
-    const start = new Date(weekStartISO);
-    const end = new Date(weekEndISO);
-    return isWeekendDay(start) || isWeekendDay(end);
-  }, [weekStartISO, weekEndISO]);
+  // ✅ Modal totals from daily
+  const modalTotals = useMemo(() => {
+    const daily = activeApproval?.daily || [];
+    const computed = daily.reduce((s, d) => s + (d.computedMinutes || 0), 0);
 
-  // ✅ helper: convert approvedBy email -> display name (if it is the current logged-in approver)
-  function getApprovedByDisplay(approvedByEmail?: string | null) {
-    const email = (approvedByEmail || "").toLowerCase().trim();
-    const myEmail = (meUser?.email || "").toLowerCase().trim();
-
-    if (email && myEmail && email === myEmail) {
-      const fn = (employee?.firstName || "").trim();
-      const ln = (employee?.lastName || "").trim();
-      const full = `${fn} ${ln}`.trim();
-      if (full) return full;
+    let after = 0;
+    for (const d of daily) {
+      const raw = dailyAdjustInputs[d.date] ?? "";
+      const mins = parseAdjustInputToMinutes(raw);
+      after += mins === null ? d.computedMinutes : mins;
     }
 
-    // fallback (keep old behavior)
-    return approvedByEmail || "-";
-  }
+    return { computed, after };
+  }, [activeApproval?.daily, dailyAdjustInputs]);
 
   return (
     <div className="min-h-screen bg-bac-bg text-bac-text">
@@ -869,8 +912,8 @@ export default function TimeKeepingPage() {
           <div>
             <h1 className="text-2xl font-semibold">Time Keeping</h1>
             <p className="text-sm text-bac-muted">
-              Office staff attendance (GPS required). Payroll uses this as the
-              only source for Office hours.
+              Office staff attendance (GPS required). Payroll uses approved week
+              totals.
             </p>
           </div>
 
@@ -930,7 +973,7 @@ export default function TimeKeepingPage() {
           </div>
         ) : null}
 
-        {/* Controls (Week + This Week Total) */}
+        {/* Controls */}
         <div className="mt-5 grid grid-cols-1 gap-3 rounded-2xl border border-bac-border bg-bac-panel p-4 md:grid-cols-4">
           <div className="flex flex-col">
             <label className="text-xs text-bac-muted">Week Start (Sun)</label>
@@ -963,17 +1006,16 @@ export default function TimeKeepingPage() {
           <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
             <div className="text-xs text-bac-muted">This Week Total</div>
             <div className="mt-1 text-xl font-semibold">
-              {totalHours.toFixed(2)} hrs
+              {minutesToHhMm(totalMinutes)}
             </div>
             <div className="text-xs text-bac-muted">
-              ({minutesToHHMM(totalMinutes)} total)
+              ({minutesToHoursDecimal(totalMinutes).toFixed(2)} hrs)
             </div>
           </div>
         </div>
 
         {/* 3 cards */}
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          {/* Today is + buttons */}
           <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
             <div className="text-sm font-semibold">Today is</div>
             <div className="mt-2 text-sm text-bac-muted">{getTodayLabel()}</div>
@@ -1012,7 +1054,8 @@ export default function TimeKeepingPage() {
               </div>
             ) : (
               <div className="mt-3 rounded-xl border border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
-                GPS is required for every check-in/out.
+                GPS is required for every check-in/out. If week is approved, you
+                must ask Admin/HR to unlock.
               </div>
             )}
 
@@ -1021,7 +1064,6 @@ export default function TimeKeepingPage() {
             ) : null}
           </div>
 
-          {/* Current Status */}
           <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
             <div className="text-sm font-semibold">Current Status</div>
             <div className="mt-2 text-sm text-bac-muted">
@@ -1046,12 +1088,8 @@ export default function TimeKeepingPage() {
                 {fmtDateTimeMMDD(status?.lastCheckOutAt)}
               </span>
             </div>
-            <div className="mt-3 text-xs text-bac-muted">
-              Auto check-out: Mon–Fri at 5:00 PM if staff forgets.
-            </div>
           </div>
 
-          {/* GPS */}
           <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
             <div className="text-sm font-semibold">GPS (Last Capture)</div>
             <div className="mt-2 text-sm text-bac-muted">
@@ -1068,9 +1106,6 @@ export default function TimeKeepingPage() {
                 {status?.lastAccuracy ?? "-"} m
               </span>
             </div>
-            <div className="mt-3 text-xs text-bac-muted">
-              GPS is required for every check-in/out.
-            </div>
           </div>
         </div>
 
@@ -1082,10 +1117,6 @@ export default function TimeKeepingPage() {
               <div className="text-xs text-bac-muted">
                 Week: {weekRangeLabel}
               </div>
-            </div>
-
-            <div className="text-xs text-bac-muted">
-              Weekend check-in will be blocked or flagged (policy).
             </div>
           </div>
 
@@ -1120,7 +1151,7 @@ export default function TimeKeepingPage() {
                       <td className="px-4 py-3">
                         {r.totalMinutes === null
                           ? "-"
-                          : minutesToHHMM(r.totalMinutes)}
+                          : minutesToHhMm(r.totalMinutes)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-xs text-bac-muted">
@@ -1153,14 +1184,9 @@ export default function TimeKeepingPage() {
               </tbody>
             </table>
           </div>
-
-          <div className="px-4 py-3 text-xs text-bac-muted">
-            Notes: Auto check-out at 5:00 PM (Mon–Fri) will show as a flag in
-            the record.
-          </div>
         </div>
 
-        {/* ===================== Approval Panel (ADMIN/HR only) ===================== */}
+        {/* Approval Panel */}
         {isApprover && (
           <div className="mt-6 rounded-2xl border border-bac-border bg-bac-panel">
             <div className="flex flex-col gap-3 border-b border-bac-border px-4 py-3 md:flex-row md:items-center md:justify-between">
@@ -1169,8 +1195,7 @@ export default function TimeKeepingPage() {
                   Weekly Approval (Admin / HR)
                 </div>
                 <div className="text-xs text-bac-muted">
-                  Review office attendance for the week, adjust if needed, then
-                  approve. Payroll & export must use the approved final hours.
+                  Adjust per day, then approve. Payroll uses approved totals.
                 </div>
               </div>
 
@@ -1210,18 +1235,12 @@ export default function TimeKeepingPage() {
               </div>
             ) : null}
 
-            {/* Summary chips */}
             <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
               <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
                 <div className="text-xs text-bac-muted">Week</div>
                 <div className="mt-1 text-sm font-semibold">
                   {weekRangeLabel}
                 </div>
-                {weekIsWeekend && (
-                  <div className="mt-1 text-xs text-bac-muted">
-                    (Policy checks apply)
-                  </div>
-                )}
               </div>
 
               <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
@@ -1229,7 +1248,6 @@ export default function TimeKeepingPage() {
                 <div className="mt-1 text-xl font-semibold">
                   {approvalTotals.pending}
                 </div>
-                <div className="text-xs text-bac-muted">Needs review</div>
               </div>
 
               <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
@@ -1237,22 +1255,19 @@ export default function TimeKeepingPage() {
                 <div className="mt-1 text-xl font-semibold">
                   {approvalTotals.approved}
                 </div>
-                <div className="text-xs text-bac-muted">Locked for payroll</div>
               </div>
 
               <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
                 <div className="text-xs text-bac-muted">Final Total (All)</div>
                 <div className="mt-1 text-xl font-semibold">
-                  {minutesToHours(approvalTotals.final).toFixed(2)} hrs
+                  {minutesToHhMm(approvalTotals.final)}
                 </div>
                 <div className="text-xs text-bac-muted">
-                  (Computed:{" "}
-                  {minutesToHours(approvalTotals.computed).toFixed(2)} hrs)
+                  (Computed: {minutesToHhMm(approvalTotals.computed)})
                 </div>
               </div>
             </div>
 
-            {/* Table */}
             <div className="overflow-x-auto px-4 pb-4">
               <table className="w-full text-left text-sm">
                 <thead className="text-xs text-bac-muted">
@@ -1261,7 +1276,6 @@ export default function TimeKeepingPage() {
                     <th className="py-3 pr-3">Name</th>
                     <th className="py-3 pr-3">Position</th>
                     <th className="py-3 pr-3">Computed</th>
-                    <th className="py-3 pr-3">Adjusted</th>
                     <th className="py-3 pr-3">Final</th>
                     <th className="py-3 pr-3">Flags</th>
                     <th className="py-3 pr-3">Status</th>
@@ -1273,85 +1287,74 @@ export default function TimeKeepingPage() {
                 <tbody>
                   {filteredWeeklyApprovals.length === 0 ? (
                     <tr>
-                      <td className="py-6 text-bac-muted" colSpan={10}>
+                      <td className="py-6 text-bac-muted" colSpan={9}>
                         No results.
                       </td>
                     </tr>
                   ) : (
-                    filteredWeeklyApprovals.map((r) => {
-                      const finalMin = r.adjustedMinutes ?? r.computedMinutes;
+                    filteredWeeklyApprovals.map((r) => (
+                      <tr
+                        key={r.staffId}
+                        className="border-b border-bac-border"
+                      >
+                        <td className="py-3 pr-3 font-medium">{r.staffId}</td>
+                        <td className="py-3 pr-3">{r.name}</td>
+                        <td className="py-3 pr-3 text-bac-muted">
+                          {r.position}
+                        </td>
 
-                      return (
-                        <tr
-                          key={r.staffId}
-                          className="border-b border-bac-border"
-                        >
-                          <td className="py-3 pr-3 font-medium">{r.staffId}</td>
-                          <td className="py-3 pr-3">{r.name}</td>
-                          <td className="py-3 pr-3 text-bac-muted">
-                            {r.position}
-                          </td>
+                        <td className="py-3 pr-3">
+                          {minutesToHhMm(r.computedMinutes)}
+                        </td>
 
-                          <td className="py-3 pr-3">
-                            {minutesToHours(r.computedMinutes).toFixed(2)} hrs
-                          </td>
-                          <td className="py-3 pr-3">
-                            {r.adjustedMinutes === null
-                              ? "-"
-                              : `${minutesToHours(r.adjustedMinutes).toFixed(
-                                  2
-                                )} hrs`}
-                          </td>
-                          <td className="py-3 pr-3 font-semibold">
-                            {minutesToHours(finalMin).toFixed(2)} hrs
-                          </td>
+                        <td className="py-3 pr-3 font-semibold">
+                          {minutesToHhMm(r.finalMinutes ?? r.computedMinutes)}
+                        </td>
 
-                          <td className="py-3 pr-3">
-                            {r.flagsCount > 0 ? (
-                              <span className="rounded-full border border-bac-border bg-bac-bg px-2 py-0.5 text-xs">
-                                {r.flagsCount} flags
-                              </span>
-                            ) : (
-                              <span className="text-bac-muted">-</span>
-                            )}
-                          </td>
-
-                          <td className="py-3 pr-3">
-                            <span
-                              className={`rounded-full border px-2 py-0.5 text-xs ${chipClass(
-                                r.status
-                              )}`}
-                            >
-                              {r.status}
+                        <td className="py-3 pr-3">
+                          {r.flagsCount > 0 ? (
+                            <span className="rounded-full border border-bac-border bg-bac-bg px-2 py-0.5 text-xs">
+                              {r.flagsCount} flags
                             </span>
-                          </td>
+                          ) : (
+                            <span className="text-bac-muted">-</span>
+                          )}
+                        </td>
 
-                          {/* ✅ ONLY CHANGE HERE: "Approved by" + show First/Last name when possible */}
-                          <td className="py-3 pr-3 text-xs text-bac-muted">
-                            {r.status === "APPROVED" ? (
-                              <>
-                                <div className="font-medium text-bac-text">
-                                  Approved by
-                                </div>
-                                <div>{getApprovedByDisplay(r.approvedBy)}</div>
-                                <div>{fmtDateTimeMMDD(r.approvedAt)}</div>
-                              </>
-                            ) : (
-                              "-"
-                            )}
-                          </td>
+                        <td className="py-3 pr-3">
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-xs ${chipClass(
+                              r.status
+                            )}`}
+                          >
+                            {r.status}
+                          </span>
+                        </td>
 
-                          <td className="py-3 text-right">
-                            <button
-                              onClick={() => openReview(r)}
-                              className="h-9 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm font-medium hover:opacity-90"
-                            >
-                              Review
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
+                        {/* ✅ No repeated "Approved by" label */}
+                        <td className="py-3 pr-3 text-xs text-bac-muted">
+                          {r.status === "APPROVED" ? (
+                            <>
+                              <div className="font-medium text-bac-text">
+                                {r.approvedByName || r.approvedBy || "-"}
+                              </div>
+                              <div>{fmtDateTimeMMDD(r.approvedAt)}</div>
+                            </>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+
+                        <td className="py-3 text-right">
+                          <button
+                            onClick={() => openReview(r)}
+                            className="h-9 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm font-medium hover:opacity-90"
+                          >
+                            Review
+                          </button>
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>
@@ -1365,10 +1368,10 @@ export default function TimeKeepingPage() {
           </div>
         )}
 
-        {/* Modal (REAL) */}
+        {/* Modal */}
         {modalOpen && activeApproval && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-3xl rounded-2xl border border-bac-border bg-bac-panel p-4">
+            <div className="w-full max-w-4xl rounded-2xl border border-bac-border bg-bac-panel p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-lg font-semibold">Review & Approve</div>
@@ -1397,26 +1400,22 @@ export default function TimeKeepingPage() {
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
                 <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-                  <div className="text-xs text-bac-muted">Computed Hours</div>
+                  <div className="text-xs text-bac-muted">Computed</div>
                   <div className="mt-1 text-xl font-semibold">
-                    {minutesToHours(activeApproval.computedMinutes).toFixed(2)}
+                    {minutesToHhMm(activeApproval.computedMinutes)}
                   </div>
-                  <div className="text-xs text-bac-muted">
-                    (from raw attendance)
-                  </div>
+                  <div className="text-xs text-bac-muted">(raw attendance)</div>
                 </div>
 
                 <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-                  <div className="text-xs text-bac-muted">Adjusted Hours</div>
-                  <input
-                    value={adjustedHoursInput}
-                    onChange={(e) => setAdjustedHoursInput(e.target.value)}
-                    className="mt-2 h-10 w-full rounded-xl border border-bac-border bg-bac-panel px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-                    placeholder="e.g. 40.00"
-                    disabled={modalBusy !== null}
-                  />
-                  <div className="mt-1 text-xs text-bac-muted">
-                    Use decimal hours (MM/DD/YYYY week)
+                  <div className="text-xs text-bac-muted">
+                    Total Hours (After Adjusted)
+                  </div>
+                  <div className="mt-1 text-xl font-semibold">
+                    {minutesToHhMm(modalTotals.after)}
+                  </div>
+                  <div className="text-xs text-bac-muted">
+                    This weekly total is used for Payroll (after approval).
                   </div>
                 </div>
 
@@ -1448,11 +1447,84 @@ export default function TimeKeepingPage() {
                 />
               </div>
 
+              {/* ✅ Daily Summary (Adjust per day) */}
+              <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
+                <div className="border-b border-bac-border px-4 py-3">
+                  <div className="text-sm font-semibold">
+                    Daily Summary (Adjust per day)
+                  </div>
+                  <div className="text-xs text-bac-muted">
+                    Leave Adjust blank to use Computed. Use H:MM (e.g. 0:45) or
+                    decimal hours (e.g. 1.25).
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="text-xs text-bac-muted">
+                      <tr className="border-b border-bac-border">
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Computed</th>
+                        <th className="px-4 py-3">Adjust</th>
+                        <th className="px-4 py-3">Result</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(activeApproval.daily || []).length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-6 text-bac-muted" colSpan={4}>
+                            No records.
+                          </td>
+                        </tr>
+                      ) : (
+                        (activeApproval.daily || []).map((d) => {
+                          const raw = dailyAdjustInputs[d.date] ?? "";
+                          const mins = parseAdjustInputToMinutes(raw);
+                          const result =
+                            mins === null ? d.computedMinutes : mins;
+
+                          return (
+                            <tr
+                              key={d.date}
+                              className="border-b border-bac-border"
+                            >
+                              <td className="px-4 py-3">
+                                {formatISOToMMDD(d.date)}
+                              </td>
+                              <td className="px-4 py-3">
+                                {minutesToHhMm(d.computedMinutes)}
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  value={raw}
+                                  onChange={(e) =>
+                                    setDailyAdjustInputs((prev) => ({
+                                      ...prev,
+                                      [d.date]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="e.g. 0:45"
+                                  className="h-9 w-[120px] rounded-xl border border-bac-border bg-bac-panel px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                                  disabled={modalBusy !== null}
+                                />
+                              </td>
+                              <td className="px-4 py-3 font-semibold">
+                                {minutesToHhMm(result)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               {/* Attendance preview */}
               <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
                 <div className="border-b border-bac-border px-4 py-3">
                   <div className="text-sm font-semibold">
-                    Raw Attendance (week)
+                    Raw Attendance (events)
                   </div>
                   <div className="text-xs text-bac-muted">
                     Records: {activeAttendance.length}
@@ -1490,7 +1562,7 @@ export default function TimeKeepingPage() {
                             <td className="px-4 py-3">
                               {r.totalMinutes === null
                                 ? "-"
-                                : minutesToHHMM(r.totalMinutes)}
+                                : minutesToHhMm(r.totalMinutes)}
                             </td>
                             <td className="px-4 py-3">
                               {r.flags?.length ? (

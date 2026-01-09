@@ -6,7 +6,22 @@ type PayrollRow = {
   staffId: string;
   staffName: string;
   staffType: "DSP" | "OFFICE";
+
+  // ✅ Sensitive + weekly add-ons (for Taxer DOC)
+  employeeSSN?: string | null;
+
+  trainingHours?: number; // HR/Admin can edit weekly
+  sickHours?: number; // HR/Admin can edit weekly
+  holidayHours?: number; // HR/Admin can edit weekly
+  ptoHours?: number; // HR/Admin can edit weekly
+  mileage?: number; // ✅ NEW: miles (HR/Admin can edit weekly)
+
+  // Rates
   rate: number; // hourly rate
+  trainingRate?: number; // default 10 (reference)
+  mileageRate?: number; // ✅ NEW: default 0.30 (reference)
+
+  // Payroll computed fields (base from backend; UI will add extras)
   hours: number;
   otHours: number;
   regularPay: number;
@@ -31,6 +46,41 @@ type PayrollRun = {
   };
 };
 
+// Employee roster used by Payroll (do NOT expose rate in Employee Profile)
+type EmployeePayrollLite = {
+  employeeId: string; // Employee.employeeId (BAC-E-....)
+  firstName: string;
+  lastName: string;
+  role: string | null;
+
+  dob?: string | null;
+  ssn?: string | null;
+
+  address1?: string | null;
+  address2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+
+  phone?: string | null;
+  email?: string | null;
+
+  // payroll-specific
+  rate?: number | null;
+  trainingRate?: number | null; // default 10
+  mileageRate?: number | null; // ✅ NEW default 0.30
+  staffType?: "DSP" | "OFFICE" | null; // optional (backend can compute)
+};
+
+type SaveRatesPayload = {
+  items: Array<{
+    employeeId: string;
+    rate: number | null;
+    trainingRate: number | null;
+    mileageRate: number | null; // ✅ NEW
+  }>;
+};
+
 function money(n: number) {
   return n.toLocaleString(undefined, {
     style: "currency",
@@ -38,9 +88,102 @@ function money(n: number) {
   });
 }
 
+function toNumberOrNull(v: string): number | null {
+  const s = (v || "").trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function toNumberOrZero(v: string): number {
+  const s = (v || "").trim();
+  if (!s) return 0;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+
+function fmtDateOrDash(s?: string | null) {
+  const v = (s || "").trim();
+  return v ? v : "-";
+}
+
+function fmtOrDash(s?: string | null) {
+  const v = (s || "").toString().trim();
+  return v ? v : "-";
+}
+
+function formatAddress(e: EmployeePayrollLite) {
+  const parts: string[] = [];
+  if (e.address1) parts.push(e.address1);
+  if (e.address2) parts.push(e.address2);
+
+  const cityStateZip = [e.city, e.state, e.zip].filter(Boolean).join(" ");
+  if (cityStateZip) parts.push(cityStateZip);
+
+  return parts.length ? parts.join(", ") : "-";
+}
+
+function clampNonNeg(n: number) {
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+
+// ✅ Payroll formula (UI reference; backend must match)
+function computeExtrasPay(r: PayrollRow) {
+  const rate = Number.isFinite(r.rate) ? r.rate : 0;
+
+  const trainingHours = clampNonNeg(r.trainingHours || 0);
+  const sickHours = clampNonNeg(r.sickHours || 0);
+  const holidayHours = clampNonNeg(r.holidayHours || 0);
+  const ptoHours = clampNonNeg(r.ptoHours || 0);
+  const mileage = clampNonNeg(r.mileage || 0);
+
+  const trainingRate =
+    typeof r.trainingRate === "number" && Number.isFinite(r.trainingRate)
+      ? r.trainingRate
+      : 10;
+
+  // ✅ Mileage reimbursement default = $0.30/mile
+  const mileageRate =
+    typeof r.mileageRate === "number" && Number.isFinite(r.mileageRate)
+      ? r.mileageRate
+      : 0.3;
+
+  // Multipliers requested:
+  const sickPay = sickHours * rate * 1.0;
+  const holidayPay = holidayHours * rate * 2.0;
+  const ptoPay = ptoHours * rate * 1.0;
+
+  const trainingPay = trainingHours * trainingRate;
+  const mileagePay = mileage * mileageRate;
+
+  const extrasPay = sickPay + holidayPay + ptoPay + trainingPay + mileagePay;
+
+  return {
+    trainingHours,
+    sickHours,
+    holidayHours,
+    ptoHours,
+    mileage,
+    trainingRate,
+    mileageRate,
+    trainingPay,
+    sickPay,
+    holidayPay,
+    ptoPay,
+    mileagePay,
+    extrasPay,
+  };
+}
+
 export default function PayrollPage() {
   const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+
+  // Tabs
+  const [tab, setTab] = useState<"RUN" | "RATES">("RUN");
 
   // Default: current payroll week (Sun-Sat)
   const [periodFrom, setPeriodFrom] = useState<string>(() => {
@@ -68,8 +211,35 @@ export default function PayrollPage() {
     "ALL" | "DSP" | "OFFICE"
   >("ALL");
 
+  // RUN states
   const [isGenerating, setIsGenerating] = useState(false);
   const [run, setRun] = useState<PayrollRun | null>(null);
+
+  // ✅ Local editable weekly extras (until backend exists)
+  // key: staffId -> overrides
+  const [weeklyExtras, setWeeklyExtras] = useState<
+    Record<
+      string,
+      {
+        trainingHours: number;
+        sickHours: number;
+        holidayHours: number;
+        ptoHours: number;
+        mileage: number; // ✅ NEW
+      }
+    >
+  >({});
+
+  // RATES states
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
+  const [isSavingRates, setIsSavingRates] = useState(false);
+  const [employees, setEmployees] = useState<EmployeePayrollLite[]>([]);
+  const [empQ, setEmpQ] = useState("");
+  const [empRoleFilter, setEmpRoleFilter] = useState<"ALL" | "DSP" | "OFFICE">(
+    "ALL"
+  );
+  const [showSensitive, setShowSensitive] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
 
   const filteredRows = useMemo(() => {
@@ -78,24 +248,72 @@ export default function PayrollPage() {
     return rows.filter((r) => r.staffType === staffTypeFilter);
   }, [run, staffTypeFilter]);
 
+  const mergedRows = useMemo(() => {
+    // merge backend rows + local weekly extras (UI edits)
+    return filteredRows.map((r) => {
+      const ex = weeklyExtras[r.staffId];
+      return {
+        ...r,
+        trainingHours:
+          typeof ex?.trainingHours === "number"
+            ? ex.trainingHours
+            : r.trainingHours || 0,
+        sickHours:
+          typeof ex?.sickHours === "number" ? ex.sickHours : r.sickHours || 0,
+        holidayHours:
+          typeof ex?.holidayHours === "number"
+            ? ex.holidayHours
+            : r.holidayHours || 0,
+        ptoHours:
+          typeof ex?.ptoHours === "number" ? ex.ptoHours : r.ptoHours || 0,
+        mileage: typeof ex?.mileage === "number" ? ex.mileage : r.mileage || 0,
+      };
+    });
+  }, [filteredRows, weeklyExtras]);
+
   const viewTotals = useMemo(() => {
-    const rows = filteredRows;
+    const rows = mergedRows;
+
+    // hours totals (work hours only)
     const totalHours = rows.reduce((s, r) => s + (r.hours || 0), 0);
     const totalOtHours = rows.reduce((s, r) => s + (r.otHours || 0), 0);
-    const totalPay = rows.reduce((s, r) => s + (r.totalPay || 0), 0);
+
+    // pay totals: backend totalPay + extras pay (training/sick/holiday/pto/mileage)
+    const totalPay = rows.reduce((s, r) => {
+      const ex = computeExtrasPay(r);
+      return s + (r.totalPay || 0) + ex.extrasPay;
+    }, 0);
+
     return { totalHours, totalOtHours, totalPay };
-  }, [filteredRows]);
+  }, [mergedRows]);
+
+  const filteredEmployees = useMemo(() => {
+    const q = empQ.trim().toLowerCase();
+    const rows = employees;
+
+    return rows.filter((e) => {
+      const matchQ =
+        !q ||
+        e.employeeId.toLowerCase().includes(q) ||
+        e.firstName.toLowerCase().includes(q) ||
+        e.lastName.toLowerCase().includes(q) ||
+        `${e.firstName} ${e.lastName}`.toLowerCase().includes(q) ||
+        (e.email || "").toLowerCase().includes(q) ||
+        (e.role || "").toLowerCase().includes(q);
+
+      const t = (e.staffType || "").toUpperCase() as "DSP" | "OFFICE" | "";
+      const matchType = empRoleFilter === "ALL" ? true : t === empRoleFilter;
+
+      return matchQ && matchType;
+    });
+  }, [employees, empQ, empRoleFilter]);
 
   async function generatePayroll() {
     setError(null);
     setIsGenerating(true);
 
     try {
-      // Expected endpoint (placeholder):
       // POST /payroll/generate { from, to }
-      // Backend rules:
-      // - OFFICE: hours come from TimeKeeping ONLY; OT applies only if total hours > 40
-      // - DSP: hours come from Visits ONLY; OT applies only if total hours > 40
       const res = await fetch(`${API_BASE}/payroll/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -113,6 +331,19 @@ export default function PayrollPage() {
 
       const json = (await res.json()) as PayrollRun;
       setRun(json);
+
+      // init local weekly extras cache
+      const next: typeof weeklyExtras = {};
+      for (const r of json.rows || []) {
+        next[r.staffId] = {
+          trainingHours: r.trainingHours || 0,
+          sickHours: r.sickHours || 0,
+          holidayHours: r.holidayHours || 0,
+          ptoHours: r.ptoHours || 0,
+          mileage: r.mileage || 0,
+        };
+      }
+      setWeeklyExtras(next);
     } catch (e: any) {
       setError(e?.message || "Generate failed");
     } finally {
@@ -120,18 +351,32 @@ export default function PayrollPage() {
     }
   }
 
+  // ===============================
+  // DOC EXPORT TEMPLATE (LANDSCAPE)
+  // Columns MUST match Payroll Details table:
+  // Employee, SSN#, Type, Rate, Hours, OT Hours,
+  // Training hour, Sick hour, Holiday hour, PTO hour, Mileage,
+  // Regular Pay, OT Pay, Extras Pay, Total
+  // ===============================
+
   async function exportDoc() {
     if (!run) return;
     setError(null);
 
     try {
-      // Expected endpoint (placeholder):
-      // POST /payroll/export/doc { runId }
+      // POST /payroll/export/doc { runId, weeklyExtras, periodFrom, periodTo, staffTypeFilter }
+      // ✅ Include weeklyExtras so DOC can include Training/Sick/Holiday/PTO/Mileage columns & totals.
       const res = await fetch(`${API_BASE}/payroll/export/doc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ runId: run.id }),
+        body: JSON.stringify({
+          runId: run.id,
+          periodFrom,
+          periodTo,
+          staffTypeFilter,
+          weeklyExtras,
+        }),
       });
 
       if (!res.ok) {
@@ -160,13 +405,18 @@ export default function PayrollPage() {
     setError(null);
 
     try {
-      // Expected endpoint (placeholder):
-      // POST /payroll/export/pdf { runId }
+      // POST /payroll/export/pdf { runId, weeklyExtras, periodFrom, periodTo, staffTypeFilter }
       const res = await fetch(`${API_BASE}/payroll/export/pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ runId: run.id }),
+        body: JSON.stringify({
+          runId: run.id,
+          periodFrom,
+          periodTo,
+          staffTypeFilter,
+          weeklyExtras,
+        }),
       });
 
       if (!res.ok) {
@@ -190,6 +440,145 @@ export default function PayrollPage() {
     }
   }
 
+  async function loadEmployees() {
+    setError(null);
+    setIsLoadingEmployees(true);
+    try {
+      // GET /payroll/employees
+      const res = await fetch(`${API_BASE}/payroll/employees`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(
+          `Load employees failed (${res.status}). ${t || ""}`.trim()
+        );
+      }
+
+      const json = (await res.json()) as EmployeePayrollLite[];
+      const arr = Array.isArray(json) ? json : [];
+
+      // ensure defaults
+      setEmployees(
+        arr.map((e) => ({
+          ...e,
+          trainingRate:
+            typeof e.trainingRate === "number" ? e.trainingRate : 10,
+          // ✅ Mileage reimbursement default = $0.30/mile
+          mileageRate: typeof e.mileageRate === "number" ? e.mileageRate : 0.3,
+        }))
+      );
+    } catch (e: any) {
+      setError(e?.message || "Load employees failed");
+    } finally {
+      setIsLoadingEmployees(false);
+    }
+  }
+
+  function updateRateLocal(employeeId: string, rateText: string) {
+    const rate = toNumberOrNull(rateText);
+    setEmployees((prev) =>
+      prev.map((e) => (e.employeeId === employeeId ? { ...e, rate } : e))
+    );
+  }
+
+  function updateTrainingRateLocal(employeeId: string, rateText: string) {
+    const r = toNumberOrNull(rateText);
+    setEmployees((prev) =>
+      prev.map((e) =>
+        e.employeeId === employeeId
+          ? { ...e, trainingRate: r === null ? null : r }
+          : e
+      )
+    );
+  }
+
+  function updateMileageRateLocal(employeeId: string, rateText: string) {
+    const r = toNumberOrNull(rateText);
+    setEmployees((prev) =>
+      prev.map((e) =>
+        e.employeeId === employeeId
+          ? { ...e, mileageRate: r === null ? null : r }
+          : e
+      )
+    );
+  }
+
+  async function saveRates() {
+    setError(null);
+    setIsSavingRates(true);
+
+    try {
+      // POST /payroll/rates/upsert { items: [{ employeeId, rate, trainingRate, mileageRate }] }
+      const payload: SaveRatesPayload = {
+        items: employees.map((e) => ({
+          employeeId: e.employeeId,
+          rate: typeof e.rate === "number" ? e.rate : null,
+          trainingRate:
+            typeof e.trainingRate === "number" ? e.trainingRate : null,
+          mileageRate: typeof e.mileageRate === "number" ? e.mileageRate : null,
+        })),
+      };
+
+      const res = await fetch(`${API_BASE}/payroll/rates/upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`Save rates failed (${res.status}). ${t || ""}`.trim());
+      }
+
+      const json = (await res.json()) as {
+        ok: true;
+        employees?: EmployeePayrollLite[];
+      };
+      if (json?.employees && Array.isArray(json.employees)) {
+        setEmployees(
+          json.employees.map((e) => ({
+            ...e,
+            trainingRate:
+              typeof e.trainingRate === "number" ? e.trainingRate : 10,
+            mileageRate:
+              typeof e.mileageRate === "number" ? e.mileageRate : 0.3,
+          }))
+        );
+      }
+    } catch (e: any) {
+      setError(e?.message || "Save rates failed");
+    } finally {
+      setIsSavingRates(false);
+    }
+  }
+
+  function setExtra(
+    staffId: string,
+    key:
+      | "trainingHours"
+      | "sickHours"
+      | "holidayHours"
+      | "ptoHours"
+      | "mileage",
+    val: number
+  ) {
+    setWeeklyExtras((prev) => ({
+      ...prev,
+      [staffId]: {
+        trainingHours: prev[staffId]?.trainingHours ?? 0,
+        sickHours: prev[staffId]?.sickHours ?? 0,
+        holidayHours: prev[staffId]?.holidayHours ?? 0,
+        ptoHours: prev[staffId]?.ptoHours ?? 0,
+        mileage: prev[staffId]?.mileage ?? 0,
+        [key]: clampNonNeg(val),
+      },
+    }));
+  }
+
   return (
     <div className="min-h-screen bg-bac-bg text-bac-text">
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -197,252 +586,644 @@ export default function PayrollPage() {
           <div>
             <h1 className="text-2xl font-semibold">Payroll</h1>
             <p className="text-sm text-bac-muted">
-              Weekly payroll (Sun–Sat). Office uses Time Keeping only. DSP uses
-              Visits only. OT is 1.5× after 40 hours.
+              Weekly payroll (Sun–Sat). Office uses Time Keeping. DSP uses
+              Schedule/Visits. OT is 1.5× after 40 hours. Rates are managed here
+              (not in Employee Profile).
             </p>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <button
-              onClick={generatePayroll}
-              disabled={isGenerating}
-              className="h-10 rounded-xl bg-bac-primary px-4 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
-            >
-              {isGenerating ? "Generating..." : "Generate Payroll"}
-            </button>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="mt-5 grid grid-cols-1 gap-3 rounded-2xl border border-bac-border bg-bac-panel p-4 md:grid-cols-4">
-          <div className="flex flex-col">
-            <label className="text-xs text-bac-muted">Period Start (Sun)</label>
-            <input
-              type="date"
-              value={periodFrom}
-              onChange={(e) => setPeriodFrom(e.target.value)}
-              className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-            />
-          </div>
-
-          <div className="flex flex-col">
-            <label className="text-xs text-bac-muted">Period End (Sat)</label>
-            <input
-              type="date"
-              value={periodTo}
-              onChange={(e) => setPeriodTo(e.target.value)}
-              className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-            />
-          </div>
-
-          <div className="flex flex-col">
-            <label className="text-xs text-bac-muted">Staff Type</label>
-            <select
-              value={staffTypeFilter}
-              onChange={(e) =>
-                setStaffTypeFilter(e.target.value as "ALL" | "DSP" | "OFFICE")
-              }
-              className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-            >
-              <option value="ALL">All</option>
-              <option value="OFFICE">Office</option>
-              <option value="DSP">DSP</option>
-            </select>
-          </div>
-
-          <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-            <div className="text-xs text-bac-muted">Current View Total</div>
-            <div className="mt-1 text-xl font-semibold">
-              {money(viewTotals.totalPay)}
-            </div>
-            <div className="text-xs text-bac-muted">
-              {viewTotals.totalHours.toFixed(2)} hrs •{" "}
-              {viewTotals.totalOtHours.toFixed(2)} OT hrs
-            </div>
-          </div>
-        </div>
-
-        {/* Actions + status */}
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
-            <div className="text-sm font-semibold">Payroll Run</div>
-
-            <div className="mt-2 text-sm text-bac-muted">
-              Period:{" "}
-              <span className="text-bac-text">
-                {run ? `${run.periodFrom} → ${run.periodTo}` : "-"}
-              </span>
-            </div>
-
-            <div className="mt-1 text-sm text-bac-muted">
-              Generated at:{" "}
-              <span className="text-bac-text">
-                {run ? new Date(run.generatedAt).toLocaleString() : "-"}
-              </span>
-            </div>
-
-            <div className="mt-3 text-xs text-bac-muted">
-              Policy lock:
-              <ul className="mt-1 list-disc pl-5">
-                <li>Office hours from Time Keeping only</li>
-                <li>DSP hours from Visits only</li>
-                <li>OT after 40h at 1.5×</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
-            <div className="text-sm font-semibold">Export</div>
-            <div className="mt-3 flex gap-2">
+            <div className="inline-flex overflow-hidden rounded-xl border border-bac-border bg-bac-bg">
               <button
-                onClick={exportDoc}
-                disabled={!run}
-                className="h-10 flex-1 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                onClick={() => setTab("RUN")}
+                className={`h-10 px-4 text-sm font-semibold ${
+                  tab === "RUN"
+                    ? "bg-bac-primary text-white"
+                    : "text-bac-text hover:opacity-90"
+                }`}
               >
-                Export DOC
+                Weekly Run
               </button>
               <button
-                onClick={exportPdf}
-                disabled={!run}
-                className="h-10 flex-1 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                onClick={() => setTab("RATES")}
+                className={`h-10 px-4 text-sm font-semibold ${
+                  tab === "RATES"
+                    ? "bg-bac-primary text-white"
+                    : "text-bac-text hover:opacity-90"
+                }`}
               >
-                Export PDF
+                Employee Rates
               </button>
             </div>
 
-            <div className="mt-3 text-xs text-bac-muted">
-              {run?.exports?.docUrl ? (
-                <div>
-                  DOC:{" "}
-                  <a
-                    className="text-bac-primary underline"
-                    href={run.exports.docUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open
-                  </a>
-                </div>
-              ) : (
-                <div>DOC: -</div>
-              )}
-              {run?.exports?.pdfUrl ? (
-                <div>
-                  PDF:{" "}
-                  <a
-                    className="text-bac-primary underline"
-                    href={run.exports.pdfUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open
-                  </a>
-                </div>
-              ) : (
-                <div>PDF: -</div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
-            <div className="text-sm font-semibold">Messages</div>
-
-            {error ? (
-              <div className="mt-3 rounded-xl border border-bac-border bg-bac-bg p-3 text-sm text-bac-red">
-                {error}
-              </div>
+            {tab === "RUN" ? (
+              <button
+                onClick={generatePayroll}
+                disabled={isGenerating}
+                className="h-10 rounded-xl bg-bac-primary px-4 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+              >
+                {isGenerating ? "Generating..." : "Generate Payroll"}
+              </button>
             ) : (
-              <div className="mt-3 rounded-xl border border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
-                Tip: Admin generates payroll weekly (Sun–Sat). On Thursdays,
-                click Generate, then export DOC to send to taxer.
+              <div className="flex gap-2">
+                <button
+                  onClick={loadEmployees}
+                  disabled={isLoadingEmployees}
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                >
+                  {isLoadingEmployees ? "Loading..." : "Load Employees"}
+                </button>
+                <button
+                  onClick={saveRates}
+                  disabled={isSavingRates || employees.length === 0}
+                  className="h-10 rounded-xl bg-bac-primary px-4 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  {isSavingRates ? "Saving..." : "Save Rates"}
+                </button>
               </div>
             )}
           </div>
         </div>
 
-        {/* Table */}
-        <div className="mt-6 rounded-2xl border border-bac-border bg-bac-panel">
-          <div className="flex items-center justify-between border-b border-bac-border px-4 py-3">
-            <div>
-              <div className="text-sm font-semibold">Payroll Details</div>
-              <div className="text-xs text-bac-muted">
-                Showing: {staffTypeFilter} • Rows: {filteredRows.length}
-              </div>
-            </div>
-
-            <div className="text-xs text-bac-muted">
-              Regular + OT totals calculated by backend rules.
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-bac-muted">
-                <tr className="border-b border-bac-border">
-                  <th className="px-4 py-3">Staff</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Rate</th>
-                  <th className="px-4 py-3">Hours</th>
-                  <th className="px-4 py-3">OT Hours</th>
-                  <th className="px-4 py-3">Regular Pay</th>
-                  <th className="px-4 py-3">OT Pay</th>
-                  <th className="px-4 py-3">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!run ? (
-                  <tr>
-                    <td className="px-4 py-6 text-bac-muted" colSpan={8}>
-                      No payroll generated yet. Click{" "}
-                      <span className="text-bac-text font-medium">
-                        Generate Payroll
-                      </span>
-                      .
-                    </td>
-                  </tr>
-                ) : filteredRows.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-6 text-bac-muted" colSpan={8}>
-                      No rows match the current filter.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredRows.map((r) => (
-                    <tr key={r.staffId} className="border-b border-bac-border">
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{r.staffName}</div>
-                        <div className="text-xs text-bac-muted">
-                          {r.staffId}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">{r.staffType}</td>
-                      <td className="px-4 py-3">{money(r.rate)}</td>
-                      <td className="px-4 py-3">{r.hours.toFixed(2)}</td>
-                      <td className="px-4 py-3">{r.otHours.toFixed(2)}</td>
-                      <td className="px-4 py-3">{money(r.regularPay)}</td>
-                      <td className="px-4 py-3">{money(r.otPay)}</td>
-                      <td className="px-4 py-3 font-semibold">
-                        {money(r.totalPay)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {run ? (
-            <div className="px-4 py-3 text-xs text-bac-muted">
-              Run totals (all rows): {run.totals.totalHours.toFixed(2)} hrs •{" "}
-              {run.totals.totalOtHours.toFixed(2)} OT hrs •{" "}
-              {money(run.totals.totalPay)}
+        {/* Messages */}
+        <div className="mt-4">
+          {error ? (
+            <div className="rounded-2xl border border-bac-border bg-bac-panel p-4 text-sm text-bac-red">
+              {error}
             </div>
           ) : (
-            <div className="px-4 py-3 text-xs text-bac-muted">
-              Once generated, payroll runs are saved as history (backend).
+            <div className="rounded-2xl border border-bac-border bg-bac-panel p-4 text-xs text-bac-muted">
+              Tip: Admin generates payroll weekly (Sun–Sat). On Thursdays, click
+              Generate, then export DOC to send to taxer. Weekly extras
+              (Training/Sick/Holiday/PTO/Mileage) are editable and included in
+              DOC.
+              <div className="mt-2">
+                Formula: OT = 1.5× rate; Sick = 1.0× rate; Holiday = 2.0× rate;
+                PTO = 1.0× rate; Training = trainingRate; Mileage = mileageRate.
+              </div>
             </div>
           )}
         </div>
+
+        {/* ======================= TAB: RUN ======================= */}
+        {tab === "RUN" ? (
+          <>
+            {/* Filters */}
+            <div className="mt-5 grid grid-cols-1 gap-3 rounded-2xl border border-bac-border bg-bac-panel p-4 md:grid-cols-4">
+              <div className="flex flex-col">
+                <label className="text-xs text-bac-muted">
+                  Period Start (Sun)
+                </label>
+                <input
+                  type="date"
+                  value={periodFrom}
+                  onChange={(e) => setPeriodFrom(e.target.value)}
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-xs text-bac-muted">
+                  Period End (Sat)
+                </label>
+                <input
+                  type="date"
+                  value={periodTo}
+                  onChange={(e) => setPeriodTo(e.target.value)}
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-xs text-bac-muted">Staff Type</label>
+                <select
+                  value={staffTypeFilter}
+                  onChange={(e) =>
+                    setStaffTypeFilter(
+                      e.target.value as "ALL" | "DSP" | "OFFICE"
+                    )
+                  }
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                >
+                  <option value="ALL">All</option>
+                  <option value="OFFICE">Office</option>
+                  <option value="DSP">DSP</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                <div className="text-xs text-bac-muted">Current View Total</div>
+                <div className="mt-1 text-xl font-semibold">
+                  {money(viewTotals.totalPay)}
+                </div>
+                <div className="text-xs text-bac-muted">
+                  {viewTotals.totalHours.toFixed(2)} hrs •{" "}
+                  {viewTotals.totalOtHours.toFixed(2)} OT hrs
+                </div>
+              </div>
+            </div>
+
+            {/* Actions + status */}
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="text-sm font-semibold">Payroll Run</div>
+
+                <div className="mt-2 text-sm text-bac-muted">
+                  Period:{" "}
+                  <span className="text-bac-text">
+                    {run ? `${run.periodFrom} → ${run.periodTo}` : "-"}
+                  </span>
+                </div>
+
+                <div className="mt-1 text-sm text-bac-muted">
+                  Generated at:{" "}
+                  <span className="text-bac-text">
+                    {run ? new Date(run.generatedAt).toLocaleString() : "-"}
+                  </span>
+                </div>
+
+                <div className="mt-3 text-xs text-bac-muted">
+                  Policy lock:
+                  <ul className="mt-1 list-disc pl-5">
+                    <li>Office hours from Time Keeping (approved totals)</li>
+                    <li>DSP hours from Schedule/Visits</li>
+                    <li>OT after 40h at 1.5×</li>
+                    <li>Holiday pay at 2.0× rate</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="text-sm font-semibold">Export</div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={exportDoc}
+                    disabled={!run}
+                    className="h-10 flex-1 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                  >
+                    Export DOC
+                  </button>
+                  <button
+                    onClick={exportPdf}
+                    disabled={!run}
+                    className="h-10 flex-1 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                  >
+                    Export PDF
+                  </button>
+                </div>
+
+                <div className="mt-3 text-xs text-bac-muted">
+                  {run?.exports?.docUrl ? (
+                    <div>
+                      DOC:{" "}
+                      <a
+                        className="text-bac-primary underline"
+                        href={run.exports.docUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open
+                      </a>
+                    </div>
+                  ) : (
+                    <div>DOC: -</div>
+                  )}
+                  {run?.exports?.pdfUrl ? (
+                    <div>
+                      PDF:{" "}
+                      <a
+                        className="text-bac-primary underline"
+                        href={run.exports.pdfUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open
+                      </a>
+                    </div>
+                  ) : (
+                    <div>PDF: -</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="text-sm font-semibold">Notes</div>
+                <div className="mt-3 rounded-xl border border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
+                  Weekly extras entry:
+                  <ul className="mt-2 list-disc pl-5">
+                    <li>
+                      Training/Sick/Holiday/PTO/Mileage are editable per
+                      employee
+                    </li>
+                    <li>These columns must appear in the DOC sent to Taxer</li>
+                    <li>Table is wide → DOC should be Landscape</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="mt-6 rounded-2xl border border-bac-border bg-bac-panel">
+              <div className="flex items-center justify-between border-b border-bac-border px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold">Payroll Details</div>
+                  <div className="text-xs text-bac-muted">
+                    Showing: {staffTypeFilter} • Rows: {mergedRows.length}
+                  </div>
+                </div>
+
+                <div className="text-xs text-bac-muted">
+                  Regular + OT totals calculated by backend rules. Extras are
+                  added in UI (backend must match).
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs text-bac-muted">
+                    <tr className="border-b border-bac-border">
+                      <th className="px-4 py-3">Employee</th>
+                      <th className="px-4 py-3">SSN#</th>
+
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Rate</th>
+
+                      <th className="px-4 py-3">Hours</th>
+                      <th className="px-4 py-3">OT Hours</th>
+
+                      <th className="px-4 py-3">Training hour</th>
+                      <th className="px-4 py-3">Sick hour</th>
+                      <th className="px-4 py-3">Holiday hour</th>
+                      <th className="px-4 py-3">PTO hour</th>
+
+                      {/* ✅ NEW */}
+                      <th className="px-4 py-3">Mileage</th>
+
+                      <th className="px-4 py-3">Regular Pay</th>
+                      <th className="px-4 py-3">OT Pay</th>
+
+                      {/* ✅ Helpful columns for Taxer */}
+                      <th className="px-4 py-3">Extras Pay</th>
+
+                      <th className="px-4 py-3">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!run ? (
+                      <tr>
+                        <td className="px-4 py-6 text-bac-muted" colSpan={15}>
+                          No payroll generated yet. Click{" "}
+                          <span className="text-bac-text font-medium">
+                            Generate Payroll
+                          </span>
+                          .
+                        </td>
+                      </tr>
+                    ) : mergedRows.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-6 text-bac-muted" colSpan={15}>
+                          No rows match the current filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      mergedRows.map((r) => {
+                        const ex = computeExtrasPay(r);
+                        const totalWithExtras =
+                          (r.totalPay || 0) + ex.extrasPay;
+
+                        return (
+                          <tr
+                            key={r.staffId}
+                            className="border-b border-bac-border"
+                          >
+                            <td className="px-4 py-3">
+                              <div className="font-medium">{r.staffName}</div>
+                              <div className="text-xs text-bac-muted">
+                                {r.staffId}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <span className="text-xs text-bac-muted">
+                                {fmtOrDash(r.employeeSSN || null)}
+                              </span>
+                            </td>
+
+                            <td className="px-4 py-3">{r.staffType}</td>
+                            <td className="px-4 py-3">{money(r.rate)}</td>
+
+                            <td className="px-4 py-3">{r.hours.toFixed(2)}</td>
+                            <td className="px-4 py-3">
+                              {r.otHours.toFixed(2)}
+                            </td>
+
+                            {/* Weekly extras inputs */}
+                            <td className="px-4 py-3">
+                              <input
+                                defaultValue={String(ex.trainingHours || 0)}
+                                onChange={(e) =>
+                                  setExtra(
+                                    r.staffId,
+                                    "trainingHours",
+                                    toNumberOrZero(e.target.value)
+                                  )
+                                }
+                                className="h-9 w-20 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                defaultValue={String(ex.sickHours || 0)}
+                                onChange={(e) =>
+                                  setExtra(
+                                    r.staffId,
+                                    "sickHours",
+                                    toNumberOrZero(e.target.value)
+                                  )
+                                }
+                                className="h-9 w-20 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                defaultValue={String(ex.holidayHours || 0)}
+                                onChange={(e) =>
+                                  setExtra(
+                                    r.staffId,
+                                    "holidayHours",
+                                    toNumberOrZero(e.target.value)
+                                  )
+                                }
+                                className="h-9 w-20 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                defaultValue={String(ex.ptoHours || 0)}
+                                onChange={(e) =>
+                                  setExtra(
+                                    r.staffId,
+                                    "ptoHours",
+                                    toNumberOrZero(e.target.value)
+                                  )
+                                }
+                                className="h-9 w-20 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                            </td>
+
+                            {/* ✅ mileage */}
+                            <td className="px-4 py-3">
+                              <input
+                                defaultValue={String(ex.mileage || 0)}
+                                onChange={(e) =>
+                                  setExtra(
+                                    r.staffId,
+                                    "mileage",
+                                    toNumberOrZero(e.target.value)
+                                  )
+                                }
+                                className="h-9 w-24 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                              />
+                              <div className="mt-1 text-[10px] text-bac-muted">
+                                @ {money(ex.mileageRate)}/mile
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">{money(r.regularPay)}</td>
+                            <td className="px-4 py-3">{money(r.otPay)}</td>
+
+                            <td className="px-4 py-3">{money(ex.extrasPay)}</td>
+
+                            <td className="px-4 py-3 font-semibold">
+                              {money(totalWithExtras)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {run ? (
+                <div className="px-4 py-3 text-xs text-bac-muted">
+                  Totals (view): {viewTotals.totalHours.toFixed(2)} hrs •{" "}
+                  {viewTotals.totalOtHours.toFixed(2)} OT hrs •{" "}
+                  {money(viewTotals.totalPay)} (includes extras + mileage)
+                </div>
+              ) : (
+                <div className="px-4 py-3 text-xs text-bac-muted">
+                  Once generated, payroll runs are saved as history (backend).
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          /* ======================= TAB: RATES ======================= */
+          <>
+            <div className="mt-5 grid grid-cols-1 gap-3 rounded-2xl border border-bac-border bg-bac-panel p-4 md:grid-cols-4">
+              <div className="flex flex-col md:col-span-2">
+                <label className="text-xs text-bac-muted">Search</label>
+                <input
+                  value={empQ}
+                  onChange={(e) => setEmpQ(e.target.value)}
+                  placeholder="Search by ID / name / email / role..."
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-xs text-bac-muted">Type</label>
+                <select
+                  value={empRoleFilter}
+                  onChange={(e) =>
+                    setEmpRoleFilter(e.target.value as "ALL" | "DSP" | "OFFICE")
+                  }
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                >
+                  <option value="ALL">All</option>
+                  <option value="OFFICE">Office</option>
+                  <option value="DSP">DSP</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                <div className="text-xs text-bac-muted">Employees</div>
+                <div className="mt-1 text-xl font-semibold">
+                  {filteredEmployees.length}
+                </div>
+                <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-bac-muted">
+                  <input
+                    type="checkbox"
+                    checked={showSensitive}
+                    onChange={(e) => setShowSensitive(e.target.checked)}
+                  />
+                  Show sensitive fields (DOB/SSN/Address)
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-bac-border bg-bac-panel">
+              <div className="flex items-center justify-between border-b border-bac-border px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold">
+                    Employee Payroll Rates
+                  </div>
+                  <div className="text-xs text-bac-muted">
+                    Fields: Employee ID, First/Last Name, DOB, SSN, Address,
+                    Phone, Email, Role/Position, Rate, Training Rate, Mileage
+                    Reimbursement.
+                  </div>
+                </div>
+
+                <div className="text-xs text-bac-muted">
+                  Backend must restrict this page/actions to ADMIN/HR.
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs text-bac-muted">
+                    <tr className="border-b border-bac-border">
+                      <th className="px-4 py-3">Employee ID</th>
+                      <th className="px-4 py-3">First Name</th>
+                      <th className="px-4 py-3">Last Name</th>
+                      <th className="px-4 py-3">Role/Position</th>
+                      <th className="px-4 py-3">Phone</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Rate ($/hr)</th>
+                      <th className="px-4 py-3">Training Rate ($/hr)</th>
+                      <th className="px-4 py-3">
+                        Mileage Reimbursement ($/mile)
+                      </th>
+
+                      {showSensitive ? (
+                        <>
+                          <th className="px-4 py-3">DOB</th>
+                          <th className="px-4 py-3">SSN</th>
+                          <th className="px-4 py-3">Address</th>
+                        </>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-6 text-bac-muted"
+                          colSpan={showSensitive ? 12 : 9}
+                        >
+                          No employees loaded. Click{" "}
+                          <span className="text-bac-text font-medium">
+                            Load Employees
+                          </span>
+                          .
+                        </td>
+                      </tr>
+                    ) : filteredEmployees.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-6 text-bac-muted"
+                          colSpan={showSensitive ? 12 : 9}
+                        >
+                          No employees match the current filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredEmployees.map((e) => (
+                        <tr
+                          key={e.employeeId}
+                          className="border-b border-bac-border"
+                        >
+                          <td className="px-4 py-3">
+                            <div className="font-medium">{e.employeeId}</div>
+                            {e.staffType ? (
+                              <div className="mt-1 inline-flex rounded-full border border-bac-border bg-bac-bg px-2 py-0.5 text-[10px] text-bac-muted">
+                                {e.staffType}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            {fmtOrDash(e.firstName)}
+                          </td>
+                          <td className="px-4 py-3">{fmtOrDash(e.lastName)}</td>
+                          <td className="px-4 py-3">{fmtOrDash(e.role)}</td>
+                          <td className="px-4 py-3">{fmtOrDash(e.phone)}</td>
+                          <td className="px-4 py-3">{fmtOrDash(e.email)}</td>
+
+                          <td className="px-4 py-3">
+                            <input
+                              value={
+                                typeof e.rate === "number" ? String(e.rate) : ""
+                              }
+                              onChange={(ev) =>
+                                updateRateLocal(e.employeeId, ev.target.value)
+                              }
+                              placeholder="e.g. 18.50"
+                              className="h-9 w-28 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                            />
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <input
+                              value={
+                                typeof e.trainingRate === "number"
+                                  ? String(e.trainingRate)
+                                  : ""
+                              }
+                              onChange={(ev) =>
+                                updateTrainingRateLocal(
+                                  e.employeeId,
+                                  ev.target.value
+                                )
+                              }
+                              placeholder="default 10"
+                              className="h-9 w-28 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                            />
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <input
+                              value={
+                                typeof e.mileageRate === "number"
+                                  ? String(e.mileageRate)
+                                  : ""
+                              }
+                              onChange={(ev) =>
+                                updateMileageRateLocal(
+                                  e.employeeId,
+                                  ev.target.value
+                                )
+                              }
+                              placeholder="default 0.30"
+                              className="h-9 w-32 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                            />
+                          </td>
+
+                          {showSensitive ? (
+                            <>
+                              <td className="px-4 py-3">
+                                {fmtDateOrDash(e.dob)}
+                              </td>
+                              <td className="px-4 py-3">{fmtOrDash(e.ssn)}</td>
+                              <td className="px-4 py-3">{formatAddress(e)}</td>
+                            </>
+                          ) : null}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="px-4 py-3 text-xs text-bac-muted">
+                Recommendation: keep rates in a dedicated Payroll table
+                (effective dates later). Do NOT store/show rates in Employee
+                Profile UI.
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
