@@ -95,19 +95,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [handleLogout]);
 
-  // ===== 4) Full-width override for wide-table pages (Payroll + Time Keeping) =====
+  // ===== 4) Full-width override for wide-table pages (Payroll + Time Keeping + Schedule) =====
   const isFullWidthPage = useMemo(() => {
     if (!pathname) return false;
 
-    const fullWidthPrefixes = ["/payroll", "/time-keeping"];
+    // ✅ Add "/schedule" here so Schedule page can expand full width
+    const fullWidthPrefixes = ["/payroll", "/time-keeping", "/schedule"];
 
     return fullWidthPrefixes.some(
       (p) => pathname === p || pathname.startsWith(p + "/")
     );
   }, [pathname]);
 
+  // ✅ Keep Payroll/TimeKeeping behavior, but make full-width actually "full"
   const contentContainerClass = isFullWidthPage
-    ? "w-full"
+    ? "w-full max-w-none"
     : "mx-auto w-full max-w-6xl";
 
   // ===== 5) Render layout =====

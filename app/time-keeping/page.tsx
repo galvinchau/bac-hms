@@ -215,9 +215,56 @@ function formatISOToMMDD(d: string) {
   return fmtDateMMDDFromYYYYMMDD(d);
 }
 
+/**
+ * ✅ Extract a clean human message from API error response
+ */
+async function readApiErrorMessage(res: Response): Promise<string> {
+  try {
+    const data = await res.clone().json();
+    const msg = (data as any)?.message;
+
+    if (Array.isArray(msg) && msg.length) {
+      const first = msg.find((x) => typeof x === "string") || "";
+      return (first || "Request failed.").toString().trim();
+    }
+
+    if (typeof msg === "string" && msg.trim()) {
+      return msg.trim();
+    }
+
+    const err = (data as any)?.error;
+    if (typeof err === "string" && err.trim()) return err.trim();
+  } catch {
+    // ignore
+  }
+
+  try {
+    const t = await res.text();
+    const tt = (t || "").trim();
+    if (tt.startsWith("{") && tt.endsWith("}")) {
+      try {
+        const obj = JSON.parse(tt);
+        const msg = (obj as any)?.message;
+        if (typeof msg === "string" && msg.trim()) return msg.trim();
+        if (Array.isArray(msg) && msg.length) return String(msg[0]).trim();
+      } catch {
+        // ignore
+      }
+    }
+    if (tt) return tt;
+  } catch {
+    // ignore
+  }
+
+  return "Request failed. Please try again.";
+}
+
 export default function TimeKeepingPage() {
   const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+
+  // ✅ Debug: show the ACTUAL response URL we hit (to detect wrong API/DB)
+  const [lastApiUrl, setLastApiUrl] = useState<string | null>(null);
 
   const [meLoading, setMeLoading] = useState(true);
   const [meError, setMeError] = useState<string | null>(null);
@@ -378,6 +425,22 @@ export default function TimeKeepingPage() {
     return qs;
   }
 
+  function buildUrl(path: string) {
+    // If API_BASE is empty, we hit same-origin (may be proxied/rewrite)
+    return `${API_BASE}${path}`;
+  }
+
+  async function trackedFetch(input: RequestInfo, init?: RequestInit) {
+    const res = await fetch(input, init);
+    // ✅ Record the *final URL* actually used by the browser
+    try {
+      setLastApiUrl(res.url || String(input));
+    } catch {
+      // ignore
+    }
+    return res;
+  }
+
   async function apiAdminListWeekly() {
     if (!isApprover) return;
     setApprovalLoading(true);
@@ -394,17 +457,18 @@ export default function TimeKeepingPage() {
       });
       appendCtxToSearchParams(qs, ctx);
 
-      const res = await fetch(`${API_BASE}/time-keeping/admin/weekly?${qs}`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-      });
+      const res = await trackedFetch(
+        buildUrl(`/time-keeping/admin/weekly?${qs}`),
+        {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        }
+      );
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(
-          `Failed to load weekly approvals (${res.status}). ${t || ""}`.trim()
-        );
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       const json = (await res.json()) as any;
@@ -458,10 +522,10 @@ export default function TimeKeepingPage() {
       });
       appendCtxToSearchParams(qs, ctx);
 
-      const res = await fetch(
-        `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
-          r.staffId
-        )}?${qs.toString()}`,
+      const res = await trackedFetch(
+        buildUrl(
+          `/time-keeping/admin/weekly/${encodeURIComponent(r.staffId)}?${qs}`
+        ),
         {
           method: "GET",
           headers: { "Content-Type": "application/json" },
@@ -470,10 +534,8 @@ export default function TimeKeepingPage() {
       );
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(
-          `Failed to load weekly detail (${res.status}). ${t || ""}`.trim()
-        );
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       const json = (await res.json()) as WeeklyDetailResponse;
@@ -513,11 +575,6 @@ export default function TimeKeepingPage() {
         if (d.adjustedMinutes === null || d.adjustedMinutes === undefined) {
           initInputs[d.date] = "";
         } else {
-          initInputs[d.date] = minutesToHhMm(Number(d.adjustedMinutes)).replace(
-            "h ",
-            ":"
-          ); // rough display
-          // Better: show HH:MM
           const mins = Number(d.adjustedMinutes);
           const hh = Math.floor(mins / 60);
           const mm = mins % 60;
@@ -561,10 +618,12 @@ export default function TimeKeepingPage() {
     try {
       const ctx = getCtxOrThrow();
 
-      const res = await fetch(
-        `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
-          activeApproval.staffId
-        )}/adjust`,
+      const res = await trackedFetch(
+        buildUrl(
+          `/time-keeping/admin/weekly/${encodeURIComponent(
+            activeApproval.staffId
+          )}/adjust`
+        ),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -582,10 +641,8 @@ export default function TimeKeepingPage() {
       );
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(
-          `Save adjustment failed (${res.status}). ${t || ""}`.trim()
-        );
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       await apiAdminListWeekly();
@@ -605,10 +662,12 @@ export default function TimeKeepingPage() {
     try {
       const ctx = getCtxOrThrow();
 
-      const res = await fetch(
-        `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
-          activeApproval.staffId
-        )}/approve`,
+      const res = await trackedFetch(
+        buildUrl(
+          `/time-keeping/admin/weekly/${encodeURIComponent(
+            activeApproval.staffId
+          )}/approve`
+        ),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -625,8 +684,8 @@ export default function TimeKeepingPage() {
       );
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Approve failed (${res.status}). ${t || ""}`.trim());
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       await apiAdminListWeekly();
@@ -651,10 +710,12 @@ export default function TimeKeepingPage() {
     try {
       const ctx = getCtxOrThrow();
 
-      const res = await fetch(
-        `${API_BASE}/time-keeping/admin/weekly/${encodeURIComponent(
-          activeApproval.staffId
-        )}/unlock`,
+      const res = await trackedFetch(
+        buildUrl(
+          `/time-keeping/admin/weekly/${encodeURIComponent(
+            activeApproval.staffId
+          )}/unlock`
+        ),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -671,8 +732,8 @@ export default function TimeKeepingPage() {
       );
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Unlock failed (${res.status}). ${t || ""}`.trim());
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       await apiAdminListWeekly();
@@ -737,7 +798,6 @@ export default function TimeKeepingPage() {
   }
 
   async function apiGetStatusAndWeek(staffId: string) {
-    setError(null);
     setLoading(true);
     setBusy("REFRESH");
 
@@ -752,12 +812,12 @@ export default function TimeKeepingPage() {
       appendCtxToSearchParams(qs, ctx);
 
       const [sRes, rRes] = await Promise.all([
-        fetch(`${API_BASE}/time-keeping/status?${qs.toString()}`, {
+        trackedFetch(buildUrl(`/time-keeping/status?${qs.toString()}`), {
           method: "GET",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
         }),
-        fetch(`${API_BASE}/time-keeping/attendance?${qs.toString()}`, {
+        trackedFetch(buildUrl(`/time-keeping/attendance?${qs.toString()}`), {
           method: "GET",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
@@ -765,16 +825,12 @@ export default function TimeKeepingPage() {
       ]);
 
       if (!sRes.ok) {
-        const t = await sRes.text();
-        throw new Error(
-          `Failed to load status (${sRes.status}). ${t || ""}`.trim()
-        );
+        const msg = await readApiErrorMessage(sRes);
+        throw new Error(msg);
       }
       if (!rRes.ok) {
-        const t = await rRes.text();
-        throw new Error(
-          `Failed to load attendance (${rRes.status}). ${t || ""}`.trim()
-        );
+        const msg = await readApiErrorMessage(rRes);
+        throw new Error(msg);
       }
 
       const sJson = (await sRes.json()) as TKStatus;
@@ -782,6 +838,9 @@ export default function TimeKeepingPage() {
 
       setStatus(sJson);
       setRows(Array.isArray(rJson) ? rJson : []);
+
+      // ✅ IMPORTANT: if refresh succeeds, clear any previous sticky errors
+      setError(null);
     } catch (e: any) {
       setError(e?.message || "Unknown error");
     } finally {
@@ -798,7 +857,7 @@ export default function TimeKeepingPage() {
       const ctx = getCtxOrThrow();
       const loc = await getBrowserLocation();
 
-      const res = await fetch(`${API_BASE}/time-keeping/check-in`, {
+      const res = await trackedFetch(buildUrl(`/time-keeping/check-in`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
@@ -816,8 +875,8 @@ export default function TimeKeepingPage() {
       });
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Check-in failed (${res.status}). ${t || ""}`.trim());
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       await apiGetStatusAndWeek(staffId);
@@ -836,7 +895,7 @@ export default function TimeKeepingPage() {
       const ctx = getCtxOrThrow();
       const loc = await getBrowserLocation();
 
-      const res = await fetch(`${API_BASE}/time-keeping/check-out`, {
+      const res = await trackedFetch(buildUrl(`/time-keeping/check-out`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
@@ -854,8 +913,8 @@ export default function TimeKeepingPage() {
       });
 
       if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Check-out failed (${res.status}). ${t || ""}`.trim());
+        const msg = await readApiErrorMessage(res);
+        throw new Error(msg);
       }
 
       await apiGetStatusAndWeek(staffId);
@@ -905,6 +964,16 @@ export default function TimeKeepingPage() {
     return { computed, after };
   }, [activeApproval?.daily, dailyAdjustInputs]);
 
+  const effectiveApiHint = useMemo(() => {
+    // If API_BASE empty, requests go to same-origin (and may be rewritten)
+    if (!API_BASE) {
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "(unknown)";
+      return `API_BASE is empty → using same-origin: ${origin} (may be proxied/rewrite)`;
+    }
+    return `API_BASE: ${API_BASE}`;
+  }, [API_BASE]);
+
   return (
     <div className="min-h-screen bg-bac-bg text-bac-text">
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -926,6 +995,28 @@ export default function TimeKeepingPage() {
               className="h-10 rounded-xl border border-bac-border bg-bac-panel px-4 text-sm font-medium hover:opacity-90 disabled:opacity-60"
             >
               {busy === "REFRESH" ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        {/* ✅ Debug banner to detect wrong API */}
+        <div className="mt-4 rounded-2xl border border-bac-border bg-bac-panel p-3 text-xs text-bac-muted">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="font-semibold text-bac-text">API Debug</div>
+              <div className="mt-1">{effectiveApiHint}</div>
+              <div className="mt-1">
+                Last Response URL:{" "}
+                <span className="text-bac-text">{lastApiUrl || "-"}</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setError(null)}
+              className="mt-2 h-9 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm hover:opacity-90 md:mt-0"
+              title="Clear the red error box"
+            >
+              Clear Message
             </button>
           </div>
         </div>
@@ -1331,7 +1422,6 @@ export default function TimeKeepingPage() {
                           </span>
                         </td>
 
-                        {/* ✅ No repeated "Approved by" label */}
                         <td className="py-3 pr-3 text-xs text-bac-muted">
                           {r.status === "APPROVED" ? (
                             <>
@@ -1447,7 +1537,6 @@ export default function TimeKeepingPage() {
                 />
               </div>
 
-              {/* ✅ Daily Summary (Adjust per day) */}
               <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
                 <div className="border-b border-bac-border px-4 py-3">
                   <div className="text-sm font-semibold">
@@ -1520,7 +1609,6 @@ export default function TimeKeepingPage() {
                 </div>
               </div>
 
-              {/* Attendance preview */}
               <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
                 <div className="border-b border-bac-border px-4 py-3">
                   <div className="text-sm font-semibold">

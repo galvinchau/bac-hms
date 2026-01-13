@@ -1114,7 +1114,9 @@ export default function SchedulePage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Failed to update shift");
+        throw new Error(
+          data?.error || `Failed to update shift (${res.status})`
+        );
       }
 
       const updated = (await res.json()) as ScheduleShift;
@@ -1153,18 +1155,19 @@ export default function SchedulePage() {
       setError(null);
       setSuccess(null);
 
-      const res = await fetch(`/api/schedule/shift/${editingShift.id}`, {
+      const res = await fetch(`/api/schedule/shift`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // gửi kèm shiftId cho thống nhất với backend
           shiftId: editingShift.id,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Failed to delete shift");
+        throw new Error(
+          data?.error || `Failed to delete shift (${res.status})`
+        );
       }
 
       setCurrentWeek((prev) =>
@@ -1462,7 +1465,7 @@ export default function SchedulePage() {
         )}
 
         <div className="flex justify-between text-[11px] text-slate-300 mb-1">
-          <span>
+          <span className="whitespace-nowrap">
             Sched: {formatTime(shift.plannedStart)}–
             {formatTime(shift.plannedEnd)}
           </span>
@@ -1470,7 +1473,7 @@ export default function SchedulePage() {
         </div>
 
         <div className="flex justify-between text-[11px] text-slate-300 mb-1">
-          <span>
+          <span className="whitespace-nowrap">
             Visit:{" "}
             {shift.visits.length > 0
               ? `${formatTime(shift.visits[0].checkInAt)}–${
@@ -1505,7 +1508,7 @@ export default function SchedulePage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="px-6 pb-10 pt-6 space-y-6">
+      <div className="px-6 pb-10 pt-6 space-y-6 w-full max-w-none">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -1624,10 +1627,13 @@ export default function SchedulePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-7 gap-3">
-            {dayLabels.map((_, idx) => (
-              <div key={idx}>{renderMasterDayCard(idx)}</div>
-            ))}
+          {/* ✅ Make grid expand + horizontal scroll when needed */}
+          <div className="overflow-x-auto">
+            <div className="min-w-[1100px] grid grid-cols-7 gap-3">
+              {dayLabels.map((_, idx) => (
+                <div key={idx}>{renderMasterDayCard(idx)}</div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -1722,41 +1728,51 @@ export default function SchedulePage() {
 
               {currentWeek && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 space-y-3">
-                  {/* Header row: days */}
-                  <div className="grid grid-cols-7 gap-3 text-xs text-slate-300 mb-2">
-                    {Array.from({ length: 7 }).map((_, day) => {
-                      const d = addDays(weekStart, day);
-                      return (
-                        <div key={day} className="text-center">
-                          <div className="font-semibold text-slate-100">
-                            {dayLabels[day]}
-                          </div>
-                          <div className="text-[11px] text-slate-400">
-                            {formatDateShort(d)}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Grid rows: each row of shifts */}
-                  <div className="space-y-3">
-                    {gridByDayAndSlot.maxSlots === 0 && (
-                      <div className="text-xs text-slate-500 text-center py-4">
-                        No shifts for this week. Use Master schedule to generate
-                        schedule.
+                  {/* ✅ Keep header + grid together, expand & horizontal scroll */}
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[1100px] space-y-3">
+                      {/* Header row: days */}
+                      <div className="grid grid-cols-7 gap-3 text-xs text-slate-300 mb-2">
+                        {Array.from({ length: 7 }).map((_, day) => {
+                          const d = addDays(weekStart, day);
+                          return (
+                            <div key={day} className="text-center">
+                              <div className="font-semibold text-slate-100">
+                                {dayLabels[day]}
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                {formatDateShort(d)}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    )}
 
-                    {gridByDayAndSlot.slots.map((row, rowIndex) => (
-                      <div key={rowIndex} className="grid grid-cols-7 gap-3">
-                        {row.map((shift, dayIndex) => (
-                          <div key={dayIndex}>
-                            {renderShiftCell(shift && shift.id ? shift : null)}
+                      {/* Grid rows: each row of shifts */}
+                      <div className="space-y-3">
+                        {gridByDayAndSlot.maxSlots === 0 && (
+                          <div className="text-xs text-slate-500 text-center py-4">
+                            No shifts for this week. Use Master schedule to
+                            generate schedule.
+                          </div>
+                        )}
+
+                        {gridByDayAndSlot.slots.map((row, rowIndex) => (
+                          <div
+                            key={rowIndex}
+                            className="grid grid-cols-7 gap-3"
+                          >
+                            {row.map((shift, dayIndex) => (
+                              <div key={dayIndex}>
+                                {renderShiftCell(
+                                  shift && shift.id ? shift : null
+                                )}
+                              </div>
+                            ))}
                           </div>
                         ))}
                       </div>
-                    ))}
+                    </div>
                   </div>
 
                   <div className="pt-3">
