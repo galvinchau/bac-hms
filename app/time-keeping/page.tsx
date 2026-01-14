@@ -1460,248 +1460,277 @@ export default function TimeKeepingPage() {
 
         {/* Modal */}
         {modalOpen && activeApproval && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-4xl rounded-2xl border border-bac-border bg-bac-panel p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">Review & Approve</div>
-                  <div className="mt-1 text-sm text-bac-muted">
-                    {activeApproval.staffId} • {activeApproval.name} •{" "}
-                    {activeApproval.position}
-                  </div>
-                  <div className="mt-1 text-xs text-bac-muted">
-                    Week: {weekRangeLabel}
-                  </div>
-                </div>
+          // ✅ CHANGE ONLY: allow overlay scrolling + modal internal scrolling + sticky footer buttons
+          <div className="fixed inset-0 z-50 bg-black/60 overflow-y-auto">
+            <div className="min-h-screen flex items-start justify-center p-4">
+              <div className="w-full max-w-4xl rounded-2xl border border-bac-border bg-bac-panel">
+                {/* Body scroll area */}
+                <div className="max-h-[85vh] overflow-y-auto p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-lg font-semibold">
+                        Review & Approve
+                      </div>
+                      <div className="mt-1 text-sm text-bac-muted">
+                        {activeApproval.staffId} • {activeApproval.name} •{" "}
+                        {activeApproval.position}
+                      </div>
+                      <div className="mt-1 text-xs text-bac-muted">
+                        Week: {weekRangeLabel}
+                      </div>
+                    </div>
 
-                <button
-                  onClick={closeReview}
-                  className="h-9 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm hover:opacity-90"
-                >
-                  Close
-                </button>
-              </div>
-
-              {modalError ? (
-                <div className="mt-3 rounded-xl border border-bac-border bg-bac-bg p-3 text-sm text-bac-red">
-                  {modalError}
-                </div>
-              ) : null}
-
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-                  <div className="text-xs text-bac-muted">Computed</div>
-                  <div className="mt-1 text-xl font-semibold">
-                    {minutesToHhMm(activeApproval.computedMinutes)}
-                  </div>
-                  <div className="text-xs text-bac-muted">(raw attendance)</div>
-                </div>
-
-                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-                  <div className="text-xs text-bac-muted">
-                    Total Hours (After Adjusted)
-                  </div>
-                  <div className="mt-1 text-xl font-semibold">
-                    {minutesToHhMm(modalTotals.after)}
-                  </div>
-                  <div className="text-xs text-bac-muted">
-                    This weekly total is used for Payroll (after approval).
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-                  <div className="text-xs text-bac-muted">Status</div>
-                  <div className="mt-1">
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-xs ${chipClass(
-                        activeApproval.status
-                      )}`}
+                    <button
+                      onClick={closeReview}
+                      className="h-9 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm hover:opacity-90"
                     >
-                      {activeApproval.status}
-                    </span>
+                      Close
+                    </button>
                   </div>
-                  <div className="mt-2 text-xs text-bac-muted">
-                    Flags: {activeApproval.flagsCount}
+
+                  {modalError ? (
+                    <div className="mt-3 rounded-xl border border-bac-border bg-bac-bg p-3 text-sm text-bac-red">
+                      {modalError}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                      <div className="text-xs text-bac-muted">Computed</div>
+                      <div className="mt-1 text-xl font-semibold">
+                        {minutesToHhMm(activeApproval.computedMinutes)}
+                      </div>
+                      <div className="text-xs text-bac-muted">
+                        (raw attendance)
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                      <div className="text-xs text-bac-muted">
+                        Total Hours (After Adjusted)
+                      </div>
+                      <div className="mt-1 text-xl font-semibold">
+                        {minutesToHhMm(modalTotals.after)}
+                      </div>
+                      <div className="text-xs text-bac-muted">
+                        This weekly total is used for Payroll (after approval).
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                      <div className="text-xs text-bac-muted">Status</div>
+                      <div className="mt-1">
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-xs ${chipClass(
+                            activeApproval.status
+                          )}`}
+                        >
+                          {activeApproval.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs text-bac-muted">
+                        Flags: {activeApproval.flagsCount}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <div className="mt-3">
-                <label className="text-xs text-bac-muted">Reason / Notes</label>
-                <textarea
-                  value={adjustReason}
-                  onChange={(e) => setAdjustReason(e.target.value)}
-                  className="mt-1 min-h-[80px] w-full rounded-2xl border border-bac-border bg-bac-bg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-                  placeholder="Explain why you adjusted hours (required for Unlock; recommended for Adjust/Approve)."
-                  disabled={modalBusy !== null}
-                />
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
-                <div className="border-b border-bac-border px-4 py-3">
-                  <div className="text-sm font-semibold">
-                    Daily Summary (Adjust per day)
+                  <div className="mt-3">
+                    <label className="text-xs text-bac-muted">
+                      Reason / Notes
+                    </label>
+                    <textarea
+                      value={adjustReason}
+                      onChange={(e) => setAdjustReason(e.target.value)}
+                      className="mt-1 min-h-[80px] w-full rounded-2xl border border-bac-border bg-bac-bg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                      placeholder="Explain why you adjusted hours (required for Unlock; recommended for Adjust/Approve)."
+                      disabled={modalBusy !== null}
+                    />
                   </div>
-                  <div className="text-xs text-bac-muted">
-                    Leave Adjust blank to use Computed. Use H:MM (e.g. 0:45) or
-                    decimal hours (e.g. 1.25).
-                  </div>
-                </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="text-xs text-bac-muted">
-                      <tr className="border-b border-bac-border">
-                        <th className="px-4 py-3">Date</th>
-                        <th className="px-4 py-3">Computed</th>
-                        <th className="px-4 py-3">Adjust</th>
-                        <th className="px-4 py-3">Result</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(activeApproval.daily || []).length === 0 ? (
-                        <tr>
-                          <td className="px-4 py-6 text-bac-muted" colSpan={4}>
-                            No records.
-                          </td>
-                        </tr>
-                      ) : (
-                        (activeApproval.daily || []).map((d) => {
-                          const raw = dailyAdjustInputs[d.date] ?? "";
-                          const mins = parseAdjustInputToMinutes(raw);
-                          const result =
-                            mins === null ? d.computedMinutes : mins;
+                  <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
+                    <div className="border-b border-bac-border px-4 py-3">
+                      <div className="text-sm font-semibold">
+                        Daily Summary (Adjust per day)
+                      </div>
+                      <div className="text-xs text-bac-muted">
+                        Leave Adjust blank to use Computed. Use H:MM (e.g. 0:45)
+                        or decimal hours (e.g. 1.25).
+                      </div>
+                    </div>
 
-                          return (
-                            <tr
-                              key={d.date}
-                              className="border-b border-bac-border"
-                            >
-                              <td className="px-4 py-3">
-                                {formatISOToMMDD(d.date)}
-                              </td>
-                              <td className="px-4 py-3">
-                                {minutesToHhMm(d.computedMinutes)}
-                              </td>
-                              <td className="px-4 py-3">
-                                <input
-                                  value={raw}
-                                  onChange={(e) =>
-                                    setDailyAdjustInputs((prev) => ({
-                                      ...prev,
-                                      [d.date]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder="e.g. 0:45"
-                                  className="h-9 w-[120px] rounded-xl border border-bac-border bg-bac-panel px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
-                                  disabled={modalBusy !== null}
-                                />
-                              </td>
-                              <td className="px-4 py-3 font-semibold">
-                                {minutesToHhMm(result)}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="text-xs text-bac-muted">
+                          <tr className="border-b border-bac-border">
+                            <th className="px-4 py-3">Date</th>
+                            <th className="px-4 py-3">Computed</th>
+                            <th className="px-4 py-3">Adjust</th>
+                            <th className="px-4 py-3">Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(activeApproval.daily || []).length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-6 text-bac-muted"
+                                colSpan={4}
+                              >
+                                No records.
                               </td>
                             </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                          ) : (
+                            (activeApproval.daily || []).map((d) => {
+                              const raw = dailyAdjustInputs[d.date] ?? "";
+                              const mins = parseAdjustInputToMinutes(raw);
+                              const result =
+                                mins === null ? d.computedMinutes : mins;
 
-              <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
-                <div className="border-b border-bac-border px-4 py-3">
-                  <div className="text-sm font-semibold">
-                    Raw Attendance (events)
+                              return (
+                                <tr
+                                  key={d.date}
+                                  className="border-b border-bac-border"
+                                >
+                                  <td className="px-4 py-3">
+                                    {formatISOToMMDD(d.date)}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    {minutesToHhMm(d.computedMinutes)}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <input
+                                      value={raw}
+                                      onChange={(e) =>
+                                        setDailyAdjustInputs((prev) => ({
+                                          ...prev,
+                                          [d.date]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="e.g. 0:45"
+                                      className="h-9 w-[120px] rounded-xl border border-bac-border bg-bac-panel px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
+                                      disabled={modalBusy !== null}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3 font-semibold">
+                                    {minutesToHhMm(result)}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div className="text-xs text-bac-muted">
-                    Records: {activeAttendance.length}
-                  </div>
-                </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="text-xs text-bac-muted">
-                      <tr className="border-b border-bac-border">
-                        <th className="px-4 py-3">Check In</th>
-                        <th className="px-4 py-3">Check Out</th>
-                        <th className="px-4 py-3">Total</th>
-                        <th className="px-4 py-3">Flags</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeAttendance.length === 0 ? (
-                        <tr>
-                          <td className="px-4 py-6 text-bac-muted" colSpan={4}>
-                            {modalBusy === "LOAD"
-                              ? "Loading..."
-                              : "No records."}
-                          </td>
-                        </tr>
-                      ) : (
-                        activeAttendance.map((r) => (
-                          <tr key={r.id} className="border-b border-bac-border">
-                            <td className="px-4 py-3">
-                              {fmtDateTimeMMDD(r.checkInAt)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {fmtDateTimeMMDD(r.checkOutAt)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {r.totalMinutes === null
-                                ? "-"
-                                : minutesToHhMm(r.totalMinutes)}
-                            </td>
-                            <td className="px-4 py-3">
-                              {r.flags?.length ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {r.flags.map((f) => (
-                                    <span
-                                      key={f}
-                                      className="rounded-full border border-bac-border bg-bac-panel px-2 py-0.5 text-xs"
-                                    >
-                                      {f}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-bac-muted">-</span>
-                              )}
-                            </td>
+                  <div className="mt-4 rounded-2xl border border-bac-border bg-bac-bg">
+                    <div className="border-b border-bac-border px-4 py-3">
+                      <div className="text-sm font-semibold">
+                        Raw Attendance (events)
+                      </div>
+                      <div className="text-xs text-bac-muted">
+                        Records: {activeAttendance.length}
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="text-xs text-bac-muted">
+                          <tr className="border-b border-bac-border">
+                            <th className="px-4 py-3">Check In</th>
+                            <th className="px-4 py-3">Check Out</th>
+                            <th className="px-4 py-3">Total</th>
+                            <th className="px-4 py-3">Flags</th>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody>
+                          {activeAttendance.length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-6 text-bac-muted"
+                                colSpan={4}
+                              >
+                                {modalBusy === "LOAD"
+                                  ? "Loading..."
+                                  : "No records."}
+                              </td>
+                            </tr>
+                          ) : (
+                            activeAttendance.map((r) => (
+                              <tr
+                                key={r.id}
+                                className="border-b border-bac-border"
+                              >
+                                <td className="px-4 py-3">
+                                  {fmtDateTimeMMDD(r.checkInAt)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {fmtDateTimeMMDD(r.checkOutAt)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {r.totalMinutes === null
+                                    ? "-"
+                                    : minutesToHhMm(r.totalMinutes)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {r.flags?.length ? (
+                                    <div className="flex flex-wrap gap-2">
+                                      {r.flags.map((f) => (
+                                        <span
+                                          key={f}
+                                          className="rounded-full border border-bac-border bg-bac-panel px-2 py-0.5 text-xs"
+                                        >
+                                          {f}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-bac-muted">-</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Spacer so last rows not hidden behind sticky footer */}
+                  <div className="h-4" />
                 </div>
-              </div>
 
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                <button
-                  onClick={apiAdminSaveAdjustment}
-                  disabled={modalBusy !== null}
-                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
-                >
-                  {modalBusy === "SAVE_ADJUST"
-                    ? "Saving..."
-                    : "Save Adjustment"}
-                </button>
+                {/* Sticky Footer Buttons */}
+                <div className="sticky bottom-0 border-t border-bac-border bg-bac-panel/95 backdrop-blur px-4 py-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      onClick={apiAdminSaveAdjustment}
+                      disabled={modalBusy !== null}
+                      className="h-10 rounded-xl border border-bac-border bg-bac-bg px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                    >
+                      {modalBusy === "SAVE_ADJUST"
+                        ? "Saving..."
+                        : "Save Adjustment"}
+                    </button>
 
-                <button
-                  onClick={apiAdminUnlock}
-                  disabled={modalBusy !== null}
-                  className="h-10 rounded-xl border border-bac-border bg-bac-panel px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
-                >
-                  {modalBusy === "UNLOCK" ? "Unlocking..." : "Unlock"}
-                </button>
+                    <button
+                      onClick={apiAdminUnlock}
+                      disabled={modalBusy !== null}
+                      className="h-10 rounded-xl border border-bac-border bg-bac-panel px-4 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+                    >
+                      {modalBusy === "UNLOCK" ? "Unlocking..." : "Unlock"}
+                    </button>
 
-                <button
-                  onClick={apiAdminApprove}
-                  disabled={modalBusy !== null}
-                  className="h-10 rounded-xl bg-bac-green px-4 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
-                >
-                  {modalBusy === "APPROVE" ? "Approving..." : "Approve Week"}
-                </button>
+                    <button
+                      onClick={apiAdminApprove}
+                      disabled={modalBusy !== null}
+                      className="h-10 rounded-xl bg-bac-green px-4 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                    >
+                      {modalBusy === "APPROVE"
+                        ? "Approving..."
+                        : "Approve Week"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
