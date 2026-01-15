@@ -445,9 +445,9 @@ export default function PayrollPage() {
       setRun((prev) =>
         prev
           ? {
-              ...prev,
-              exports: { ...(prev.exports || {}), docUrl: json.docUrl },
-            }
+            ...prev,
+            exports: { ...(prev.exports || {}), docUrl: json.docUrl },
+          }
           : prev
       );
 
@@ -486,9 +486,9 @@ export default function PayrollPage() {
       setRun((prev) =>
         prev
           ? {
-              ...prev,
-              exports: { ...(prev.exports || {}), pdfUrl: json.pdfUrl },
-            }
+            ...prev,
+            exports: { ...(prev.exports || {}), pdfUrl: json.pdfUrl },
+          }
           : prev
       );
 
@@ -768,21 +768,19 @@ export default function PayrollPage() {
             <div className="inline-flex overflow-hidden rounded-xl border border-bac-border bg-bac-bg">
               <button
                 onClick={() => setTab("RUN")}
-                className={`h-10 px-4 text-sm font-semibold ${
-                  tab === "RUN"
+                className={`h-10 px-4 text-sm font-semibold ${tab === "RUN"
                     ? "bg-bac-primary text-white"
                     : "text-bac-text hover:opacity-90"
-                }`}
+                  }`}
               >
                 Weekly Run
               </button>
               <button
                 onClick={() => setTab("RATES")}
-                className={`h-10 px-4 text-sm font-semibold ${
-                  tab === "RATES"
+                className={`h-10 px-4 text-sm font-semibold ${tab === "RATES"
                     ? "bg-bac-primary text-white"
                     : "text-bac-text hover:opacity-90"
-                }`}
+                  }`}
               >
                 Employee Rates
               </button>
@@ -856,7 +854,11 @@ export default function PayrollPage() {
                 <input
                   type="date"
                   value={periodFrom}
-                  onChange={(e) => setPeriodFrom(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPeriodFrom(v);
+                    setPeriodTo(addDaysISO(v, 6)); // ✅ always lock to Saturday
+                  }}
                   className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
                 />
               </div>
@@ -868,7 +870,13 @@ export default function PayrollPage() {
                 <input
                   type="date"
                   value={periodTo}
-                  onChange={(e) => setPeriodTo(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+
+                    // ✅ Always lock to Sat = periodFrom + 6
+                    const mustBe = addDaysISO(periodFrom, 6);
+                    setPeriodTo(mustBe);
+                  }}
                   className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm outline-none focus:ring-2 focus:ring-bac-primary"
                 />
               </div>
