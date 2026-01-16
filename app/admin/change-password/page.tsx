@@ -1,9 +1,23 @@
 // app/admin/change-password/page.tsx
 "use client";
 
-import { FormEvent, useState } from "react";
+import React, { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
+function isStrongPassword(pw: string): boolean {
+  if (!pw || pw.length < 8) return false;
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasLower = /[a-z]/.test(pw);
+  const hasDigit = /[0-9]/.test(pw);
+  const hasSpecial = /[^A-Za-z0-9]/.test(pw);
+  return hasUpper && hasLower && hasDigit && hasSpecial;
+}
 
 export default function ChangePasswordPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -11,12 +25,40 @@ export default function ChangePasswordPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const passwordPolicyText = useMemo(() => {
+    return "Password must be at least 8 characters and include 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character.";
+  }, []);
+
+  // ✅ Prefill email + current password from last successful login
+  useEffect(() => {
+    const qEmail = (searchParams.get("email") || "").trim().toLowerCase();
+
+    let rememberedEmail = "";
+    let rememberedPass = "";
+    try {
+      rememberedEmail = (sessionStorage.getItem("hms:lastLoginEmail") || "")
+        .trim()
+        .toLowerCase();
+      rememberedPass = sessionStorage.getItem("hms:lastLoginPassword") || "";
+    } catch {
+      // ignore
+    }
+
+    const finalEmail = qEmail || rememberedEmail;
+    if (finalEmail) setEmail(finalEmail);
+
+    // key: auto-fill current password
+    if (rememberedPass) setCurrentPassword(rememberedPass);
+  }, [searchParams]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    const normEmail = email.trim().toLowerCase();
+
+    if (!normEmail || !currentPassword || !newPassword || !confirmPassword) {
       setError("Please fill all required fields.");
       return;
     }
@@ -26,18 +68,51 @@ export default function ChangePasswordPage() {
       return;
     }
 
-    // Hiện tại chưa có hệ thống đăng nhập / password thật,
-    // nên form này chỉ làm UI + validate cơ bản.
-    // Sau này khi có auth backend, mình sẽ gọi API đổi mật khẩu ở đây.
+    if (!isStrongPassword(newPassword)) {
+      setError(passwordPolicyText);
+      return;
+    }
+
     setSaving(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      setSuccess(
-        "Password form submitted (demo only). Backend change will be added later."
-      );
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: normEmail,
+          currentPassword,
+          newPassword,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(data?.error || "Failed to change password.");
+        return;
+      }
+
+      setSuccess("Password updated successfully. You can sign in now.");
+
+      // clear sensitive remembered temp password to avoid confusion later
+      try {
+        sessionStorage.removeItem("hms:lastLoginPassword");
+      } catch {
+        // ignore
+      }
+
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+
+      // ✅ auto back to login, prefill email with ?user=
+      setTimeout(() => {
+        router.push(`/login?user=${encodeURIComponent(normEmail)}`);
+        router.refresh();
+      }, 900);
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.message || "Failed to change password.");
     } finally {
       setSaving(false);
     }
@@ -48,8 +123,7 @@ export default function ChangePasswordPage() {
       <h1 className="text-2xl font-semibold mb-4">Change Password</h1>
 
       <p className="text-sm text-bac-muted mb-4">
-        This screen provides the password change form UI. Actual password
-        changes will be connected when the authentication system is enabled.
+        Enter your username/email and change your password.
       </p>
 
       {error && (
@@ -66,6 +140,19 @@ export default function ChangePasswordPage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="text-xs font-semibold text-bac-muted uppercase">
+            Username / Email *
+          </label>
+          <input
+            type="email"
+            className="mt-1 w-full rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="username"
+          />
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-bac-muted uppercase">
             Current Password *
           </label>
           <input
@@ -75,6 +162,9 @@ export default function ChangePasswordPage() {
             onChange={(e) => setCurrentPassword(e.target.value)}
             autoComplete="current-password"
           />
+          <div className="mt-1 text-[11px] text-bac-muted">
+            (Auto-filled from your last successful sign-in.)
+          </div>
         </div>
 
         <div>
@@ -88,6 +178,9 @@ export default function ChangePasswordPage() {
             onChange={(e) => setNewPassword(e.target.value)}
             autoComplete="new-password"
           />
+          <div className="mt-1 text-[11px] text-bac-muted">
+            {passwordPolicyText}
+          </div>
         </div>
 
         <div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export default function LoginForm() {
@@ -11,6 +11,21 @@ export default function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // ✅ Prefill email from ?user=
+  useEffect(() => {
+    const u = (searchParams.get("user") || "").trim().toLowerCase();
+    if (u) setUsername(u);
+  }, [searchParams]);
+
+  function rememberLastSuccessfulLogin(email: string, pass: string) {
+    try {
+      sessionStorage.setItem("hms:lastLoginEmail", email);
+      sessionStorage.setItem("hms:lastLoginPassword", pass);
+    } catch {
+      // ignore
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,16 +38,30 @@ export default function LoginForm() {
 
     setLoading(true);
     try {
+      const email = username.trim().toLowerCase();
+
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: email, password }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setError(data.error || "Unable to sign in.");
+        return;
+      }
+
+      // ✅ remember temp password for the next screen (Change Password)
+      rememberLastSuccessfulLogin(email, password);
+
+      // ✅ NEW: first-login flow
+      if (data?.user?.mustChangePassword) {
+        router.push(
+          `/admin/change-password?email=${encodeURIComponent(email)}`
+        );
+        router.refresh();
         return;
       }
 

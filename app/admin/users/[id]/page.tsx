@@ -62,6 +62,10 @@ export default function EditUserPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // ✅ NEW: deleting state
+  const [deleting, setDeleting] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -162,6 +166,41 @@ export default function EditUserPage() {
     }
   }
 
+  // ✅ NEW: delete handler
+  async function handleDelete() {
+    setError(null);
+    setSuccess(null);
+
+    if (!userId) return;
+
+    const ok = window.confirm(
+      `Delete this user?\n\nUsername/Email: ${email}\n\nThis action cannot be undone.`
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json().catch(() => ({} as any));
+
+      if (!res.ok) {
+        setError(data?.error || "Failed to delete user.");
+        return;
+      }
+
+      setSuccess("User deleted successfully.");
+      setTimeout(() => router.push("/admin/users"), 500);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to delete user.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const userTypeOptions = useMemo(() => {
     const list = lookups?.userTypes?.length
       ? lookups.userTypes
@@ -189,6 +228,17 @@ export default function EditUserPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Modify User</h1>
+
+        {/* ✅ NEW: Delete button (top-right) */}
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={loading || saving || deleting}
+          className="px-4 py-2 rounded-xl border border-red-500/60 text-red-200 text-sm hover:bg-red-500/10 disabled:opacity-60"
+          title="Delete user"
+        >
+          {deleting ? "Deleting..." : "DELETE USER"}
+        </button>
       </div>
 
       {error && (
@@ -411,14 +461,14 @@ export default function EditUserPage() {
             type="button"
             className="px-4 py-2 rounded-xl border border-bac-border text-sm"
             onClick={() => router.push("/admin/users")}
-            disabled={saving}
+            disabled={saving || deleting}
           >
             Cancel
           </button>
           <button
             type="submit"
             className="px-4 py-2 rounded-xl bg-bac-primary text-white text-sm font-medium disabled:opacity-60"
-            disabled={saving}
+            disabled={saving || deleting}
           >
             {saving ? "Saving..." : "SAVE CHANGES"}
           </button>

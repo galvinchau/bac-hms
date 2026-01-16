@@ -31,21 +31,27 @@ export function getSessionFromRequest(req: NextRequest): SessionUser | null {
 export function setSessionCookie(res: NextResponse, user: SessionUser) {
   const payload: SessionPayload = { user };
 
+  // ✅ IMPORTANT:
+  // - localhost uses http => secure cookie will NOT be stored
+  // - production uses https => secure should be true
+  const isProd = process.env.NODE_ENV === "production";
+
   res.cookies.set(SESSION_COOKIE_NAME, JSON.stringify(payload), {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: isProd,
     path: "/",
     maxAge: 60 * 60 * 8, // 8 giờ
   });
 }
 
 export function clearSessionCookie(res: NextResponse) {
-  // xoá cookie
+  const isProd = process.env.NODE_ENV === "production";
+
   res.cookies.set(SESSION_COOKIE_NAME, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: isProd,
     path: "/",
     expires: new Date(0),
   });

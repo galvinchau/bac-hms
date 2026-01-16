@@ -88,6 +88,11 @@ const ADMIN: MenuItem[] = [
   { label: "Change Password", href: "/admin/password" },
 ];
 
+// ✅ NEW: Self-service change password for ALL users (logged-in)
+const ACCOUNT: MenuItem[] = [
+  { label: "Change Password", href: "/account/change-password" },
+];
+
 function norm(s?: string | null) {
   return String(s ?? "")
     .trim()
@@ -168,6 +173,12 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
       a.href ? pathname.startsWith(a.href) : false
     );
     if (adminHasActive) foundParent = "Admin";
+
+    // ✅ Account (self change password) active highlight
+    const accountHasActive = ACCOUNT.some((a) =>
+      a.href ? pathname.startsWith(a.href) : false
+    );
+    if (accountHasActive) foundParent = "Account";
 
     if (foundParent) setOpenParent(foundParent);
   }, [pathname, userType, employeePosition, VISIBLE_MENU]);
@@ -298,6 +309,56 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     );
   };
 
+  // ✅ NEW: Account section for ALL logged-in users
+  const renderAccountSection = () => {
+    const isOpen = openParent === "Account";
+
+    return (
+      <div className="mt-4 px-2">
+        <button
+          type="button"
+          onClick={() => toggleParent("Account")}
+          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-base font-semibold transition-colors
+            ${
+              isOpen
+                ? "bg-bac-panel text-yellow-200"
+                : "text-yellow-300 hover:bg-bac-panel/60 hover:text-yellow-200"
+            }`}
+        >
+          <span className="font-semibold">Account</span>
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${
+              isOpen ? "rotate-180" : "rotate-0"
+            }`}
+          />
+        </button>
+
+        {isOpen && (
+          <div className="mt-1 space-y-1 pl-4">
+            {ACCOUNT.map((a) => {
+              if (!a.href) return null;
+              const isActive = pathname.startsWith(a.href);
+              return (
+                <Link
+                  key={a.href}
+                  href={a.href}
+                  className={`block rounded-lg px-3 py-1.5 text-sm italic transition-colors
+                    ${
+                      isActive
+                        ? "bg-bac-panel text-yellow-200"
+                        : "text-yellow-300 hover:bg-bac-panel/70 hover:text-yellow-200"
+                    }`}
+                >
+                  {a.label}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="h-14 flex items-center gap-3 px-4 border-b border-bac-border">
@@ -326,6 +387,9 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
         </div>
 
         <nav className="space-y-1 px-2">{VISIBLE_MENU.map(renderMainItem)}</nav>
+
+        {/* ✅ NEW: Account section visible to all users */}
+        {renderAccountSection()}
 
         {renderAdminSection()}
       </div>

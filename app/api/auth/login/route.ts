@@ -9,6 +9,32 @@ type LoginBody = {
   password?: string;
 };
 
+function hashPasswordPBKDF2(password: string, salt: string) {
+  const iterations = 120000;
+  const keylen = 32;
+  const digest = "sha256";
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest);
+  return hash.toString("hex");
+}
+
+function hashPasswordHmacSha256(password: string, salt: string) {
+  return crypto.createHmac("sha256", salt).update(password).digest("hex");
+}
+
+function verifyPassword(
+  plain: string,
+  salt: string,
+  storedHash: string
+): boolean {
+  const pbkdf2 = hashPasswordPBKDF2(plain, salt);
+  if (pbkdf2 === storedHash) return true;
+
+  const hmac = hashPasswordHmacSha256(plain, salt);
+  if (hmac === storedHash) return true;
+
+  return false;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as LoginBody;
@@ -34,10 +60,10 @@ export async function POST(req: NextRequest) {
         locked: true,
         passwordHash: true,
         passwordSalt: true,
+        mustChangePassword: true,
       },
     });
 
-    // Không tìm thấy user hoặc bị lock
     if (!user || user.locked) {
       return NextResponse.json(
         { error: "Invalid username or password." },
@@ -45,7 +71,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Chưa từng đặt mật khẩu (chưa dùng màn Change password)
     if (!user.passwordHash || !user.passwordSalt) {
       return NextResponse.json(
         { error: "Account has no password set. Please contact admin." },
@@ -53,30 +78,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Hash mật khẩu nhập vào theo ĐÚNG cách của Change Password:
-    // hash = HMAC-SHA256( salt, plainPassword )
-    const computedHash = crypto
-      .createHmac("sha256", user.passwordSalt)
-      .update(password)
-      .digest("hex");
+    const ok = verifyPassword(password, user.passwordSalt, user.passwordHash);
 
-    if (computedHash !== user.passwordHash) {
-      // sai mật khẩu
+    if (!ok) {
       return NextResponse.json(
         { error: "Invalid username or password." },
         { status: 401 }
       );
     }
 
-    // Đúng mật khẩu → tạo cookie phiên đăng nhập
+    // ✅ create session cookie
     const res = NextResponse.json({
       ok: true,
       user: {
-        id:       user.id,
-        email:    user.email,
-        firstName:user.firstName,
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
         lastName: user.lastName,
         userType: user.userType,
+        mustChangePassword: !!user.mustChangePassword,
       },
     });
 
@@ -91,9 +111,6 @@ export async function POST(req: NextRequest) {
     return res;
   } catch (err) {
     console.error("POST /api/auth/login error:", err);
-    return NextResponse.json(
-      { error: "Unable to sign in." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Unable to sign in." }, { status: 500 });
   }
 }

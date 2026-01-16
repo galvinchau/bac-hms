@@ -8,6 +8,9 @@ const {
   SMTP_PASS,
   EMAIL_FROM,
   MOBILE_APP_LOGIN_URL,
+
+  // ✅ Optional for BAC-HMS
+  HMS_LOGIN_URL,
 } = process.env;
 
 function getTransporter() {
@@ -122,5 +125,128 @@ Blue Angels Care Support Team</p>
     });
   } catch (error) {
     console.error("[mail] Failed to send mobile user email:", error);
+  }
+}
+
+// ✅ NEW: Welcome email for BAC-HMS Office/Admin user
+export async function sendHmsWelcomeEmail(args: {
+  email: string;
+  firstName: string;
+  lastName?: string | null;
+  tempPassword: string;
+}): Promise<void> {
+  const transporter = getTransporter();
+  if (!transporter) return;
+
+  const { email, firstName, lastName, tempPassword } = args;
+  if (!email) return;
+
+  const fullName = `${firstName || ""} ${lastName || ""}`.trim() || "there";
+
+  // ✅ Always prefer production URL; fallback to env; fallback to localhost
+  const loginUrl =
+    "https://hms.blueangelscare.org" ||
+    HMS_LOGIN_URL ||
+    "http://localhost:3000/login";
+
+  const subject = "Welcome to Blue Angels Care – BAC-HMS Account Access";
+
+  const text = `Hello ${fullName},
+
+Welcome to Blue Angels Care.
+
+Your BAC-HMS (Blue Angels Care – Health Management System) account has been created to support your work and collaboration within our organization.
+
+Your Login Information
+- Username / Email: ${email}
+- Temporary Password: ${tempPassword}
+
+Login here:
+${loginUrl}
+
+First-Time Login Requirement
+For security and compliance purposes, you will be required to change your password upon your first login.
+
+Policies & Acceptable Use
+By using your BAC-HMS account, you acknowledge and agree to:
+- Comply with Blue Angels Care policies, procedures, and confidentiality standards
+- Protect all client, staff, and organizational information
+- Use system access only for authorized, work-related purposes
+- Keep your login credentials secure and never share them with others
+
+Support & Assistance
+If you have questions or experience any issues accessing BAC-HMS, please contact our support team:
+Email: galvin.chau@gmail.com
+
+If you did not expect to receive this email, please notify us immediately.
+
+Warm regards,
+Blue Angels Care Support Team
+`;
+
+  const html = `
+<p>Hello <strong>${fullName}</strong>,</p>
+
+<p>Welcome to <strong>Blue Angels Care</strong>.</p>
+
+<p>
+  Your <strong>BAC-HMS (Blue Angels Care – Health Management System)</strong> account has been created to support your work and collaboration within our organization.
+</p>
+
+<hr/>
+
+<h3 style="margin: 12px 0 6px 0;">🔐 Your Login Information</h3>
+<ul>
+  <li><strong>Username / Email:</strong> ${email}</li>
+  <li><strong>Temporary Password:</strong> ${tempPassword}</li>
+</ul>
+
+<p><strong>Login here:</strong><br/>
+<a href="${loginUrl}" target="_blank" rel="noreferrer">${loginUrl}</a></p>
+
+<hr/>
+
+<h3 style="margin: 12px 0 6px 0;">🔄 First-Time Login Requirement</h3>
+<p>
+  For security and compliance purposes, you will be required to <strong>change your password upon your first login</strong>.
+</p>
+
+<h3 style="margin: 12px 0 6px 0;">📋 Policies &amp; Acceptable Use</h3>
+<p>By using your BAC-HMS account, you acknowledge and agree to:</p>
+<ul>
+  <li>Comply with <strong>Blue Angels Care policies, procedures, and confidentiality standards</strong></li>
+  <li>Protect all client, staff, and organizational information</li>
+  <li>Use system access <strong>only for authorized, work-related purposes</strong></li>
+  <li>Keep your login credentials secure and never share them with others</li>
+</ul>
+<p>Any misuse of system access may result in corrective action in accordance with company policy.</p>
+
+<h3 style="margin: 12px 0 6px 0;">🛠 Support &amp; Assistance</h3>
+<p>
+  If you have questions or experience any issues accessing BAC-HMS, please contact our support team:<br/>
+  <strong>Email:</strong> <a href="mailto:galvin.chau@gmail.com">galvin.chau@gmail.com</a>
+</p>
+
+<p>If you did not expect to receive this email, please notify us immediately.</p>
+
+<p>
+  Warm regards,<br/>
+  <strong>Blue Angels Care Support Team</strong><br/>
+  Blue Angels Care – Health Management System (BAC-HMS)<br/>
+  <a href="${loginUrl}" target="_blank" rel="noreferrer">${loginUrl}</a>
+</p>
+`;
+
+  try {
+    await transporter.sendMail({
+      from: EMAIL_FROM,
+      to: email,
+      subject,
+      text,
+      html,
+    });
+    console.log("[mail] HMS welcome email sent.", { to: email });
+  } catch (error) {
+    console.error("[mail] Failed to send HMS welcome email:", error);
   }
 }

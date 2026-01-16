@@ -1,6 +1,7 @@
 // app/api/admin/users/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionFromRequest } from "@/lib/auth/session";
 
 // ✅ Direction A: userType is source of truth for permissions/menus.
 // Roles are aligned to userType (optional legacy mapping) to avoid confusion.
@@ -31,6 +32,13 @@ function getUserIdFromUrl(req: NextRequest): string | null {
   } catch {
     return null;
   }
+}
+
+// ✅ Minimal auth guard: only ADMIN can delete
+function requireAdmin(req: NextRequest) {
+  const user = getSessionFromRequest(req);
+  if (!user || user.userType !== "ADMIN") return null;
+  return user;
 }
 
 // =========================================
@@ -205,5 +213,52 @@ export async function PUT(req: NextRequest) {
       { error: "Failed to update user." },
       { status: 500 }
     );
+  }
+}
+
+// =========================================
+// DELETE /api/admin/users/:id
+// ✅ New: delete user + links (roles/privileges/supervisors)
+// =========================================
+export async function DELETE(req: NextRequest) {
+  try {
+    const me = requireAdmin(req);
+    if (!me) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const id = getUserIdFromUrl(req);
+    if (!id) {
+      return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+    }
+
+    // ✅ Prevent deleting yourself (avoid locking out)
+    if (me.id === id) {
+      return NextResponse.json(
+        { error: "You cannot delete your own account." },
+        { status: 400 }
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.userRole.deleteMany({ where: { userId: id } });
+      await tx.userPrivilege.deleteMany({ where: { userId: id } });
+      await tx.userSupervisor.deleteMany({ where: { userId: id } });
+      await tx.user.delete({ where: { id } });
+    });
+
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (err) {
+    console.error("DELETE /api/admin/users/[id] error:", err);
+    return NextResponse.json({ error: "Delete failed." }, { status: 500 });
   }
 }

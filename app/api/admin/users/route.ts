@@ -1,6 +1,28 @@
 // app/api/admin/users/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import crypto from "crypto";
+import { sendHmsWelcomeEmail } from "@/lib/mailer";
+
+function generateTempPassword(len = 12) {
+  // ✅ Recommend: only letters+numbers to avoid copy/paste issues
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+function makeSalt(bytes = 16) {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function hashPasswordHmacSha256(password: string, salt: string) {
+  // ✅ MUST match login verifier:
+  // hash = HMAC-SHA256( salt, plainPassword )
+  return crypto.createHmac("sha256", salt).update(password).digest("hex");
+}
 
 // ===== GET: list all users for Manage Users page =====
 export async function GET() {
@@ -8,11 +30,7 @@ export async function GET() {
     const users = await prisma.user.findMany({
       orderBy: { email: "asc" },
       include: {
-        roles: {
-          include: {
-            role: true,
-          },
-        },
+        roles: { include: { role: true } },
       },
     });
 
@@ -48,7 +66,11 @@ export async function POST(req: Request) {
       supervisorIds,
     } = body;
 
-    if (!email || !firstName || !lastName) {
+    const normalizedEmail = String(email ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (!normalizedEmail || !firstName || !lastName) {
       return NextResponse.json(
         { error: "Missing required fields." },
         { status: 400 }
@@ -56,7 +78,7 @@ export async function POST(req: Request) {
     }
 
     const existing = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
     });
 
     if (existing) {
@@ -66,13 +88,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // ✅ Generate temp password + salt + hash (HMAC - matches login)
+    const tempPassword = generateTempPassword(12);
+    const salt = makeSalt(16);
+    const hash = hashPasswordHmacSha256(tempPassword, salt);
+
     const user = await prisma.user.create({
       data: {
-        email,
+        email: normalizedEmail,
         firstName,
         lastName,
         locked: !!locked,
         userType,
+
+        passwordSalt: salt,
+        passwordHash: hash,
+        passwordUpdatedAt: new Date(),
+
+        mustChangePassword: true,
       },
     });
 
@@ -102,6 +135,14 @@ export async function POST(req: Request) {
         })),
       });
     }
+
+    // ✅ Send welcome email (do not block creation if SMTP fails)
+    sendHmsWelcomeEmail({
+      email: normalizedEmail,
+      firstName,
+      lastName,
+      tempPassword,
+    }).catch((e) => console.error("[mail] HMS welcome email error:", e));
 
     return NextResponse.json({ success: true, id: user.id });
   } catch (err) {
