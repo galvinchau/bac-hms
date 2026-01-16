@@ -1,7 +1,13 @@
 // app/admin/change-password/page.tsx
 "use client";
 
-import React, { FormEvent, useEffect, useMemo, useState } from "react";
+import React, {
+  FormEvent,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function isStrongPassword(pw: string): boolean {
@@ -13,7 +19,7 @@ function isStrongPassword(pw: string): boolean {
   return hasUpper && hasLower && hasDigit && hasSpecial;
 }
 
-export default function ChangePasswordPage() {
+function ChangePasswordInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -207,5 +213,16 @@ export default function ChangePasswordPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function ChangePasswordPage() {
+  // ✅ Fix Vercel build: useSearchParams must be wrapped in Suspense
+  return (
+    <Suspense
+      fallback={<div className="p-6 text-sm text-bac-muted">Loading...</div>}
+    >
+      <ChangePasswordInner />
+    </Suspense>
   );
 }
