@@ -19,6 +19,30 @@ const {
   HMS_LOGIN_URL,
 } = process.env;
 
+/**
+ * Ensure Gmail shows a friendly sender name.
+ * If EMAIL_FROM is just an email address, we wrap it as:
+ *   "Blue Angels Care" <email@domain.com>
+ * If EMAIL_FROM already contains a name (or angle brackets), we keep it unchanged.
+ */
+function normalizeFrom(rawFrom: string | undefined): string | null {
+  if (!rawFrom) return null;
+
+  const from = rawFrom.trim();
+  if (!from) return null;
+
+  // If already formatted like: Name <email> or "Name" <email>, keep it.
+  if (from.includes("<") && from.includes(">")) return from;
+
+  // If contains quotes (someone already added a name), keep it.
+  if (from.includes('"')) return from;
+
+  // Otherwise treat it as plain email address.
+  // Default display name:
+  const displayName = "Blue Angels Care";
+  return `"${displayName}" <${from}>`;
+}
+
 function getTransporter() {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !EMAIL_FROM) {
     console.warn("[mail] Missing SMTP config, skip sending email.", {
@@ -206,9 +230,16 @@ ${companyWebsite}
 </div>
 `;
 
+  // ✅ NEW: Friendly From
+  const from = normalizeFrom(EMAIL_FROM);
+  if (!from) {
+    console.warn("[mail] Missing EMAIL_FROM after normalize, skip sending.");
+    return;
+  }
+
   try {
     const info = await transporter.sendMail({
-      from: EMAIL_FROM,
+      from,
       to,
       subject,
       text,
@@ -333,9 +364,16 @@ Blue Angels Care Support Team
 </p>
 `;
 
+  // ✅ NEW: Friendly From
+  const from = normalizeFrom(EMAIL_FROM);
+  if (!from) {
+    console.warn("[mail] Missing EMAIL_FROM after normalize, skip sending.");
+    return;
+  }
+
   try {
     await transporter.sendMail({
-      from: EMAIL_FROM,
+      from,
       to: email,
       subject,
       text,
