@@ -43,6 +43,48 @@ function normalizeFrom(rawFrom: string | undefined): string | null {
   return `"${displayName}" <${from}>`;
 }
 
+/**
+ * Extract email address from:
+ *  - "Name <email@domain.com>"
+ *  - email@domain.com
+ */
+function extractEmailAddress(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!v) return null;
+
+  const m = v.match(/<([^>]+)>/);
+  if (m && m[1]) return m[1].trim();
+
+  // If it's just an email
+  if (v.includes("@") && !v.includes(" ")) return v;
+
+  // Fallback: try to find first email-like token
+  const m2 = v.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return m2 ? m2[0].trim() : null;
+}
+
+/**
+ * ✅ IMPORTANT:
+ * Gmail sometimes ignores display name if we pass `from` as a plain string.
+ * We force RFC-friendly headers by sending `from` as an object PLUS `sender`.
+ */
+function buildFromHeaders(): {
+  from: { name: string; address: string };
+  sender: { name: string; address: string };
+} | null {
+  const displayName = "Blue Angels Care";
+
+  // Prefer SMTP_USER as the actual sending mailbox.
+  const address =
+    extractEmailAddress(SMTP_USER) || extractEmailAddress(EMAIL_FROM) || null;
+
+  if (!address) return null;
+
+  const obj = { name: displayName, address };
+  return { from: obj, sender: obj };
+}
+
 function getTransporter() {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !EMAIL_FROM) {
     console.warn("[mail] Missing SMTP config, skip sending email.", {
@@ -230,16 +272,38 @@ ${companyWebsite}
 </div>
 `;
 
-  // ✅ NEW: Friendly From
-  const from = normalizeFrom(EMAIL_FROM);
-  if (!from) {
-    console.warn("[mail] Missing EMAIL_FROM after normalize, skip sending.");
+  // ✅ Friendly From (keep existing normalize for safety, but force object headers for Gmail)
+  const fromHeaders = buildFromHeaders();
+  if (!fromHeaders) {
+    // fallback to old behavior (still keeps system working)
+    const fromFallback = normalizeFrom(EMAIL_FROM);
+    if (!fromFallback) {
+      console.warn("[mail] Missing EMAIL_FROM after normalize, skip sending.");
+      return;
+    }
+
+    try {
+      const info = await transporter.sendMail({
+        from: fromFallback,
+        to,
+        subject,
+        text,
+        html,
+      });
+
+      console.log("[mail] Email sent successfully.", {
+        to,
+        messageId: info.messageId,
+      });
+    } catch (error) {
+      console.error("[mail] Failed to send mobile user email:", error);
+    }
     return;
   }
 
   try {
     const info = await transporter.sendMail({
-      from,
+      ...fromHeaders, // ✅ from + sender as objects (forces display name)
       to,
       subject,
       text,
@@ -364,16 +428,34 @@ Blue Angels Care Support Team
 </p>
 `;
 
-  // ✅ NEW: Friendly From
-  const from = normalizeFrom(EMAIL_FROM);
-  if (!from) {
-    console.warn("[mail] Missing EMAIL_FROM after normalize, skip sending.");
+  // ✅ Friendly From (keep existing normalize for safety, but force object headers for Gmail)
+  const fromHeaders = buildFromHeaders();
+  if (!fromHeaders) {
+    // fallback to old behavior (still keeps system working)
+    const fromFallback = normalizeFrom(EMAIL_FROM);
+    if (!fromFallback) {
+      console.warn("[mail] Missing EMAIL_FROM after normalize, skip sending.");
+      return;
+    }
+
+    try {
+      await transporter.sendMail({
+        from: fromFallback,
+        to: email,
+        subject,
+        text,
+        html,
+      });
+      console.log("[mail] HMS welcome email sent.", { to: email });
+    } catch (error) {
+      console.error("[mail] Failed to send HMS welcome email:", error);
+    }
     return;
   }
 
   try {
     await transporter.sendMail({
-      from,
+      ...fromHeaders, // ✅ from + sender as objects (forces display name)
       to: email,
       subject,
       text,
