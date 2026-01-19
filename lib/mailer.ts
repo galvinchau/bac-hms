@@ -7,7 +7,13 @@ const {
   SMTP_USER,
   SMTP_PASS,
   EMAIL_FROM,
+
+  // Existing
   MOBILE_APP_LOGIN_URL,
+
+  // ✅ NEW: Mobile download links (easy to swap later)
+  MOBILE_IOS_DOWNLOAD_URL,
+  MOBILE_ANDROID_DOWNLOAD_URL,
 
   // ✅ Optional for BAC-HMS
   HMS_LOGIN_URL,
@@ -46,10 +52,10 @@ interface MobileUserEmployee {
 }
 
 /**
- * Send mobile app access email to employee
+ * Send mobile app access email to employee (DSP Mobile User)
  */
 export async function sendMobileUserAccessEmail(
-  employee: MobileUserEmployee
+  employee: MobileUserEmployee,
 ): Promise<void> {
   const transporter = getTransporter();
   if (!transporter) return;
@@ -62,52 +68,142 @@ export async function sendMobileUserAccessEmail(
   const fullName =
     `${employee.firstName || ""} ${employee.lastName || ""}`.trim() || "there";
 
-  const loginUrl =
+  const to = employee.email;
+
+  // Mobile login screen URL (OTP flow happens after entering email)
+  const mobileLoginUrl =
     MOBILE_APP_LOGIN_URL || "https://blueangelscare.org/mobile-login";
 
-  const to = employee.email;
+  // ✅ Download links (use env so you can swap after approvals without code changes)
+  const iosDownloadUrl =
+    MOBILE_IOS_DOWNLOAD_URL || "https://testflight.apple.com/join/REPLACE_ME";
+  const androidDownloadUrl =
+    MOBILE_ANDROID_DOWNLOAD_URL ||
+    "https://expo.dev/accounts/galvinchau/projects/blue-angels-care-mobile/builds/de1bebdc-2e72-4377-a7cd-bbac6be3bc31";
+
+  const supportEmail = "Galvin.chau@gmail.com";
+  const companyAddress = "3107 Beale Avenue, Altoona, PA 16601";
+  const companyWebsite = "https://blueangelscare.org";
 
   console.log("[mail] Sending mobile access email", {
     to,
     employeeId: employee.employeeId,
   });
 
-  const subject = "Blue Angels Care - Mobile App Access";
+  const subject = "Blue Angels Care – Mobile App Access Activated";
 
   const text = `Hello ${fullName},
 
-Your mobile access for Blue Angels Care has been activated.
+Welcome to Blue Angels Care!
+
+Your Mobile App access has been activated.
 
 Employee ID: ${employee.employeeId}
 Login email: ${to}
 
-Please click the link below to open the mobile login screen and sign in:
-${loginUrl}
+Download Blue Angels Care Mobile App:
+- iPhone (iOS – TestFlight): ${iosDownloadUrl}
+- Android: ${androidDownloadUrl}
 
-If this message was not intended for you or you have trouble logging in, please contact the Blue Angels Care office.
+How to Log In (OTP):
+1) Install the app
+2) Open Blue Angels Care Mobile
+3) Enter your employee email address
+4) You will receive a One-Time Password (OTP) by email
+5) Enter the OTP to securely log in
 
-Thank you,
+Important DSP Responsibilities & Policies:
+- Follow ODP regulations and Blue Angels Care policies
+- Accurately check in/out and submit Daily Notes honestly and on time
+- Protect HIPAA and confidentiality at all times
+- Do not share your OTP or login credentials with anyone
+- No falsification of time, location, or service information
+
+Need help?
+Email: ${supportEmail}
+
+Warm regards,
 Blue Angels Care Support Team
+${companyAddress}
+${companyWebsite}
 `;
 
   const html = `
-<p>Hello <strong>${fullName}</strong>,</p>
+<div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111;">
+  <p>Hello <strong>${fullName}</strong>,</p>
 
-<p>Your mobile access for <strong>Blue Angels Care</strong> has been activated.</p>
+  <p style="margin-top: 8px;">
+    Welcome to <strong>Blue Angels Care</strong>!
+  </p>
 
-<ul>
-  <li><strong>Employee ID:</strong> ${employee.employeeId}</li>
-  <li><strong>Login email:</strong> ${to}</li>
-</ul>
+  <p>
+    Your <strong>Mobile App access</strong> has been <strong>activated</strong>.
+  </p>
 
-<p>Please click the link below to open the mobile login screen and sign in:</p>
+  <div style="background:#f6f7f9; padding:12px; border-radius:10px; margin:12px 0;">
+    <div><strong>Employee ID:</strong> ${employee.employeeId}</div>
+    <div><strong>Login email:</strong> ${to}</div>
+  </div>
 
-<p><a href="${loginUrl}" target="_blank">${loginUrl}</a></p>
+  <h3 style="margin: 14px 0 8px 0;">📱 Download Blue Angels Care Mobile App</h3>
 
-<p>If this message was not intended for you or you have trouble logging in, please contact the Blue Angels Care office.</p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin:8px 0 14px 0;">
+    <a href="${iosDownloadUrl}" target="_blank" rel="noreferrer"
+       style="text-decoration:none; padding:10px 12px; border-radius:10px; background:#000; color:#fff; display:inline-block;">
+      🍎 iPhone (iOS – TestFlight)
+    </a>
 
-<p>Thank you,<br/>
-Blue Angels Care Support Team</p>
+    <a href="${androidDownloadUrl}" target="_blank" rel="noreferrer"
+       style="text-decoration:none; padding:10px 12px; border-radius:10px; background:#1a8f3a; color:#fff; display:inline-block;">
+      🤖 Android (Temporary Link)
+    </a>
+  </div>
+
+  <p style="margin: 0 0 10px 0;">
+    After installing the app, sign in using your employee email address and verify using the OTP code sent to your email.
+  </p>
+
+  <h3 style="margin: 14px 0 8px 0;">🔐 How to Log In (OTP)</h3>
+  <ol style="margin-top: 6px;">
+    <li>Install the app on your mobile device</li>
+    <li>Open <strong>Blue Angels Care Mobile</strong></li>
+    <li>Enter your <strong>employee email address</strong></li>
+    <li>Check your email for a <strong>One-Time Password (OTP)</strong></li>
+    <li>Enter the OTP to securely log in</li>
+  </ol>
+
+  <p style="margin: 10px 0; padding: 10px; background:#fff6e6; border-radius:10px;">
+    <strong>⚠️ Security Notice:</strong> Do not share your OTP or login credentials with anyone.
+  </p>
+
+  <h3 style="margin: 14px 0 8px 0;">🧑‍⚕️ Important DSP Responsibilities & Policies</h3>
+  <ul style="margin-top: 6px;">
+    <li>Comply with <strong>ODP (Office of Developmental Programs)</strong> regulations and Blue Angels Care policies</li>
+    <li>Accurately check in/out for visits and submit Daily Notes honestly and on time</li>
+    <li>Protect <strong>HIPAA</strong> and confidentiality at all times</li>
+    <li>System access is for authorized work purposes only</li>
+    <li><strong>No falsification</strong> of time, location, or service information</li>
+  </ul>
+
+  <h3 style="margin: 14px 0 8px 0;">🆘 Need Help?</h3>
+  <p>
+    If you have trouble downloading the app or logging in, please contact support:<br/>
+    <strong>Email:</strong> <a href="mailto:${supportEmail}">${supportEmail}</a>
+  </p>
+
+  <hr style="margin: 16px 0;" />
+
+  <p style="margin:0;">
+    Warm regards,<br/>
+    <strong>Blue Angels Care Support Team</strong><br/>
+    ${companyAddress}<br/>
+    🌐 <a href="${companyWebsite}" target="_blank" rel="noreferrer">${companyWebsite}</a>
+  </p>
+
+  <p style="margin-top:10px; font-size:12px; color:#666;">
+    Mobile Login Screen: <a href="${mobileLoginUrl}" target="_blank" rel="noreferrer">${mobileLoginUrl}</a>
+  </p>
+</div>
 `;
 
   try {
