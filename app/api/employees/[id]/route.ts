@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import nodemailer from "nodemailer";
+import { sendMobileUserAccessEmail } from "@/lib/mailer";
 
 // Helper: chọn điều kiện where từ param (có thể là id hoặc employeeId)
 function buildWhereFromParam(param: string) {
@@ -14,70 +14,36 @@ function buildWhereFromParam(param: string) {
 
 /**
  * Gửi email khi bật Mobile user
+ * ✅ IMPORTANT: Delegate to centralized template in /lib/mailer.ts
+ * so we only maintain ONE email content going forward.
  */
 async function sendMobileAccessEmail(employee: any) {
-  const {
-    SMTP_HOST,
-    SMTP_PORT,
-    SMTP_USER,
-    SMTP_PASS,
-    EMAIL_FROM,
-    MOBILE_APP_LOGIN_URL,
-  } = process.env;
+  try {
+    if (!employee?.email) {
+      console.warn("[MobileEmail] Employee has no email, skip sending.");
+      return;
+    }
 
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !EMAIL_FROM) {
-    console.warn("[MobileEmail] SMTP env not fully configured, skip email.");
+    // ✅ Use centralized email template (NEW content)
+    await sendMobileUserAccessEmail({
+      firstName: employee.firstName ?? "",
+      lastName: employee.lastName ?? null,
+      email: employee.email,
+      employeeId: employee.employeeId,
+    });
+
+    return;
+  } catch (err) {
+    console.error("[MobileEmail] Failed to send mobile access email:", err);
     return;
   }
 
-  if (!employee.email) {
-    console.warn("[MobileEmail] Employee has no email, skip sending.");
-    return;
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT) || 587,
-    secure: false,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-  });
-
-  const loginUrl =
-    MOBILE_APP_LOGIN_URL || "https://blueangelscare.org/mobile-login";
-
-  const fullName = `${employee.firstName ?? ""} ${
-    employee.lastName ?? ""
-  }`.trim();
-
-  const html = `
-    <p>Hello ${fullName || "there"},</p>
-
-    <p>Your mobile access for <b>Blue Angels Care</b> has been activated.</p>
-
-    <ul>
-      <li><b>Employee ID:</b> ${employee.employeeId}</li>
-      <li><b>Login email:</b> ${SMTP_USER}</li>
-    </ul>
-
-    <p>Please click the link below to open the mobile login screen and sign in:</p>
-    <p><a href="${loginUrl}">${loginUrl}</a></p>
-
-    <p>If this message was not intended for you or you have trouble logging in,
-    please contact the Blue Angels Care office.</p>
-
-    <p>Thank you,<br/>
-    Blue Angels Care Support Team</p>
-  `;
-
-  await transporter.sendMail({
-    from: EMAIL_FROM,
-    to: employee.email,
-    subject: "Blue Angels Care - Mobile App Access",
-    html,
-  });
+  /**
+   * LEGACY (kept here for reference only; do not use)
+   * Previously we created a nodemailer transporter in this route and sent
+   * the old email content: "Blue Angels Care - Mobile App Access".
+   * That caused duplicate templates across routes and made updates inconsistent.
+   */
 }
 
 /**
@@ -86,7 +52,7 @@ async function sendMobileAccessEmail(employee: any) {
  */
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params; // 🔑 phải await
@@ -94,7 +60,7 @@ export async function GET(
     if (!id) {
       return NextResponse.json(
         { message: "Missing employee id" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -107,7 +73,7 @@ export async function GET(
     if (!employee) {
       return NextResponse.json(
         { message: "Employee not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -116,7 +82,7 @@ export async function GET(
     console.error("Error fetching employee:", error);
     return NextResponse.json(
       { message: "Failed to load employee" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -128,7 +94,7 @@ export async function GET(
  */
 export async function PUT(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params; // 🔑 phải await
@@ -136,7 +102,7 @@ export async function PUT(
     if (!id) {
       return NextResponse.json(
         { message: "Missing employee id" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -147,7 +113,7 @@ export async function PUT(
     if (!existing) {
       return NextResponse.json(
         { message: "Employee not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -250,7 +216,7 @@ export async function PUT(
     console.error("Error updating employee:", error);
     return NextResponse.json(
       { message: "Failed to update employee" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
