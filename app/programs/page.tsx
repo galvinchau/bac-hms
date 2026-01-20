@@ -1,7 +1,8 @@
-// app/programs/page.tsx
-// or app/(dashboard)/programs/page.tsx depending on your folder structure
+// Web\app\programs\page.tsx
 
-import React from "react";
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
 
 type ProgramItem = {
   id: string;
@@ -10,64 +11,15 @@ type ProgramItem = {
   description: string;
 };
 
-const nonResidentialPrograms: ProgramItem[] = [
-  {
-    id: "nr-1",
-    code: "NR-HAB",
-    name: "Home & Community Habilitation",
-    description:
-      "Skill-building and support in the person’s home and community: daily living, communication, social skills, and helping the individual participate safely in community life.",
-  },
-  {
-    id: "nr-2",
-    code: "NR-COMP",
-    name: "Companion Services",
-    description:
-      "Staff stay with the individual during the day, evening, or weekend to provide supervision, basic support, and social interaction in the home or community.",
-  },
-  {
-    id: "nr-3",
-    code: "NR-EMP",
-    name: "Employment / Supported Employment",
-    description:
-      "Job development, job coaching, and ongoing support so individuals with disabilities can obtain and maintain meaningful employment in the community.",
-  },
-  {
-    id: "nr-4",
-    code: "NR-THER",
-    name: "Therapy Services",
-    description:
-      "Professional therapy such as PT/OT/speech and related rehabilitation services to maintain or improve functional skills and health.",
-  },
-  {
-    id: "nr-5",
-    code: "NR-BEH",
-    name: "Behavior Support",
-    description:
-      "Clinical assessment and behavior support plans to help manage challenging behaviors and teach safer, more appropriate skills.",
-  },
-  {
-    id: "nr-6",
-    code: "NR-TRANS",
-    name: "Transportation",
-    description:
-      "Transportation to work, day programs, medical appointments, and community activities when the person cannot safely use other options.",
-  },
-  {
-    id: "nr-7",
-    code: "NR-RESP",
-    name: "Respite Services",
-    description:
-      "Short-term relief for families and caregivers, either during the day or overnight, so they can rest while the individual continues to receive care.",
-  },
-  {
-    id: "nr-8",
-    code: "NR-TECH",
-    name: "Assistive Technology / Environmental Modifications",
-    description:
-      "Equipment and home/vehicle modifications that support mobility, communication, safety, and independence (e.g., ramps, grab bars, adaptive devices).",
-  },
-];
+type ServiceRow = {
+  id: string;
+  serviceCode: string;
+  serviceName: string;
+  category: string;
+  status: string;
+  description: string | null;
+  notes: string | null;
+};
 
 const residentialPrograms: ProgramItem[] = [
   {
@@ -100,7 +52,70 @@ const residentialPrograms: ProgramItem[] = [
   },
 ];
 
+function pickBestDesc(svc: ServiceRow): string {
+  const d = (svc.description || "").trim();
+  if (d) return d;
+
+  // If description empty, try first line of notes (ignore CONFIG block)
+  const n = (svc.notes || "").trim();
+  if (!n) return "—";
+
+  const lines = n
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const firstNonConfig = lines.find((x) => !x.startsWith("[CONFIG]"));
+  return firstNonConfig || "—";
+}
+
 export default function ProgramsPage() {
+  const [services, setServices] = useState<ServiceRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/services", { cache: "no-store" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.message || "Failed to load services");
+        }
+        const data = await res.json();
+        setServices(data?.services ?? []);
+      } catch (e: any) {
+        console.error(e);
+        setError(e?.message || "Failed to load services");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // ✅ Non-Residential column = live from DB
+  const nonResidentialPrograms: ProgramItem[] = useMemo(() => {
+    const rows = (services || [])
+      .filter((s) => (s.category || "").toLowerCase() === "none-residential")
+      .filter((s) => (s.status || "").toLowerCase() !== "inactive")
+      .map((s) => ({
+        id: s.id,
+        code: s.serviceCode,
+        name: s.serviceName,
+        description: pickBestDesc(s),
+      }));
+
+    // Sort A–Z by Program name (case-insensitive)
+    rows.sort((a, b) =>
+      (a.name || "").localeCompare(b.name || "", undefined, {
+        sensitivity: "base",
+      }),
+    );
+    return rows;
+  }, [services]);
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -113,9 +128,7 @@ export default function ProgramsPage() {
               Non-Residential
             </span>{" "}
             and{" "}
-            <span className="text-yellow-200 font-semibold">
-              Residential
-            </span>{" "}
+            <span className="text-yellow-200 font-semibold">Residential</span>{" "}
             options for individuals with intellectual and developmental
             disabilities.
           </p>
@@ -132,10 +145,8 @@ export default function ProgramsPage() {
       {/* Info note */}
       <div className="rounded-2xl border border-bac-border bg-bac-panel px-4 py-3 text-sm text-bac-muted">
         <span className="font-semibold text-yellow-200">Note:</span>{" "}
-        This is sample configuration for BAC programs —{" "}
-        <span className="font-semibold text-bac-text">
-          Galvin will update this page with live database data soon.
-        </span>
+        Non-Residential is currently loaded from live Services. Residential is
+        sample configuration for now.
       </div>
 
       {/* Two-column layout */}
@@ -158,31 +169,43 @@ export default function ProgramsPage() {
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-bac-border bg-bac-bg/40">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-bac-bg/60 text-bac-muted">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Code</th>
-                  <th className="px-3 py-2 font-medium">Program</th>
-                </tr>
-              </thead>
-              <tbody>
-                {nonResidentialPrograms.map((p) => (
-                  <tr key={p.id} className="border-t border-bac-border">
-                    <td className="px-3 py-2 align-top text-yellow-200 font-semibold text-xs sm:text-sm whitespace-nowrap">
-                      {p.code}
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="font-medium text-bac-text">
-                        {p.name}
-                      </div>
-                      <div className="mt-0.5 text-xs text-bac-muted">
-                        {p.description}
-                      </div>
-                    </td>
+            {loading ? (
+              <div className="px-4 py-3 text-sm text-bac-muted">
+                Loading services...
+              </div>
+            ) : error ? (
+              <div className="px-4 py-3 text-sm text-red-300">{error}</div>
+            ) : nonResidentialPrograms.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-bac-muted">
+                No active None-Residential services found.
+              </div>
+            ) : (
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-bac-bg/60 text-bac-muted">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Code</th>
+                    <th className="px-3 py-2 font-medium">Program</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {nonResidentialPrograms.map((p) => (
+                    <tr key={p.id} className="border-t border-bac-border">
+                      <td className="px-3 py-2 align-top text-yellow-200 font-semibold text-xs sm:text-sm whitespace-nowrap">
+                        {p.code}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <div className="font-medium text-bac-text">
+                          {p.name}
+                        </div>
+                        <div className="mt-0.5 text-xs text-bac-muted">
+                          {p.description}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -218,9 +241,7 @@ export default function ProgramsPage() {
                       {p.code}
                     </td>
                     <td className="px-3 py-2 align-top">
-                      <div className="font-medium text-bac-text">
-                        {p.name}
-                      </div>
+                      <div className="font-medium text-bac-text">{p.name}</div>
                       <div className="mt-0.5 text-xs text-bac-muted">
                         {p.description}
                       </div>

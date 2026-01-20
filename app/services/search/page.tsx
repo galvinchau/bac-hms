@@ -1,13 +1,18 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
 
 type ServiceStatus = "Active" | "Inactive" | "";
 
 const SERVICE_OPTIONS: { code: string; label: string; full: string }[] = [
   { code: "PCA", label: "PCA", full: "Personal Care Assistant" },
   { code: "NT", label: "NT", full: "Nursing / Nurse Triage" },
-  { code: "PBIS", label: "PBIS", full: "Positive Behavior Interventions and Supports" },
+  {
+    code: "PBIS",
+    label: "PBIS",
+    full: "Positive Behavior Interventions and Supports",
+  },
   { code: "SHHA", label: "SHHA", full: "Skilled Home Health Aide" },
   { code: "PT", label: "PT", full: "Physical Therapy" },
   { code: "CNA", label: "CNA", full: "Certified Nursing Assistant" },
@@ -18,28 +23,42 @@ const SERVICE_OPTIONS: { code: string; label: string; full: string }[] = [
   { code: "COMP", label: "COMP", full: "Companion Services" },
 
   { code: "LPN", label: "LPN", full: "Licensed Practical Nurse" },
-  { code: "HCSS", label: "HCSS", full: "Home & Community Support Services" },
+  {
+    code: "HCSS",
+    label: "HCSS",
+    full: "In- Home & Community Support Services",
+  },
   { code: "SDP", label: "SDP", full: "Structured Day Program" },
   { code: "OTA", label: "OTA", full: "Occupational Therapy Assistant" },
   { code: "MSW", label: "MSW", full: "Master of Social Work Services" },
   { code: "APC", label: "APC", full: "Advanced Professional Care" },
   { code: "CBSA", label: "CBSA", full: "Community-Based Supported Activities" },
   { code: "PTA", label: "PTA", full: "Physical Therapy Assistant" },
-  { code: "HSK", label: "HSK", full: "Homemaker / Housekeeping" },
+  { code: "HMK", label: "HMK", full: "Homemake Services" },
+  { code: "CHORE", label: "CHORE", full: "Chore Services" },
   { code: "ILST", label: "ILST", full: "Independent Living Skills Training" },
   { code: "SPC", label: "SPC", full: "Specialist / Professional Consultant" },
+  { code: "TRAN", label: "TRAN", full: "Non-Emergency (Transportation)" },
+  { code: "BSP", label: "BSP", full: "Behavioral Support" },
 
   { code: "ST", label: "ST", full: "Speech Therapy" },
   { code: "SCI", label: "SCI", full: "Specialized Community Integration" },
   { code: "PC", label: "PC", full: "Personal Care" },
   { code: "HHA", label: "HHA", full: "Home Health Aide" },
-  { code: "RT", label: "RT", full: "Respiratory Therapy / Rehabilitation Therapy" },
-  { code: "HMK", label: "HMK", full: "Homemaker Services" },
+  {
+    code: "RT",
+    label: "RT",
+    full: "Respiratory Therapy / Rehabilitation Therapy",
+  },
   { code: "CH", label: "CH", full: "Companion / Habilitation" },
   { code: "RN", label: "RN", full: "Registered Nurse" },
   { code: "PA", label: "PA", full: "Physician Assistant / Personal Assistant" },
   { code: "ESC", label: "ESC", full: "Enhanced Support Companion" },
-  { code: "NINS", label: "NINS", full: "Non-Insurance / Non-traditional Service" },
+  {
+    code: "NINS",
+    label: "NINS",
+    full: "Non-Insurance / Non-traditional Service",
+  },
 ];
 
 interface Service {
@@ -57,6 +76,8 @@ interface Service {
 }
 
 export default function SearchServicePage() {
+  const router = useRouter();
+
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +85,8 @@ export default function SearchServicePage() {
   const [serviceFilter, setServiceFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<ServiceStatus>("");
+
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const serviceMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -98,13 +121,9 @@ export default function SearchServicePage() {
     return services.filter((svc) => {
       const matchesService =
         !serviceFilter || svc.serviceCode === serviceFilter;
-
       const matchesCategory =
         !categoryFilter || svc.category === categoryFilter;
-
-      const matchesStatus =
-        !statusFilter || svc.status === statusFilter;
-
+      const matchesStatus = !statusFilter || svc.status === statusFilter;
       return matchesService && matchesCategory && matchesStatus;
     });
   }, [services, serviceFilter, categoryFilter, statusFilter]);
@@ -117,6 +136,63 @@ export default function SearchServicePage() {
 
   const handleStatusChange = (e: ChangeEvent<HTMLSelectElement>) =>
     setStatusFilter(e.target.value as ServiceStatus);
+
+  const goEdit = (id: string) => {
+    // ✅ Safe navigation only (does not change any shared service structure)
+    router.push(`/services/${id}/edit`);
+  };
+
+  const deactivateService = async (svc: Service) => {
+    const ok = window.confirm(
+      `Deactivate this service?\n\nService: ${svc.serviceName}\nCode: ${svc.serviceCode}\n\nThis service will no longer be available for new schedules.\nExisting records remain unchanged.`,
+    );
+    if (!ok) return;
+
+    setActionLoadingId(svc.id);
+    setError(null);
+
+    const tryPatch = async () => {
+      const res = await fetch(`/api/services/${svc.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "Inactive" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || "Failed to deactivate service (PATCH)");
+      }
+      return res;
+    };
+
+    const tryDelete = async () => {
+      const res = await fetch(`/api/services/${svc.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || "Failed to delete service (DELETE)");
+      }
+      return res;
+    };
+
+    try {
+      // ✅ Prefer soft delete by status
+      try {
+        await tryPatch();
+      } catch (ePatch) {
+        // Fallback if backend only supports DELETE
+        await tryDelete();
+      }
+
+      // ✅ Update local UI without changing global data structures
+      setServices((prev) =>
+        prev.map((x) => (x.id === svc.id ? { ...x, status: "Inactive" } : x)),
+      );
+    } catch (err: any) {
+      console.error("Deactivate service error:", err);
+      setError(err?.message || "Failed to deactivate service");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-bac-bg text-bac-text">
@@ -159,11 +235,7 @@ export default function SearchServicePage() {
               >
                 <option value="">All services</option>
                 {SERVICE_OPTIONS.map((svc) => (
-                  <option
-                    key={svc.code}
-                    value={svc.code}
-                    title={svc.full}
-                  >
+                  <option key={svc.code} value={svc.code} title={svc.full}>
                     {svc.label} — {svc.full}
                   </option>
                 ))}
@@ -232,6 +304,7 @@ export default function SearchServicePage() {
                     <th className="px-3 py-2">Category</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Billable</th>
+                    <th className="px-3 py-2 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -243,28 +316,60 @@ export default function SearchServicePage() {
                       <td className="px-3 py-2 align-middle font-mono text-xs text-bac-muted">
                         {svc.serviceCode}
                       </td>
+
                       <td
                         className="px-3 py-2 align-middle text-sm font-medium"
                         title={
-                          serviceMap.get(svc.serviceCode) ??
-                          svc.serviceName
+                          serviceMap.get(svc.serviceCode) ?? svc.serviceName
                         }
                       >
                         {svc.serviceName}
                       </td>
+
                       <td className="px-3 py-2 align-middle text-xs">
                         {svc.category}
                       </td>
+
                       <td className="px-3 py-2 align-middle text-xs">
                         {svc.status}
                       </td>
+
                       <td className="px-3 py-2 align-middle text-xs">
                         {svc.billable ? "Yes" : "No"}
+                      </td>
+
+                      {/* ✅ Actions */}
+                      <td className="px-3 py-2 align-middle">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => goEdit(svc.id)}
+                            className="rounded-lg border border-bac-border bg-bac-bg px-3 py-1.5 text-xs font-semibold hover:bg-bac-bg/60"
+                            title="Edit service"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => deactivateService(svc)}
+                            disabled={actionLoadingId === svc.id}
+                            className="rounded-lg border border-bac-border bg-bac-bg px-3 py-1.5 text-xs font-semibold text-bac-red hover:bg-bac-bg/60 disabled:opacity-50"
+                            title="Deactivate service (soft delete)"
+                          >
+                            {actionLoadingId === svc.id ? "..." : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+
+              <p className="mt-3 text-xs text-bac-muted">
+                Note: “Delete” deactivates a service (sets status to Inactive).
+                Existing records remain unchanged.
+              </p>
             </div>
           )}
         </section>
