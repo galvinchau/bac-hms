@@ -38,6 +38,8 @@ const STATUS_OPTIONS: { key: IndividualStatus; label: string }[] = [
   { key: "INACTIVE", label: "In-active" },
 ];
 
+type SortDir = "asc" | "desc";
+
 export default function SearchIndividualPage() {
   const router = useRouter();
 
@@ -49,6 +51,9 @@ export default function SearchIndividualPage() {
     pageSize: 50,
   });
   const [loading, setLoading] = useState(false);
+
+  // ✅ NEW: sort by Name
+  const [nameSortDir, setNameSortDir] = useState<SortDir>("asc");
 
   // ✅ DEFAULT: only Pending + Active checked
   const [statusFilter, setStatusFilter] = useState<
@@ -120,6 +125,28 @@ export default function SearchIndividualPage() {
     if (v === "ACTIVE") return "ACTIVE";
     if (v === "INACTIVE") return "INACTIVE";
     return "PENDING";
+  };
+
+  // ✅ NEW: client-side sort by Name (LastName, FirstName)
+  const sortedItems = useMemo(() => {
+    const items = [...data.items];
+    items.sort((a, b) => {
+      const aName = `${a.lastName || ""}, ${a.firstName || ""}`
+        .toUpperCase()
+        .trim();
+      const bName = `${b.lastName || ""}, ${b.firstName || ""}`
+        .toUpperCase()
+        .trim();
+
+      if (aName < bName) return nameSortDir === "asc" ? -1 : 1;
+      if (aName > bName) return nameSortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return items;
+  }, [data.items, nameSortDir]);
+
+  const toggleNameSort = () => {
+    setNameSortDir((d) => (d === "asc" ? "desc" : "asc"));
   };
 
   return (
@@ -197,7 +224,19 @@ export default function SearchIndividualPage() {
           <thead className="bg-bac-panel">
             <tr className="[&>th]:px-3 [&>th]:py-2 text-left">
               <th>Code</th>
-              <th>Name</th>
+
+              {/* ✅ Click to sort by Name */}
+              <th
+                className="cursor-pointer select-none"
+                onClick={toggleNameSort}
+                title="Sort by Name"
+              >
+                Name{" "}
+                <span className="text-xs text-bac-muted">
+                  {nameSortDir === "asc" ? "▲" : "▼"}
+                </span>
+              </th>
+
               <th>DOB</th>
               <th>City</th>
               <th>County</th>
@@ -209,7 +248,7 @@ export default function SearchIndividualPage() {
             </tr>
           </thead>
           <tbody>
-            {data.items.length === 0 && !loading && (
+            {sortedItems.length === 0 && !loading && (
               <tr>
                 <td
                   className="px-3 py-3 text-bac-muted text-center"
@@ -220,7 +259,7 @@ export default function SearchIndividualPage() {
               </tr>
             )}
 
-            {data.items.map((row) => {
+            {sortedItems.map((row) => {
               const s = statusText(row.status);
               return (
                 <tr
