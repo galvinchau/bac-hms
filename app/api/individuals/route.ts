@@ -23,10 +23,10 @@ export async function GET(req: Request) {
   const simple = searchParams.get("simple") === "true";
 
   // ✅ FIX: UI đang gửi param name = "status"
-  // (giữ thêm fallback "status" phòng trường hợp chỗ khác dùng)
+  // fallback thêm "statuses" phòng chỗ khác dùng
   const statusParamRaw = (
     searchParams.get("status") ||
-    searchParams.get("status") ||
+    searchParams.get("statuses") ||
     ""
   ).trim();
 
@@ -78,6 +78,7 @@ export async function GET(req: Request) {
         branch: true,
         location: true,
         status: true,
+        // NOTE: not needed for dropdown
       },
     });
 
@@ -115,6 +116,9 @@ export async function GET(req: Request) {
         branch: true,
         location: true,
         status: true,
+
+        // ✅ NEW: allow Search Individual to show if needed
+        medicaidId: true,
       },
     }),
   ]);
@@ -128,10 +132,42 @@ export async function GET(req: Request) {
 /**
  * POST /api/individuals
  * Tạo Individual mới (giữ nguyên logic cũ anh đang dùng)
+ *
+ * ✅ NEW:
+ * - Accept medicaidId as STRING (keep leading zeros)
+ * - Pre-check duplicate medicaidId -> 409 with clear message
+ * - Catch Prisma unique constraint (P2002) -> 409
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
+    // ✅ Medicaid ID normalization (keep leading zeros)
+    const medicaidIdRaw =
+      typeof body.medicaidId === "string" ? body.medicaidId : "";
+    const medicaidId = medicaidIdRaw.trim(); // do NOT strip leading zeros
+
+    // If empty string -> store null (so partial unique index won't block)
+    const medicaidIdOrNull = medicaidId.length > 0 ? medicaidId : null;
+
+    // ✅ Duplicate check (only when not empty)
+    if (medicaidIdOrNull) {
+      const exists = await prisma.individual.findFirst({
+        where: { medicaidId: medicaidIdOrNull },
+        select: { id: true, code: true },
+      });
+
+      if (exists) {
+        return NextResponse.json(
+          {
+            message: "Create failed: Medicaid ID already exists",
+            field: "medicaidId",
+            existing: exists,
+          },
+          { status: 409 },
+        );
+      }
+    }
 
     // 1) sinh code
     const code = await nextIndividualCode();
@@ -169,7 +205,13 @@ export async function POST(req: Request) {
         lastName: body.lastName ?? "",
         dob: body.dob ?? "",
         gender: body.gender || null,
-        ssnLast4: body.ssn || null,
+
+        // ✅ Replace SSN UI -> Medicaid ID
+        // keep ssnLast4 for backward compatibility (optional)
+        ssnLast4: body.ssn ? String(body.ssn).trim() || null : null,
+
+        // ✅ NEW column (must exist in DB)
+        medicaidId: medicaidIdOrNull,
 
         branch: body.branch ?? "",
         location: body.location ?? "",
@@ -306,6 +348,18 @@ export async function POST(req: Request) {
       { status: 201 },
     );
   } catch (err: any) {
+    // ✅ Prisma unique constraint (race condition safety)
+    const code = err?.code || err?.cause?.code;
+    if (code === "P2002") {
+      return NextResponse.json(
+        {
+          message: "Create failed: Medicaid ID already exists",
+          field: "medicaidId",
+        },
+        { status: 409 },
+      );
+    }
+
     console.error("Create individual error:", err);
     return NextResponse.json(
       { error: "CREATE_FAILED", detail: String(err?.message || err) },

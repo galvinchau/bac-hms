@@ -23,6 +23,7 @@ model Individual {
   dob        String // YYYY-MM-DD
   gender     String?
   ssnLast4   String? // chỉ 4 số
+  medicaidId  String?  @db.VarChar(32)
 
   branch   String
   location String

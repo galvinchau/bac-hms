@@ -66,6 +66,34 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
     const body: any = await req.json();
 
+    // ✅ Medicaid ID normalization (keep leading zeros)
+    const medicaidIdRaw =
+      typeof body.medicaidId === "string" ? body.medicaidId : "";
+    const medicaidId = medicaidIdRaw.trim(); // do NOT strip leading zeros
+    const medicaidIdOrNull = medicaidId.length > 0 ? medicaidId : null;
+
+    // ✅ Duplicate check on UPDATE (exclude current record)
+    if (medicaidIdOrNull) {
+      const exists = await prisma.individual.findFirst({
+        where: {
+          medicaidId: medicaidIdOrNull,
+          NOT: { id },
+        },
+        select: { id: true, code: true },
+      });
+
+      if (exists) {
+        return NextResponse.json(
+          {
+            message: "Update failed: Medicaid ID already exists",
+            field: "medicaidId",
+            existing: exists,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     // ✅ NEW: accept status from body (support a few aliases just in case)
     const incomingStatus =
       body.status ?? body.individualStatus ?? body.individual_status ?? null;
@@ -97,8 +125,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       await tx.individual.update({
         where: { id },
         data: {
-          // ✅ NEW: persist status to DB
+          // ✅ persist status to DB
           status,
+
+          // ✅ persist medicaidId to DB
+          medicaidId: medicaidIdOrNull,
 
           firstName: body.firstName ?? "",
           middleName: body.middleName || null,
@@ -180,7 +211,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
       const individualId = id;
 
-      // 2) Payers: xoá hết rồi tạo lại (đơn giản, giống create)
+      // 2) Payers: xoá hết rồi tạo lại
       await tx.payer.deleteMany({ where: { individualId } });
 
       const payers: any[] = Array.isArray(body.billingPayers)
@@ -203,7 +234,6 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
           })),
         });
       } else {
-        // nếu form không gửi gì, giữ 1 payer primary rỗng
         await tx.payer.create({
           data: {
             type: "Primary",
@@ -243,6 +273,17 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
+    const code = err?.code || err?.cause?.code;
+    if (code === "P2002") {
+      return NextResponse.json(
+        {
+          message: "Update failed: Medicaid ID already exists",
+          field: "medicaidId",
+        },
+        { status: 409 },
+      );
+    }
+
     console.error("PATCH /api/individuals/[id] error:", err);
     return NextResponse.json(
       { error: "UPDATE_FAILED", detail: String(err?.message || err) },

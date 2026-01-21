@@ -1,3 +1,4 @@
+// Web\app\individual\new\page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -83,7 +84,10 @@ type ProfileForm = {
   lastName: string;
   dob: string; // store YYYY-MM-DD for <input type="date">
   gender: string;
-  ssn: string; // last 4
+
+  // ✅ Replace SSN last4 -> Medicaid ID (string, keep leading zeros)
+  medicaidId: string;
+
   branch: string;
   location: string;
   primaryPhone: string;
@@ -150,7 +154,7 @@ const defaultForm = (): ProfileForm => ({
   lastName: "",
   dob: "",
   gender: "",
-  ssn: "",
+  medicaidId: "", // ✅ NEW
   branch: "",
   location: "",
   primaryPhone: "",
@@ -185,7 +189,7 @@ const defaultForm = (): ProfileForm => ({
    SAFE INPUTS (fix caret loss)
    ==================================== */
 const SafeTextInput = (
-  props: React.InputHTMLAttributes<HTMLInputElement> & { value?: string }
+  props: React.InputHTMLAttributes<HTMLInputElement> & { value?: string },
 ) => {
   const { value, className, ...rest } = props;
   const v = value ?? "";
@@ -203,7 +207,7 @@ const SafeTextInput = (
 };
 
 const SafeSelect = (
-  props: React.SelectHTMLAttributes<HTMLSelectElement> & { value?: string }
+  props: React.SelectHTMLAttributes<HTMLSelectElement> & { value?: string },
 ) => {
   const { value, className, children, ...rest } = props;
   const v = value ?? "";
@@ -248,7 +252,7 @@ export default function NewIndividualPage() {
   const [isDirty, setDirty] = useState(false);
   const [tick, setTick] = useState(0);
   const [restorableDraft, setRestorableDraft] = useState<ProfileForm | null>(
-    null
+    null,
   );
   const savingRef = useRef(false);
 
@@ -323,7 +327,7 @@ export default function NewIndividualPage() {
   const safeNavigateBack = () => {
     if (isDirty) {
       const ok = confirm(
-        "You have unsaved changes. Do you want to leave without saving?"
+        "You have unsaved changes. Do you want to leave without saving?",
       );
       if (!ok) return;
     }
@@ -336,32 +340,48 @@ export default function NewIndividualPage() {
     const msg = ok
       ? "Draft saved locally ✅"
       : `Draft saved locally ✅\n\nStill missing required fields:\n- ${missingList.join(
-          "\n- "
+          "\n- ",
         )}`;
     alert(msg);
     setDirty(false);
   };
 
   // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  // NEW: Create Individual (call API)
+  // Create Individual (call API)
   async function onCreateIndividual() {
     if (!requiredProfileOk(form)) {
       alert("Please complete required fields before creating the Individual.");
       return;
     }
+
     try {
       const res = await fetch("/api/individuals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json(); // { id, code }
+
+      // Try read JSON body (if any) for better error message
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        // Prefer API-provided message
+        const msg =
+          payload?.message ||
+          payload?.error ||
+          (res.status === 409
+            ? "Create failed: Medicaid ID already exists"
+            : `Create failed: HTTP ${res.status}`);
+        throw new Error(msg);
+      }
+
       // clear local draft after successful creation
       localStorage.removeItem(STORAGE_KEY);
-      alert(`Created successfully!\nID: ${data.id}\nCode: ${data.code}`);
+      alert(
+        `Created successfully!\nID: ${payload?.id}\nCode: ${payload?.code}`,
+      );
       // TODO: navigate to detail page when it's ready
-      // router.push(`/individual/${data.id}`);
+      // router.push(`/individual/${payload.id}`);
       setDirty(false);
     } catch (e: any) {
       alert("Create failed: " + (e?.message || "Unknown error"));
@@ -380,7 +400,7 @@ export default function NewIndividualPage() {
       lastName: "",
       dob: "",
       gender: "",
-      ssn: "",
+      medicaidId: "", // ✅ NEW
       branch: "",
       location: "",
       primaryPhone: "",
@@ -527,7 +547,7 @@ export default function NewIndividualPage() {
           >
             Save
           </button>
-          {/* NEW: Create Individual button */}
+          {/* Create Individual button */}
           <button
             type="button"
             onClick={onCreateIndividual}
@@ -633,18 +653,19 @@ export default function NewIndividualPage() {
                 </SafeSelect>
               </Labeled>
 
-              <Labeled label="SSN (last 4)">
+              {/* ✅ Medicaid ID (text, keep leading zeros) */}
+              <Labeled label="Medicaid ID">
                 <SafeTextInput
                   type="text"
                   inputMode="numeric"
-                  placeholder="Last 4 digits"
-                  maxLength={4}
-                  value={form.ssn}
+                  placeholder="Medicaid ID"
+                  value={form.medicaidId}
                   onChange={(e) => {
-                    const v = (e.target.value ?? "")
-                      .replace(/\D/g, "")
-                      .slice(0, 4);
-                    setForm((s) => ({ ...s, ssn: v }));
+                    // keep as STRING to preserve leading zeros
+                    // allow numeric typing but store string
+                    const raw = e.target.value ?? "";
+                    const v = raw.replace(/[^\d]/g, ""); // digits only (optional)
+                    setForm((s) => ({ ...s, medicaidId: v }));
                   }}
                 />
               </Labeled>
@@ -751,7 +772,7 @@ export default function NewIndividualPage() {
                 />
               </Labeled>
 
-              {/* City + County + State + ZIP trên cùng một dòng */}
+              {/* City + County + State + ZIP */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:col-span-2">
                 <Labeled label="City">
                   <SafeTextInput
@@ -1245,7 +1266,7 @@ export default function NewIndividualPage() {
                     </Labeled>
                   </div>
                 </div>
-              )
+              ),
             )}
           </section>
 
@@ -1567,7 +1588,7 @@ export default function NewIndividualPage() {
                           />
                         </td>
                       </tr>
-                    )
+                    ),
                   )}
                 </tbody>
               </table>
@@ -1676,7 +1697,7 @@ export default function NewIndividualPage() {
                           />
                         </td>
                       </tr>
-                    )
+                    ),
                   )}
                 </tbody>
               </table>
@@ -1844,7 +1865,7 @@ export default function NewIndividualPage() {
                           {d}
                         </label>
                       );
-                    }
+                    },
                   )}
                 </div>
               </div>

@@ -1,3 +1,4 @@
+// web/app/individuals/[id]/page.tsx
 "use client";
 
 import React, {
@@ -97,7 +98,10 @@ export type ProfileForm = {
   lastName: string;
   dob: string; // "YYYY-MM-DD"
   gender: string;
-  ssn: string; // last 4
+
+  // ✅ CHANGED: Medicaid ID replaces SSN
+  medicaidId: string;
+
   branch: string;
   location: string;
   primaryPhone: string;
@@ -126,7 +130,10 @@ const makeEmptyForm = (): ProfileForm => ({
   lastName: "",
   dob: "",
   gender: "",
-  ssn: "",
+
+  // ✅ CHANGED
+  medicaidId: "",
+
   branch: "",
   location: "",
   primaryPhone: "",
@@ -254,7 +261,12 @@ type ApiIndividual = {
   lastName: string;
   dob: string;
   gender: string | null;
-  ssnLast4: string | null;
+
+  // ✅ NEW field
+  medicaidId?: string | null;
+
+  // legacy (keep for compatibility; not used in UI anymore)
+  ssnLast4?: string | null;
 
   branch: string;
   location: string;
@@ -357,7 +369,9 @@ const mapApiToForm = (api: ApiIndividual): ProfileForm => {
   form.lastName = api.lastName ?? "";
   form.dob = api.dob ?? "";
   form.gender = api.gender ?? "";
-  form.ssn = api.ssnLast4 ?? "";
+
+  // ✅ CHANGED: show Medicaid ID only (do NOT show SSN legacy)
+  form.medicaidId = api.medicaidId ?? "";
 
   form.branch = api.branch ?? "";
   form.location = api.location ?? "";
@@ -533,21 +547,40 @@ export default function IndividualDetailPage() {
 
   const handleSave = async () => {
     if (!id) return;
+
     try {
       setSaving(true);
+
       const res = await fetch(`/api/individuals/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
+
+      // ❗ KHÔNG throw ngay
       if (!res.ok) {
+        let data: any = {};
+        try {
+          data = await res.json();
+        } catch {}
+
+        // ✅ Trùng Medicaid ID
+        if (res.status === 409 && data?.field === "medicaidId") {
+          alert(
+            "Medicaid ID already exists.\nPlease check and enter a different Medicaid ID.",
+          );
+          return;
+        }
+
+        // ❌ lỗi khác
         throw new Error(`HTTP ${res.status}`);
       }
+
       alert("Saved successfully!");
       setDirty(false);
     } catch (err: any) {
       console.error("Save error:", err);
-      alert(`Save failed: ${String(err?.message || err)}`);
+      alert("Save failed. Please try again or contact admin.");
     } finally {
       setSaving(false);
     }
@@ -569,7 +602,10 @@ export default function IndividualDetailPage() {
             lastName: "",
             dob: "",
             gender: "",
-            ssn: "",
+
+            // ✅ CHANGED
+            medicaidId: "",
+
             primaryPhone: "",
             secondaryPhone: "",
             email: "",
@@ -841,18 +877,17 @@ export default function IndividualDetailPage() {
                 </SafeSelect>
               </Labeled>
 
-              <Labeled label="SSN (last 4)">
+              {/* ✅ CHANGED: Medicaid ID */}
+              <Labeled label="Medicaid ID">
                 <SafeTextInput
                   type="text"
-                  inputMode="numeric"
-                  placeholder="Last 4 digits"
-                  maxLength={4}
-                  value={form.ssn}
+                  placeholder="Medicaid ID"
+                  maxLength={32}
+                  value={form.medicaidId}
                   onChange={(e) => {
-                    const v = (e.target.value ?? "")
-                      .replace(/\D/g, "")
-                      .slice(0, 4);
-                    setForm((s) => ({ ...s, ssn: v }));
+                    // keep it simple + safe: trim leading spaces only
+                    const v = String(e.target.value ?? "").replace(/^\s+/, "");
+                    setForm((s) => ({ ...s, medicaidId: v }));
                   }}
                 />
               </Labeled>
@@ -2089,7 +2124,8 @@ export default function IndividualDetailPage() {
                 </div>
               </div>
               <Labeled label="Preferred Time Window">
-                <SafeTextInput
+                <SafeText
+                  երկրների
                   placeholder="e.g., 9:00 AM – 2:00 PM"
                   value={(form as any).prefTime ?? ""}
                   onChange={(e) =>
