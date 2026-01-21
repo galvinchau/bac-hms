@@ -26,6 +26,7 @@ model Individual {
 
   branch   String
   location String
+  status IndividualStatus @default(PENDING)
 
   primaryPhone   String?
   secondaryPhone String?
@@ -317,6 +318,12 @@ enum CancelledBy {
   INDIVIDUAL
   DSP
   OFFICE
+}
+
+enum IndividualStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
 }
 
 // =====================================================

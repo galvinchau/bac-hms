@@ -7,6 +7,15 @@ type RouteParams = {
   params: Promise<{ id: string }>;
 };
 
+function normalizeStatus(v: any): "PENDING" | "ACTIVE" | "INACTIVE" {
+  const s = String(v || "")
+    .toUpperCase()
+    .trim();
+  if (s === "ACTIVE") return "ACTIVE";
+  if (s === "INACTIVE") return "INACTIVE";
+  return "PENDING";
+}
+
 /**
  * GET /api/individuals/[id]
  * Lấy 1 individual + payers + medications + diagnoses
@@ -37,7 +46,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     console.error("GET /api/individuals/[id] error:", err);
     return NextResponse.json(
       { error: "SERVER_ERROR", detail: String(err?.message || err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -57,12 +66,17 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
     const body: any = await req.json();
 
+    // ✅ NEW: accept status from body (support a few aliases just in case)
+    const incomingStatus =
+      body.status ?? body.individualStatus ?? body.individual_status ?? null;
+    const status = normalizeStatus(incomingStatus);
+
     // acceptedServices: array -> CSV (giống POST)
     const acceptedServicesCsv = Array.isArray(body.acceptedServices)
       ? body.acceptedServices.join(",")
       : typeof body.acceptedServices === "string"
-      ? body.acceptedServices
-      : "";
+        ? body.acceptedServices
+        : "";
 
     // map các cờ thiết bị (giống POST)
     const equipFlags = {
@@ -83,6 +97,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       await tx.individual.update({
         where: { id },
         data: {
+          // ✅ NEW: persist status to DB
+          status,
+
           firstName: body.firstName ?? "",
           middleName: body.middleName || null,
           lastName: body.lastName ?? "",
@@ -229,7 +246,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     console.error("PATCH /api/individuals/[id] error:", err);
     return NextResponse.json(
       { error: "UPDATE_FAILED", detail: String(err?.message || err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

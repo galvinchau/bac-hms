@@ -12,6 +12,9 @@ import { nextIndividualCode } from "@/lib/id";
  *   pageSize - rows per page
  *
  *   simple   - nếu simple=true thì trả về THẲNG mảng items (dùng cho dropdown, Schedule...)
+ *
+ *   status   - optional filter by IndividualStatus (comma-separated)
+ *             e.g. status=PENDING,ACTIVE
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -19,7 +22,24 @@ export async function GET(req: Request) {
   const q = (searchParams.get("q") || "").trim();
   const simple = searchParams.get("simple") === "true";
 
-  const where =
+  // ✅ FIX: UI đang gửi param name = "status"
+  // (giữ thêm fallback "status" phòng trường hợp chỗ khác dùng)
+  const statusParamRaw = (
+    searchParams.get("status") ||
+    searchParams.get("status") ||
+    ""
+  ).trim();
+
+  const allowedStatuses = new Set(["PENDING", "ACTIVE", "INACTIVE"]);
+  const statusList =
+    statusParamRaw.length > 0
+      ? statusParamRaw
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter((s) => allowedStatuses.has(s))
+      : [];
+
+  const where: any =
     q.length > 0
       ? {
           OR: [
@@ -32,12 +52,17 @@ export async function GET(req: Request) {
         }
       : {};
 
+  // ✅ apply status filter
+  if (statusList.length > 0) {
+    where.status = { in: statusList };
+  }
+
   // 👉 Mode simple: dùng cho dropdown / schedule → KHÔNG phân trang, trả thẳng tất cả
   if (simple) {
     const items = await prisma.individual.findMany({
       where,
-      orderBy: { createdAt: "desc" }, // hoặc đổi sang code/id nếu muốn
-      take: 500, // limit an toàn, dư sức cho case hiện tại (22 người)
+      orderBy: { createdAt: "desc" },
+      take: 500,
       select: {
         id: true,
         code: true,
@@ -52,24 +77,27 @@ export async function GET(req: Request) {
         zip: true,
         branch: true,
         location: true,
+        status: true,
       },
     });
 
-    return NextResponse.json(items);
+    return NextResponse.json(items, {
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   // 👉 Mode đầy đủ: có paging cho màn Search Individual
   const page = Math.max(1, Number(searchParams.get("page") || "1") || 1);
   const pageSize = Math.min(
     50,
-    Math.max(5, Number(searchParams.get("pageSize") || "10") || 10)
+    Math.max(5, Number(searchParams.get("pageSize") || "10") || 10),
   );
 
   const [total, items] = await Promise.all([
     prisma.individual.count({ where }),
     prisma.individual.findMany({
       where,
-      orderBy: { createdAt: "desc" }, // nếu trong schema có createdAt, không có thì đổi sang code/id
+      orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
       select: {
@@ -86,17 +114,15 @@ export async function GET(req: Request) {
         zip: true,
         branch: true,
         location: true,
+        status: true,
       },
     }),
   ]);
 
-  // Mặc định: giữ nguyên format cũ cho màn Search Individual.
-  return NextResponse.json({
-    items,
-    total,
-    page,
-    pageSize,
-  });
+  return NextResponse.json(
+    { items, total, page, pageSize },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 /**
@@ -115,6 +141,12 @@ export async function POST(req: Request) {
       ? body.acceptedServices.join(",")
       : "";
 
+    // ✅ NEW (optional): status from body (if provided)
+    const allowedStatuses = new Set(["PENDING", "ACTIVE", "INACTIVE"]);
+    const statusRaw =
+      typeof body.status === "string" ? body.status.trim().toUpperCase() : "";
+    const status = allowedStatuses.has(statusRaw) ? statusRaw : undefined;
+
     // 3) map các cờ thiết bị
     const equipFlags = {
       equipOxygen: !!body.equip_oxygen || !!body.equipOxygen,
@@ -132,7 +164,6 @@ export async function POST(req: Request) {
     const individual = await prisma.individual.create({
       data: {
         code,
-
         firstName: body.firstName ?? "",
         middleName: body.middleName || null,
         lastName: body.lastName ?? "",
@@ -142,6 +173,8 @@ export async function POST(req: Request) {
 
         branch: body.branch ?? "",
         location: body.location ?? "",
+
+        ...(status ? { status } : {}),
 
         primaryPhone: body.primaryPhone || null,
         secondaryPhone: body.secondaryPhone || null,
@@ -270,13 +303,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json(
       { id: individualId, code: individual.code },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (err: any) {
     console.error("Create individual error:", err);
     return NextResponse.json(
       { error: "CREATE_FAILED", detail: String(err?.message || err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

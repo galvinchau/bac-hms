@@ -31,50 +31,54 @@ const TABS = [
 
 /* =========================
    SERVICE CATALOG (for tooltip)
+   - Keep in sync with: app/services/new/page.tsx (SERVICE_OPTIONS)
    ========================= */
 type ServiceItem = { code: string; name: string };
 const ACCEPTED_SERVICES: ServiceItem[] = [
   { code: "PCA", name: "Personal Care Assistant" },
-  { code: "LPN", name: "Licensed Practical Nurse" },
-  { code: "ST", name: "Speech Therapy" },
-  { code: "NT", name: "Nutrition Therapy" },
-  { code: "HCSS", name: "Home & Community Support Services" },
-  { code: "SCI", name: "Skilled Care – In-Home" },
-  { code: "PBIS", name: "Positive Behavior Intervention & Supports" },
-  { code: "SDP", name: "Self-Directed Programs" },
-  { code: "PC", name: "Personal Care (Non-Skilled)" },
+  { code: "NT", name: "Nursing / Nurse Triage" },
+  { code: "PBIS", name: "Positive Behavior Interventions and Supports" },
   { code: "SHHA", name: "Skilled Home Health Aide" },
-  { code: "OTA", name: "Occupational Therapy Assistant" },
-
-  { code: "HHA", name: "Home Health Aide" },
   { code: "PT", name: "Physical Therapy" },
-  { code: "MSW", name: "Medical Social Worker" },
-  { code: "RT", name: "Respiratory Therapy" },
   { code: "CNA", name: "Certified Nursing Assistant" },
-  { code: "APC", name: "Advanced Practice Clinician" },
-  { code: "HMK", name: "Homemaker" },
-  { code: "RESP", name: "Respite" },
-  { code: "CBSA", name: "Community-Based Supports Assistant" },
-  { code: "CH", name: "Companion / Habilitation" },
-  { code: "SHC", name: "Shared Home Care" },
-  { code: "PTA", name: "Physical Therapist Assistant" },
-
-  { code: "RN", name: "Registered Nurse" },
+  { code: "RESP", name: "Respite Services" },
+  { code: "SHC", name: "Shared Home Care / Shared Habilitation" },
   { code: "OT", name: "Occupational Therapy" },
-  { code: "HSK", name: "Housekeeping" },
-  { code: "PA", name: "Physician Assistant" },
-
   { code: "SCM", name: "Service Coordination / Case Management" },
+  { code: "COMP", name: "Companion Services" },
+
+  { code: "LPN", name: "Licensed Practical Nurse" },
+  { code: "HCSS", name: "In-Home & Community Support Services" },
+  { code: "SDP", name: "Structured Day Program" },
+  { code: "OTA", name: "Occupational Therapy Assistant" },
+  { code: "MSW", name: "Master of Social Work Services" },
+  { code: "APC", name: "Advanced Professional Care" },
+  { code: "CBSA", name: "Community-Based Supported Activities" },
+  { code: "PTA", name: "Physical Therapy Assistant" },
+  { code: "HMK", name: "Homemake Services" },
+  { code: "CHORE", name: "Chore Services" },
   { code: "ILST", name: "Independent Living Skills Training" },
-  { code: "ESC", name: "Enhanced / Specialized Care" },
-  { code: "COMP", name: "Community Companion" },
-  { code: "SPC", name: "Specialized Community Support" },
-  { code: "NINS", name: "Non-Insurance / Private Pay" },
+  { code: "SPC", name: "Specialist / Professional Consultant" },
+  { code: "TRAN", name: "Non-Emergency (Transportation)" },
+  { code: "BSP", name: "Behavioral Support" },
+
+  { code: "ST", name: "Speech Therapy" },
+  { code: "SCI", name: "Specialized Community Integration" },
+  { code: "PC", name: "Personal Care" },
+  { code: "HHA", name: "Home Health Aide" },
+  { code: "RT", name: "Respiratory Therapy / Rehabilitation Therapy" },
+  { code: "CH", name: "Companion / Habilitation" },
+  { code: "RN", name: "Registered Nurse" },
+  { code: "PA", name: "Physician Assistant / Personal Assistant" },
+  { code: "ESC", name: "Enhanced Support Companion" },
+  { code: "NINS", name: "Non-Insurance / Non-traditional Service" },
 ];
 
 /* =========================
    FORM TYPES
    ========================= */
+
+type IndividualStatus = "PENDING" | "ACTIVE" | "INACTIVE";
 
 type EmergencyContact = {
   name: string;
@@ -85,6 +89,9 @@ type EmergencyContact = {
 };
 
 export type ProfileForm = {
+  // ✅ NEW: align with DB enum IndividualStatus
+  status: IndividualStatus;
+
   firstName: string;
   middleName: string;
   lastName: string;
@@ -112,6 +119,8 @@ export type ProfileForm = {
 };
 
 const makeEmptyForm = (): ProfileForm => ({
+  status: "PENDING",
+
   firstName: "",
   middleName: "",
   lastName: "",
@@ -170,7 +179,7 @@ const requiredProfileOk = (f: ProfileForm) => {
    ==================================== */
 
 const SafeTextInput = (
-  props: React.InputHTMLAttributes<HTMLInputElement> & { value?: string }
+  props: React.InputHTMLAttributes<HTMLInputElement> & { value?: string },
 ) => {
   const { value, className, ...rest } = props;
   const v = value ?? "";
@@ -188,7 +197,7 @@ const SafeTextInput = (
 };
 
 const SafeSelect = (
-  props: React.SelectHTMLAttributes<HTMLSelectElement> & { value?: string }
+  props: React.SelectHTMLAttributes<HTMLSelectElement> & { value?: string },
 ) => {
   const { value, className, children, ...rest } = props;
   const v = value ?? "";
@@ -236,6 +245,10 @@ const Labeled = ({
 type ApiIndividual = {
   id: string;
   code: string;
+
+  // ✅ NEW
+  status?: string | null;
+
   firstName: string;
   middleName: string | null;
   lastName: string;
@@ -257,7 +270,7 @@ type ApiIndividual = {
   state: string | null;
   zip: string | null;
 
-  // ⚠️ SỬA: acceptedServices có thể là string (CSV) hoặc string[] hoặc null
+  // ⚠️ acceptedServices có thể là string (CSV) hoặc string[] hoặc null
   acceptedServices: string | string[] | null;
 
   emergency1Name: string | null;
@@ -324,8 +337,20 @@ type ApiIndividual = {
   diagnoses: any[];
 };
 
+function toStatus(v: any): IndividualStatus {
+  const s = String(v || "")
+    .toUpperCase()
+    .trim();
+  if (s === "ACTIVE") return "ACTIVE";
+  if (s === "INACTIVE") return "INACTIVE";
+  return "PENDING";
+}
+
 const mapApiToForm = (api: ApiIndividual): ProfileForm => {
   const form = makeEmptyForm();
+
+  // ✅ NEW
+  form.status = toStatus(api.status);
 
   form.firstName = api.firstName ?? "";
   form.middleName = api.middleName ?? "";
@@ -348,7 +373,7 @@ const mapApiToForm = (api: ApiIndividual): ProfileForm => {
   form.state = api.state ?? "PA";
   form.zip = api.zip ?? "";
 
-  // ⚠️ SỬA: handle cả mảng lẫn CSV lẫn null
+  // handle array / CSV / null
   if (Array.isArray(api.acceptedServices)) {
     form.acceptedServices = api.acceptedServices.filter(Boolean);
   } else if (
@@ -499,7 +524,7 @@ export default function IndividualDetailPage() {
   const handleBack = () => {
     if (isDirty) {
       const ok = confirm(
-        "You have unsaved changes. Do you want to leave without saving?"
+        "You have unsaved changes. Do you want to leave without saving?",
       );
       if (!ok) return;
     }
@@ -538,6 +563,7 @@ export default function IndividualDetailPage() {
         case "profile":
           return {
             ...f,
+            // keep status as-is (do not clear)
             firstName: "",
             middleName: "",
             lastName: "",
@@ -851,6 +877,7 @@ export default function IndividualDetailPage() {
                   <option>Johnstown Office</option>
                 </SafeSelect>
               </Labeled>
+
               <Labeled label="Location (Primary)" required>
                 <SafeSelect
                   value={form.location}
@@ -865,6 +892,30 @@ export default function IndividualDetailPage() {
                   <option>School</option>
                   <option>Workplace</option>
                   <option>Home and Community</option>
+                </SafeSelect>
+              </Labeled>
+
+              {/* ✅ NEW: Individual Status */}
+              <Labeled label="Individual Status">
+                <SafeSelect
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      status: toStatus(e.target.value),
+                    }))
+                  }
+                  className={
+                    form.status === "ACTIVE"
+                      ? "text-green-400"
+                      : form.status === "INACTIVE"
+                        ? "text-red-400"
+                        : "text-yellow-400"
+                  }
+                >
+                  <option value="PENDING">PENDING</option>
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="INACTIVE">INACTIVE</option>
                 </SafeSelect>
               </Labeled>
             </div>
@@ -1756,7 +1807,7 @@ export default function IndividualDetailPage() {
                           </button>
                         </td>
                       </tr>
-                    )
+                    ),
                   )}
                 </tbody>
               </table>
@@ -1883,7 +1934,7 @@ export default function IndividualDetailPage() {
                           </button>
                         </td>
                       </tr>
-                    )
+                    ),
                   )}
                 </tbody>
               </table>
@@ -2033,7 +2084,7 @@ export default function IndividualDetailPage() {
                           {d}
                         </label>
                       );
-                    }
+                    },
                   )}
                 </div>
               </div>
