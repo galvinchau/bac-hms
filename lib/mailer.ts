@@ -145,7 +145,7 @@ export async function sendMobileUserAccessEmail(
     MOBILE_IOS_DOWNLOAD_URL || "https://testflight.apple.com/join/REPLACE_ME";
   const androidDownloadUrl =
     MOBILE_ANDROID_DOWNLOAD_URL ||
-    https://play.google.com/store/apps/details?id=org.blueangelscare.mobile&pcampaignid=web_share;
+    "https://play.google.com/store/apps/details?id=org.blueangelscare.mobile&pcampaignid=web_share";
 
   const supportEmail = "Galvin.chau@gmail.com";
   const companyAddress = "3107 Beale Avenue, Altoona, PA 16601";
