@@ -147,7 +147,10 @@ export async function sendMobileUserAccessEmail(
     MOBILE_ANDROID_DOWNLOAD_URL ||
     "https://play.google.com/store/apps/details?id=org.blueangelscare.mobile&pcampaignid=web_share";
 
-  const supportEmail = "Galvin.chau@gmail.com";
+  // ✅ Support contact (per your request)
+  const supportName = "Galvin Chau";
+  const supportEmail = "galvin.chau@gmail.com";
+
   const companyAddress = "3107 Beale Avenue, Altoona, PA 16601";
   const companyWebsite = "https://blueangelscare.org";
 
@@ -169,7 +172,7 @@ Login email: ${to}
 
 Download Blue Angels Care Mobile App:
 - iPhone (iOS – TestFlight): ${iosDownloadUrl}
-- Android: ${androidDownloadUrl}
+- Android (Google Play): ${androidDownloadUrl}
 
 How to Log In (OTP):
 1) Install the app
@@ -186,7 +189,7 @@ Important DSP Responsibilities & Policies:
 - No falsification of time, location, or service information
 
 Need help?
-Email: ${supportEmail}
+Support Team (Blue Angels Care): Contact ${supportName}, email: ${supportEmail}
 
 Warm regards,
 Blue Angels Care Support Team
@@ -221,7 +224,7 @@ ${companyWebsite}
 
     <a href="${androidDownloadUrl}" target="_blank" rel="noreferrer"
        style="text-decoration:none; padding:10px 12px; border-radius:10px; background:#1a8f3a; color:#fff; display:inline-block;">
-      🤖 Android (Temporary Link)
+      🤖 Android (Google Play)
     </a>
   </div>
 
@@ -253,8 +256,8 @@ ${companyWebsite}
 
   <h3 style="margin: 14px 0 8px 0;">🆘 Need Help?</h3>
   <p>
-    If you have trouble downloading the app or logging in, please contact support:<br/>
-    <strong>Email:</strong> <a href="mailto:${supportEmail}">${supportEmail}</a>
+    Support Team (Blue Angels Care): Contact <strong>${supportName}</strong>, email:
+    <a href="mailto:${supportEmail}">${supportEmail}</a>
   </p>
 
   <hr style="margin: 16px 0;" />
@@ -334,10 +337,10 @@ export async function sendHmsWelcomeEmail(args: {
 
   const fullName = `${firstName || ""} ${lastName || ""}`.trim() || "there";
 
-  // ✅ Always prefer production URL; fallback to env; fallback to localhost
+  // ✅ Prefer env if provided; fallback to production; fallback to localhost
   const loginUrl =
-    "https://hms.blueangelscare.org" ||
     HMS_LOGIN_URL ||
+    "https://hms.blueangelscare.org" ||
     "http://localhost:3000/login";
 
   const subject = "Welcome to Blue Angels Care – BAC-HMS Account Access";
