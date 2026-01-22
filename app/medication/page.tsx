@@ -9,6 +9,7 @@ import React, { useEffect, useMemo, useState } from "react";
 type MedicationStatus = "ACTIVE" | "ON_HOLD" | "DISCONTINUED";
 type MedicationType = "SCHEDULED" | "PRN";
 
+// ✅ allow null/undefined for auto-generated rows (no outcome yet)
 type AdminStatus = "GIVEN" | "REFUSED" | "MISSED" | "HELD" | "LATE" | "ERROR";
 
 interface MedicationOrder {
@@ -42,7 +43,8 @@ interface MedicationAdmin {
   route: string;
   scheduledDateTime: string;
   actualDateTime?: string;
-  status: AdminStatus;
+  // ✅ allow null/undefined
+  status?: AdminStatus | null;
   reason?: string;
   vitalsSummary?: string; // e.g. "BP 120/70, HR 76"
   staffName?: string;
@@ -94,7 +96,7 @@ const mockOrders: MedicationOrder[] = [
     type: "SCHEDULED",
     frequencyText: "BID",
     timesOfDay: ["08:00", "20:00"],
-    startDate: "2024-01-01",
+    startDate: "2026-01-01",
     status: "ACTIVE",
     prescriber: "Dr. Brown",
     pharmacy: "CVS Pharmacy",
@@ -112,7 +114,7 @@ const mockOrders: MedicationOrder[] = [
     type: "SCHEDULED",
     frequencyText: "QHS",
     timesOfDay: ["21:00"],
-    startDate: "2024-02-15",
+    startDate: "2026-02-15",
     status: "ACTIVE",
     prescriber: "Dr. Lee",
     pharmacy: "Walmart Pharmacy",
@@ -129,7 +131,7 @@ const mockOrders: MedicationOrder[] = [
     route: "PO",
     type: "PRN",
     frequencyText: "PRN",
-    startDate: "2024-03-10",
+    startDate: "2026-03-10",
     status: "ACTIVE",
     prescriber: "Dr. Brown",
     indications: "Anxiety",
@@ -147,8 +149,8 @@ const mockAdmins: MedicationAdmin[] = [
     doseValue: 500,
     doseUnit: "mg",
     route: "PO",
-    scheduledDateTime: "2024-11-01T08:00:00Z",
-    actualDateTime: "2024-11-01T08:05:00Z",
+    scheduledDateTime: "2026-11-01T08:00:00Z",
+    actualDateTime: "2026-11-01T08:05:00Z",
     status: "GIVEN",
     vitalsSummary: "BG 145",
     staffName: "DSP A",
@@ -162,7 +164,7 @@ const mockAdmins: MedicationAdmin[] = [
     doseValue: 500,
     doseUnit: "mg",
     route: "PO",
-    scheduledDateTime: "2024-11-01T20:00:00Z",
+    scheduledDateTime: "2026-11-01T20:00:00Z",
     status: "MISSED",
     reason: "Individual refused medication",
     staffName: "DSP A",
@@ -176,8 +178,8 @@ const mockAdmins: MedicationAdmin[] = [
     doseValue: 1,
     doseUnit: "mg",
     route: "PO",
-    scheduledDateTime: "2024-11-03T14:00:00Z",
-    actualDateTime: "2024-11-03T14:02:00Z",
+    scheduledDateTime: "2026-11-03T14:00:00Z",
+    actualDateTime: "2026-11-03T14:02:00Z",
     status: "GIVEN",
     reason: "PRN anxiety escalated",
     vitalsSummary: "BP 130/78, HR 82",
@@ -196,7 +198,7 @@ const mockInventory: InventoryItem[] = [
     unit: "tablet",
     minThreshold: 20,
     daysRemaining: 15,
-    lastCountDate: "2024-10-30",
+    lastCountDate: "2026-10-30",
   },
   {
     id: "inv-2",
@@ -208,14 +210,14 @@ const mockInventory: InventoryItem[] = [
     unit: "tablet",
     minThreshold: 10,
     daysRemaining: 5,
-    lastCountDate: "2024-10-28",
+    lastCountDate: "2026-10-28",
   },
 ];
 
 const mockIncidents: IncidentRecord[] = [
   {
     id: "inc-1",
-    date: "2024-10-15",
+    date: "2026-10-15",
     individualName: "John Smith",
     medicationName: "Metformin 500 mg",
     type: "Missed Dose",
@@ -224,7 +226,7 @@ const mockIncidents: IncidentRecord[] = [
   },
   {
     id: "inc-2",
-    date: "2024-11-02",
+    date: "2026-11-02",
     individualName: "John Smith",
     medicationName: "Lorazepam 1 mg",
     type: "Medication Error",
@@ -245,6 +247,8 @@ type MainTab =
   | "INVENTORY"
   | "INCIDENTS";
 
+const TZ = "America/New_York";
+
 const formatDate = (iso: string | undefined) => {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -256,7 +260,7 @@ const formatDate = (iso: string | undefined) => {
   });
 };
 
-const marStatusClass = (status: AdminStatus) => {
+const marStatusClass = (status?: AdminStatus | null) => {
   switch (status) {
     case "GIVEN":
       return "border border-bac-green/50 bg-bac-green/15 text-bac-green";
@@ -275,6 +279,50 @@ const marStatusClass = (status: AdminStatus) => {
   }
 };
 
+function toTimesArray(input: string): string[] {
+  const s = (input || "").trim();
+  if (!s) return [];
+  return s
+    .split(/[\n,]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function monthToStartDate(monthValue: string): string {
+  if (!monthValue || !/^\d{4}-\d{2}$/.test(monthValue)) return "";
+  return `${monthValue}-01`;
+}
+
+// ✅ Get local (NY) day + time "HH:MM" from an ISO date string
+function getNYDayAndTime(
+  iso: string,
+): { day: number; timeHHMM: string } | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ,
+    hour12: false,
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const parts = dtf.formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value;
+
+  const dayStr = get("day");
+  const hourStr = get("hour");
+  const minuteStr = get("minute");
+
+  if (!dayStr || !hourStr || !minuteStr) return null;
+
+  return {
+    day: Number(dayStr),
+    timeHHMM: `${hourStr}:${minuteStr}`,
+  };
+}
+
 /* ================================
    Root Page Component
 ================================ */
@@ -285,7 +333,7 @@ const MedicationPage: React.FC = () => {
   // Global filters
   const [selectedIndividual, setSelectedIndividual] =
     useState<string>("IND-001");
-  const [selectedMonth, setSelectedMonth] = useState<string>("2024-11");
+  const [selectedMonth, setSelectedMonth] = useState<string>("2026-01");
 
   // Individuals (real data)
   const [individualOptions, setIndividualOptions] = useState<
@@ -316,6 +364,11 @@ const MedicationPage: React.FC = () => {
     timeOfDay?: string;
   }>({ open: false });
 
+  // ✅ Add Order modal
+  const [addOrderOpen, setAddOrderOpen] = useState(false);
+  const [addOrderSaving, setAddOrderSaving] = useState(false);
+  const [addOrderError, setAddOrderError] = useState<string | null>(null);
+
   // ======================================
   // Load Individuals từ API (dùng data thật)
   // ======================================
@@ -327,15 +380,13 @@ const MedicationPage: React.FC = () => {
       setIndividualError(null);
 
       try {
-        // Backend anh có thể làm route này:
-        // GET /api/medication/individuals -> trả về danh sách Individual cho Medication
         const res = await fetch("/api/medication/individuals", {
           signal: controller.signal,
         });
 
         if (!res.ok) {
           throw new Error(
-            `Failed to load individuals: ${res.status} ${res.statusText}`
+            `Failed to load individuals: ${res.status} ${res.statusText}`,
           );
         }
 
@@ -344,8 +395,8 @@ const MedicationPage: React.FC = () => {
         const list = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-          ? data.items
-          : [];
+            ? data.items
+            : [];
 
         const mapped: IndividualOption[] = list.map((p: any) => {
           const fullName = [p.firstName, p.middleName, p.lastName]
@@ -361,7 +412,6 @@ const MedicationPage: React.FC = () => {
         });
 
         if (mapped.length === 0) {
-          // Nếu API trả rỗng, fallback mock
           const map = new Map<string, string>();
           mockOrders.forEach((o) => map.set(o.individualId, o.individualName));
           const fallback = Array.from(map.entries()).map(([id, name]) => ({
@@ -377,7 +427,6 @@ const MedicationPage: React.FC = () => {
         console.error("[MedicationPage] Load individuals failed:", err);
         setIndividualError(err?.message ?? "Failed to load individuals.");
 
-        // Fallback: dùng individual từ mockOrders như trước đây
         const map = new Map<string, string>();
         mockOrders.forEach((o) => map.set(o.individualId, o.individualName));
         const fallback = Array.from(map.entries()).map(([id, name]) => ({
@@ -391,7 +440,6 @@ const MedicationPage: React.FC = () => {
     };
 
     loadIndividuals();
-
     return () => controller.abort();
   }, []);
 
@@ -408,6 +456,50 @@ const MedicationPage: React.FC = () => {
     individualOptions.find((i) => i.id === selectedIndividual)?.name ??
     individualOptions[0]?.name ??
     "";
+
+  // ======================================
+  // Load Orders ONLY (for Add Order refresh)
+  // ======================================
+  const reloadOrdersOnly = async () => {
+    if (!selectedIndividual) return;
+
+    try {
+      const params = new URLSearchParams({ individualId: selectedIndividual });
+      const res = await fetch(`/api/medication/orders?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || res.statusText);
+      }
+
+      const list = Array.isArray(data?.orders) ? data.orders : [];
+      const mapped: MedicationOrder[] = list.map((o: any) => ({
+        id: o.id,
+        individualId: o.individualId,
+        individualName: selectedIndividualName || "Individual",
+        medicationName: o.medicationName,
+        doseValue: o.doseValue ?? 0,
+        doseUnit: o.doseUnit ?? "",
+        route: o.route ?? "",
+        type: (o.type as MedicationType) ?? "SCHEDULED",
+        frequencyText: o.frequencyText ?? undefined,
+        timesOfDay: (o.timesOfDay as string[] | null) ?? [],
+        startDate: o.startDate,
+        endDate: o.endDate ?? undefined,
+        status: (o.status as MedicationStatus) ?? "ACTIVE",
+        prescriber: o.prescriberName ?? undefined,
+        pharmacy: o.pharmacyName ?? undefined,
+        indications: o.indications ?? undefined,
+        allergiesFlag: o.allergyFlag ?? false,
+      }));
+
+      setOrders(mapped);
+    } catch (e: any) {
+      console.error("[MedicationPage] reloadOrdersOnly failed:", e);
+    }
+  };
 
   // ======================================
   // Load MAR data từ API
@@ -436,18 +528,17 @@ const MedicationPage: React.FC = () => {
           throw new Error(data?.errorDetail || data?.error || res.statusText);
         }
 
-        // Trường hợp API trả warning (chưa có bảng Medication*)
         if (!data?.individualId) {
           setMarWarning(
             data?.warning ??
-              "Medication MAR tables not created yet. Showing sample data only."
+              "Medication MAR tables not created yet. Showing sample data only.",
           );
 
           const mockOrdersForInd = mockOrders.filter(
-            (o) => o.individualId === selectedIndividual
+            (o) => o.individualId === selectedIndividual,
           );
           const mockAdminsForInd = mockAdmins.filter(
-            (a) => a.individualId === selectedIndividual
+            (a) => a.individualId === selectedIndividual,
           );
 
           setOrders(mockOrdersForInd);
@@ -496,7 +587,8 @@ const MedicationPage: React.FC = () => {
             route: order?.route ?? a.route ?? "",
             scheduledDateTime: a.scheduledDateTime,
             actualDateTime: a.actualDateTime ?? undefined,
-            status: a.status as AdminStatus,
+            // ✅ status can be null
+            status: (a.status as AdminStatus) ?? null,
             reason: a.reason ?? undefined,
             vitalsSummary: a.vitalsSummary ?? undefined,
             staffName: a.staffName ?? undefined,
@@ -511,12 +603,11 @@ const MedicationPage: React.FC = () => {
         console.error("[MedicationPage] Load MAR failed:", err);
         setMarError(err?.message ?? "Failed to load MAR data.");
 
-        // fallback mock cho individual hiện tại
         const mockOrdersForInd = mockOrders.filter(
-          (o) => o.individualId === selectedIndividual
+          (o) => o.individualId === selectedIndividual,
         );
         const mockAdminsForInd = mockAdmins.filter(
-          (a) => a.individualId === selectedIndividual
+          (a) => a.individualId === selectedIndividual,
         );
         setOrders(mockOrdersForInd);
         setAdmins(mockAdminsForInd);
@@ -537,13 +628,13 @@ const MedicationPage: React.FC = () => {
   const totalActiveOrders = orders.filter((o) => o.status === "ACTIVE").length;
   const totalControlled = mockInventory.filter((i) => i.isControlled).length;
   const openIncidents = mockIncidents.filter(
-    (i) => i.status !== "Closed"
+    (i) => i.status !== "Closed",
   ).length;
 
   const recentPrn = admins.filter(
     (a) =>
       a.status === "GIVEN" &&
-      orders.some((o) => o.id === a.orderId && o.type === "PRN")
+      orders.some((o) => o.id === a.orderId && o.type === "PRN"),
   ).length;
 
   /* ---------- Orders Tab Data ---------- */
@@ -579,7 +670,7 @@ const MedicationPage: React.FC = () => {
 
   const marOrders = useMemo(() => {
     const base = orders.filter(
-      (o) => o.individualId === selectedIndividual && o.status === "ACTIVE"
+      (o) => o.individualId === selectedIndividual && o.status === "ACTIVE",
     );
     if (selectedOrderForMar === "ALL") return base;
     return base.filter((o) => o.id === selectedOrderForMar);
@@ -588,17 +679,19 @@ const MedicationPage: React.FC = () => {
   const getAdminsForCell = (
     orderId: string,
     day: number,
-    timeOfDay?: string
+    timeOfDay?: string,
   ): MedicationAdmin[] => {
     return admins.filter((a) => {
       if (a.orderId !== orderId) return false;
-      const d = new Date(a.scheduledDateTime);
-      if (d.getUTCDate() !== day) return false;
+
+      const ny = getNYDayAndTime(a.scheduledDateTime);
+      if (!ny) return false;
+
+      // ✅ compare by NY local day in month
+      if (ny.day !== day) return false;
+
       if (timeOfDay) {
-        const hh = String(d.getUTCHours()).padStart(2, "0");
-        const mm = String(d.getUTCMinutes()).padStart(2, "0");
-        const slot = `${hh}:${mm}`;
-        return slot === timeOfDay;
+        return ny.timeHHMM === timeOfDay;
       }
       return true;
     });
@@ -607,7 +700,7 @@ const MedicationPage: React.FC = () => {
   const openMarModalForSlot = (
     order: MedicationOrder,
     day: number,
-    timeOfDay?: string
+    timeOfDay?: string,
   ) => {
     const existingAdmins = timeOfDay
       ? getAdminsForCell(order.id, day, timeOfDay)
@@ -631,22 +724,89 @@ const MedicationPage: React.FC = () => {
   const prnAdmins = useMemo(
     () =>
       admins.filter((a) =>
-        orders.some((o) => o.id === a.orderId && o.type === "PRN")
+        orders.some((o) => o.id === a.orderId && o.type === "PRN"),
       ),
-    [admins, orders]
+    [admins, orders],
   );
 
   /* ---------- Inventory Tab Data ---------- */
 
   const inventoryForIndividual = mockInventory.filter(
-    (i) => i.individualId === selectedIndividual
+    (i) => i.individualId === selectedIndividual,
   );
 
   /* ---------- Incidents Tab Data ---------- */
 
   const incidentsForIndividual = mockIncidents.filter(
-    (i) => i.individualName === selectedIndividualName
+    (i) => i.individualName === selectedIndividualName,
   );
+
+  /* ---------- Add Order handlers ---------- */
+
+  const openAddOrder = () => {
+    setAddOrderError(null);
+    setAddOrderOpen(true);
+  };
+
+  const closeAddOrder = () => {
+    if (addOrderSaving) return;
+    setAddOrderOpen(false);
+  };
+
+  const handleCreateOrder = async (payload: {
+    medicationName: string;
+    form?: string | null;
+    doseValue: number;
+    doseUnit: string;
+    route?: string | null;
+    type: MedicationType;
+    frequencyText?: string | null;
+    timesOfDay?: string[];
+    startDate: string; // yyyy-mm-dd
+    endDate?: string | null; // yyyy-mm-dd
+    prescriberName?: string | null;
+    pharmacyName?: string | null;
+    indications?: string | null;
+    allergyFlag?: boolean;
+    status?: MedicationStatus;
+  }) => {
+    setAddOrderError(null);
+
+    if (!selectedIndividual) {
+      setAddOrderError("Missing individual selection.");
+      return;
+    }
+
+    try {
+      setAddOrderSaving(true);
+
+      const res = await fetch("/api/medication/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          individualId: selectedIndividual,
+          ...payload,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || res.statusText);
+      }
+
+      setAddOrderOpen(false);
+
+      await reloadOrdersOnly();
+
+      setActiveTab("ORDERS");
+    } catch (err: any) {
+      console.error("[MedicationPage] Create order failed:", err);
+      setAddOrderError(err?.message ?? "Create order failed.");
+    } finally {
+      setAddOrderSaving(false);
+    }
+  };
 
   /* ================================
      Render
@@ -659,11 +819,14 @@ const MedicationPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-semibold text-bac-text">Medication</h1>
           <p className="mt-1 text-sm text-bac-muted">
-            End-to-end medication management: master data, orders, MAR, PRN,
-            inventory, incidents and reports.
+            End-to-end medication management: orders, MAR, PRN, inventory,
+            incidents and reports.
           </p>
         </div>
-        <button className="rounded-2xl bg-bac-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90">
+        <button
+          onClick={openAddOrder}
+          className="rounded-2xl bg-bac-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
+        >
           Add order
         </button>
       </div>
@@ -699,7 +862,7 @@ const MedicationPage: React.FC = () => {
           />
         </div>
 
-        {/* Trạng thái load MAR + Individuals */}
+        {/* Status lines */}
         <div className="flex flex-1 flex-col justify-end gap-1 text-xs">
           {individualLoading && (
             <span className="text-bac-muted">Loading individuals...</span>
@@ -726,42 +889,42 @@ const MedicationPage: React.FC = () => {
           "Overview",
           "High level dashboard",
           activeTab,
-          setActiveTab
+          setActiveTab,
         )}
         {renderMainTabButton(
           "ORDERS",
           "Orders",
           "Master data & orders",
           activeTab,
-          setActiveTab
+          setActiveTab,
         )}
         {renderMainTabButton(
           "MAR",
           "MAR",
           "Monthly eMAR",
           activeTab,
-          setActiveTab
+          setActiveTab,
         )}
         {renderMainTabButton(
           "PRN",
           "PRN & Vitals",
           "PRN log with vitals",
           activeTab,
-          setActiveTab
+          setActiveTab,
         )}
         {renderMainTabButton(
           "INVENTORY",
           "Inventory & Controlled",
           "Stock, controlled meds",
           activeTab,
-          setActiveTab
+          setActiveTab,
         )}
         {renderMainTabButton(
           "INCIDENTS",
           "Incidents & Reports",
           "Errors, refusals, exports",
           activeTab,
-          setActiveTab
+          setActiveTab,
         )}
       </div>
 
@@ -824,6 +987,18 @@ const MedicationPage: React.FC = () => {
       {marModalState.open && marModalState.order && (
         <MarEntryModal state={marModalState} onClose={closeMarModal} />
       )}
+
+      {/* ✅ Add Order modal */}
+      {addOrderOpen && (
+        <AddOrderModal
+          individualName={selectedIndividualName}
+          defaultStartDate={monthToStartDate(selectedMonth)}
+          saving={addOrderSaving}
+          error={addOrderError}
+          onClose={closeAddOrder}
+          onCreate={handleCreateOrder}
+        />
+      )}
     </div>
   );
 };
@@ -837,7 +1012,7 @@ const renderMainTabButton = (
   label: string,
   desc: string,
   activeTab: MainTab,
-  setActiveTab: (t: MainTab) => void
+  setActiveTab: (t: MainTab) => void,
 ) => (
   <button
     key={id}
@@ -872,7 +1047,6 @@ const OverviewTab: React.FC<{
 }) => {
   return (
     <div className="flex h-full flex-col gap-4">
-      {/* Metric cards */}
       <div className="grid gap-3 md:grid-cols-4">
         <MetricCard
           label="Active orders"
@@ -890,7 +1064,6 @@ const OverviewTab: React.FC<{
       </div>
 
       <div className="grid h-full gap-4 md:grid-cols-[2fr,1.2fr]">
-        {/* Today schedule (stub) */}
         <div className="flex h-full flex-col rounded-2xl border border-bac-border bg-bac-panel p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -904,7 +1077,6 @@ const OverviewTab: React.FC<{
             </div>
           </div>
           <div className="mt-4 flex-1 space-y-2 overflow-auto text-sm">
-            {/* Placeholder list */}
             <div className="rounded-xl border border-bac-border bg-bac-bg px-3 py-2">
               <div className="flex justify-between">
                 <span className="font-medium text-bac-text">
@@ -939,13 +1111,11 @@ const OverviewTab: React.FC<{
               </div>
             </div>
             <div className="rounded-xl border border-dashed border-bac-border bg-bac-bg/40 px-3 py-2 text-xs text-bac-muted">
-              PRN medications will appear here when ordered (e.g. Lorazepam 1 mg
-              PRN anxiety).
+              PRN medications will appear here when ordered.
             </div>
           </div>
         </div>
 
-        {/* Alerts */}
         <div className="flex h-full flex-col rounded-2xl border border-bac-border bg-bac-panel p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-bac-text">
             Alerts & tasks
@@ -998,8 +1168,8 @@ const AlertItem: React.FC<{
     type === "info"
       ? "border-bac-primary/40 bg-bac-primary/10 text-bac-primary"
       : type === "warning"
-      ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400"
-      : "border-bac-red/40 bg-bac-red/10 text-bac-red";
+        ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400"
+        : "border-bac-red/40 bg-bac-red/10 text-bac-red";
 
   return (
     <div className={`rounded-xl border px-3 py-2 ${colors}`}>
@@ -1031,9 +1201,7 @@ const OrdersTab: React.FC<{
 
   return (
     <div className="grid h-full gap-4 md:grid-cols-[2.2fr,1.2fr]">
-      {/* Left: Orders list */}
       <div className="flex h-full flex-col gap-3">
-        {/* Filters */}
         <div className="rounded-2xl border border-bac-border bg-bac-panel p-4 shadow-sm">
           <div className="grid gap-3 md:grid-cols-3">
             <div>
@@ -1092,7 +1260,6 @@ const OrdersTab: React.FC<{
           </div>
         </div>
 
-        {/* Orders table */}
         <div className="flex-1 overflow-hidden rounded-2xl border border-bac-border bg-bac-panel shadow-sm">
           <div className="max-h-full overflow-auto">
             <table className="min-w-full text-left text-sm">
@@ -1141,7 +1308,7 @@ const OrdersTab: React.FC<{
                         {o.type === "SCHEDULED"
                           ? `${o.frequencyText ?? ""} ${
                               o.timesOfDay?.length
-                                ? "– " + o.timesOfDay.join(", ")
+                                ? "– " + [...o.timesOfDay].sort().join(", ")
                                 : ""
                             }`
                           : "PRN"}
@@ -1164,7 +1331,6 @@ const OrdersTab: React.FC<{
         </div>
       </div>
 
-      {/* Right: Master data summary (for first order) */}
       <div className="hidden flex-col gap-3 md:flex">
         <div className="rounded-2xl border border-bac-border bg-bac-panel p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-bac-text">
@@ -1273,7 +1439,7 @@ const MarTab: React.FC<{
   getAdminsForCell: (
     orderId: string,
     day: number,
-    timeOfDay?: string
+    timeOfDay?: string,
   ) => MedicationAdmin[];
 }> = ({
   month,
@@ -1293,8 +1459,7 @@ const MarTab: React.FC<{
             Monthly MAR – {selectedIndividualName}
           </h2>
           <p className="text-xs text-bac-muted">
-            eMAR with electronic signatures and per-dose documentation for{" "}
-            {month || "selected"}.
+            eMAR with per-dose documentation for {month || "selected"}.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
@@ -1338,8 +1503,7 @@ const MarTab: React.FC<{
               View mode
             </label>
             <div className="mt-1 text-xs text-bac-muted">
-              Monthly grid (once we finalize, we can add daily strip view for
-              mobile).
+              Monthly grid (we can add daily strip view for mobile later).
             </div>
           </div>
         </div>
@@ -1363,7 +1527,7 @@ const MarTab: React.FC<{
                       <th key={day} className="px-2 py-2 text-center">
                         {day}
                       </th>
-                    )
+                    ),
                   )}
                 </tr>
               </thead>
@@ -1387,7 +1551,7 @@ const MarTab: React.FC<{
                       (day) => {
                         const times =
                           order.type === "SCHEDULED"
-                            ? order.timesOfDay ?? []
+                            ? [...(order.timesOfDay ?? [])].sort()
                             : [];
                         const cellAdmins = getAdminsForCell(order.id, day);
 
@@ -1403,9 +1567,10 @@ const MarTab: React.FC<{
                                     const slotAdmins = getAdminsForCell(
                                       order.id,
                                       day,
-                                      t
+                                      t,
                                     );
-                                    const status = slotAdmins[0]?.status;
+                                    const status =
+                                      slotAdmins[0]?.status ?? null;
                                     return (
                                       <button
                                         key={t}
@@ -1446,7 +1611,7 @@ const MarTab: React.FC<{
                             </div>
                           </td>
                         );
-                      }
+                      },
                     )}
                   </tr>
                 ))}
@@ -1473,8 +1638,7 @@ const PrnTab: React.FC<{ prnAdmins: MedicationAdmin[]; month: string }> = ({
             PRN log & vitals
           </h2>
           <p className="text-xs text-bac-muted">
-            PRN administrations with reason, follow-up effectiveness and vitals.
-            Month: {month || "—"}
+            PRN administrations with reason and vitals. Month: {month || "—"}
           </p>
         </div>
       </div>
@@ -1517,10 +1681,7 @@ const PrnTab: React.FC<{ prnAdmins: MedicationAdmin[]; month: string }> = ({
                         Scheduled:{" "}
                         {new Date(a.scheduledDateTime).toLocaleTimeString(
                           undefined,
-                          {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          }
+                          { hour: "2-digit", minute: "2-digit", timeZone: TZ },
                         )}
                         {a.actualDateTime && (
                           <>
@@ -1531,7 +1692,8 @@ const PrnTab: React.FC<{ prnAdmins: MedicationAdmin[]; month: string }> = ({
                               {
                                 hour: "2-digit",
                                 minute: "2-digit",
-                              }
+                                timeZone: TZ,
+                              },
                             )}
                           </>
                         )}
@@ -1547,10 +1709,10 @@ const PrnTab: React.FC<{ prnAdmins: MedicationAdmin[]; month: string }> = ({
                     <td className="px-4 py-3 align-top text-xs">
                       <span
                         className={`rounded-full px-2 py-0.5 ${marStatusClass(
-                          a.status
+                          a.status,
                         )}`}
                       >
-                        {a.status}
+                        {(a.status ?? "—").toString()}
                       </span>
                     </td>
                     <td className="px-4 py-3 align-top text-xs text-bac-text">
@@ -1585,8 +1747,7 @@ const InventoryTab: React.FC<{ inventoryItems: InventoryItem[] }> = ({
           Inventory & controlled meds – per individual
         </h2>
         <p className="text-xs text-bac-muted">
-          Track in/out balance, low stock alerts and controlled medication
-          counts.
+          Track balance, low stock alerts and controlled medication counts.
         </p>
       </div>
 
@@ -1753,9 +1914,7 @@ const MarEntryModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-40 flex">
-      {/* backdrop */}
       <div className="flex-1 bg-black/40" onClick={onClose} />
-      {/* panel */}
       <div className="h-full w-full max-w-md border-l border-bac-border bg-bac-panel p-6 shadow-2xl">
         <div className="flex items-start justify-between">
           <div>
@@ -1785,7 +1944,7 @@ const MarEntryModal: React.FC<{
             </label>
             <select
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              defaultValue={admin?.status ?? "GIVEN"}
+              defaultValue={(admin?.status ?? "GIVEN") as any}
             >
               <option value="GIVEN">Given</option>
               <option value="REFUSED">Refused</option>
@@ -1820,7 +1979,8 @@ const MarEntryModal: React.FC<{
                           hour: "2-digit",
                           minute: "2-digit",
                           hour12: false,
-                        }
+                          timeZone: TZ,
+                        },
                       )
                     : ""
                 }
@@ -1860,6 +2020,339 @@ const MarEntryModal: React.FC<{
           </button>
           <button className="rounded-xl bg-bac-primary px-4 py-2 text-xs font-medium text-white hover:opacity-90">
             Save record
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ---------- ✅ Add Order Modal ---------- */
+/* (kept identical to your original; no changes needed) */
+
+const AddOrderModal: React.FC<{
+  individualName: string;
+  defaultStartDate: string; // yyyy-mm-dd
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onCreate: (payload: {
+    medicationName: string;
+    form?: string | null;
+    doseValue: number;
+    doseUnit: string;
+    route?: string | null;
+    type: MedicationType;
+    frequencyText?: string | null;
+    timesOfDay?: string[];
+    startDate: string;
+    endDate?: string | null;
+    prescriberName?: string | null;
+    pharmacyName?: string | null;
+    indications?: string | null;
+    allergyFlag?: boolean;
+    status?: MedicationStatus;
+  }) => void;
+}> = ({
+  individualName,
+  defaultStartDate,
+  saving,
+  error,
+  onClose,
+  onCreate,
+}) => {
+  const [medicationName, setMedicationName] = useState("");
+  const [form, setForm] = useState("");
+  const [doseValue, setDoseValue] = useState<string>("");
+  const [doseUnit, setDoseUnit] = useState("mg");
+  const [route, setRoute] = useState("PO");
+
+  const [type, setType] = useState<MedicationType>("SCHEDULED");
+  const [frequencyText, setFrequencyText] = useState("");
+  const [timesText, setTimesText] = useState("08:00, 20:00");
+
+  const [startDate, setStartDate] = useState<string>(defaultStartDate || "");
+  const [endDate, setEndDate] = useState<string>("");
+
+  const [status, setStatus] = useState<MedicationStatus>("ACTIVE");
+
+  const [prescriberName, setPrescriberName] = useState("");
+  const [pharmacyName, setPharmacyName] = useState("");
+  const [indications, setIndications] = useState("");
+  const [allergyFlag, setAllergyFlag] = useState(false);
+
+  const canSubmit = useMemo(() => {
+    if (!medicationName.trim()) return false;
+    const dv = Number(doseValue);
+    if (!Number.isFinite(dv) || dv <= 0) return false;
+    if (!doseUnit.trim()) return false;
+    if (!startDate) return false;
+    return true;
+  }, [medicationName, doseValue, doseUnit, startDate]);
+
+  const submit = () => {
+    const dv = Number(doseValue);
+    const times = type === "SCHEDULED" ? toTimesArray(timesText) : [];
+
+    onCreate({
+      medicationName: medicationName.trim(),
+      form: form.trim() ? form.trim() : null,
+      doseValue: Number.isFinite(dv) ? dv : 0,
+      doseUnit: doseUnit.trim(),
+      route: route.trim() ? route.trim() : null,
+      type,
+      frequencyText: frequencyText.trim() ? frequencyText.trim() : null,
+      timesOfDay: times,
+      startDate,
+      endDate: endDate ? endDate : null,
+      prescriberName: prescriberName.trim() ? prescriberName.trim() : null,
+      pharmacyName: pharmacyName.trim() ? pharmacyName.trim() : null,
+      indications: indications.trim() ? indications.trim() : null,
+      allergyFlag,
+      status,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div
+        className="flex-1 bg-black/40"
+        onClick={() => !saving && onClose()}
+      />
+      <div className="h-full w-full max-w-lg border-l border-bac-border bg-bac-panel p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-bac-text">Add order</h2>
+            <p className="mt-1 text-xs text-bac-muted">
+              Create a medication order for{" "}
+              <span className="text-bac-text">{individualName}</span>.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-full border border-bac-border px-3 py-1 text-xs text-bac-muted hover:bg-bac-bg disabled:opacity-50"
+          >
+            Close
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-bac-red/40 bg-bac-red/10 px-3 py-2 text-sm text-bac-red">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-5 space-y-4 text-sm">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Medication name <span className="text-bac-red">*</span>
+              </label>
+              <input
+                value={medicationName}
+                onChange={(e) => setMedicationName(e.target.value)}
+                placeholder="e.g. Metformin"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Form
+              </label>
+              <input
+                value={form}
+                onChange={(e) => setForm(e.target.value)}
+                placeholder="e.g. tablet"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Dose value <span className="text-bac-red">*</span>
+              </label>
+              <input
+                value={doseValue}
+                onChange={(e) => setDoseValue(e.target.value)}
+                placeholder="e.g. 500"
+                inputMode="decimal"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Dose unit <span className="text-bac-red">*</span>
+              </label>
+              <input
+                value={doseUnit}
+                onChange={(e) => setDoseUnit(e.target.value)}
+                placeholder="mg"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Route
+              </label>
+              <input
+                value={route}
+                onChange={(e) => setRoute(e.target.value)}
+                placeholder="PO"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Type
+              </label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value as MedicationType)}
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              >
+                <option value="SCHEDULED">Scheduled</option>
+                <option value="PRN">PRN</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as MedicationStatus)}
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              >
+                <option value="ACTIVE">Active</option>
+                <option value="ON_HOLD">On hold</option>
+                <option value="DISCONTINUED">Discontinued</option>
+              </select>
+            </div>
+            <div className="flex items-end gap-2">
+              <label className="flex items-center gap-2 text-xs text-bac-text">
+                <input
+                  type="checkbox"
+                  checked={allergyFlag}
+                  onChange={(e) => setAllergyFlag(e.target.checked)}
+                />
+                Allergy flag
+              </label>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Start date <span className="text-bac-red">*</span>
+              </label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                End date
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Frequency
+              </label>
+              <input
+                value={frequencyText}
+                onChange={(e) => setFrequencyText(e.target.value)}
+                placeholder="e.g. BID, TID, QHS, PRN"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Times of day (Scheduled)
+              </label>
+              <input
+                value={timesText}
+                onChange={(e) => setTimesText(e.target.value)}
+                disabled={type !== "SCHEDULED"}
+                placeholder="08:00, 20:00"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text disabled:opacity-50"
+              />
+              <div className="mt-1 text-[11px] text-bac-muted">
+                Use comma or new lines. Example: 08:00, 20:00
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Prescriber
+              </label>
+              <input
+                value={prescriberName}
+                onChange={(e) => setPrescriberName(e.target.value)}
+                placeholder="e.g. Dr. Smith"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                Pharmacy
+              </label>
+              <input
+                value={pharmacyName}
+                onChange={(e) => setPharmacyName(e.target.value)}
+                placeholder="e.g. CVS"
+                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+              Indications / Notes
+            </label>
+            <textarea
+              value={indications}
+              onChange={(e) => setIndications(e.target.value)}
+              rows={3}
+              placeholder="Reason for medication, special notes..."
+              className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-xl border border-bac-border px-4 py-2 text-xs font-medium text-bac-muted hover:bg-bac-bg disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!canSubmit || saving}
+            className="rounded-xl bg-bac-primary px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? "Creating..." : "Create order"}
           </button>
         </div>
       </div>

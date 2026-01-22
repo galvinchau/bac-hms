@@ -7,6 +7,7 @@ generator client {
 datasource db {
   provider = "postgresql" // Dùng PostgreSQL (Supabase)
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 /**
@@ -23,11 +24,11 @@ model Individual {
   dob        String // YYYY-MM-DD
   gender     String?
   ssnLast4   String? // chỉ 4 số
-  medicaidId  String?  @db.VarChar(32)
+  medicaidId String? @db.VarChar(32)
 
   branch   String
   location String
-  status IndividualStatus @default(PENDING)
+  status   IndividualStatus @default(PENDING)
 
   primaryPhone   String?
   secondaryPhone String?
@@ -42,6 +43,12 @@ model Individual {
 
   // acceptedServices: form gửi lên là mảng string, DB lưu dạng CSV cho đơn giản
   acceptedServices String
+
+  // ===== Medication relations (ADD) =====
+  medicationOrders          MedicationOrder[]
+  medicationAdministrations MedicationAdministration[]
+  medicationInventories     MedicationInventory[]
+  medicationIncidents       MedicationIncident[]
 
   // Emergency contacts
   emergency1Name           String?
@@ -662,101 +669,124 @@ enum MedicationIncidentStatus {
  * MedicationOrder = y lệnh thuốc (đơn thuốc) cho từng Individual
  */
 model MedicationOrder {
-  id             String                @id @default(cuid())
-  individualId   String // link sang Individual qua id (string)
-  medicationName String
-  form           String? // tablet, capsule, solution...
-  doseValue      Float
-  doseUnit       String // mg, ml, tablet...
-  route          String // PO, IM, IV, SQ...
-  type           MedicationType
-  frequencyText  String? // “BID”, “QHS”…
-  timesOfDay     String[]              @default([])
-  startDate      DateTime
-  endDate        DateTime?
-  status         MedicationOrderStatus @default(ACTIVE)
+  id String @id @default(cuid())
 
-  prescriberName String?
-  pharmacyName   String?
-  indications    String? // lý do dùng thuốc
-  allergyFlag    Boolean @default(false)
+  // DB column: individualid
+  individualId String     @map("individualid")
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
 
-  // Relations nội bộ Medication
+  medicationName String  @map("medicationname")
+  form           String? @map("form")
+  doseValue      Float   @map("dosevalue")
+  doseUnit       String  @map("doseunit")
+  route          String? @map("route")
+
+  type MedicationType
+
+  frequencyText String? @map("frequencytext")
+
+  // DB column: timesofday (text[])
+  timesOfDay String[] @map("timesofday")
+
+  startDate DateTime  @map("startdate")
+  endDate   DateTime? @map("enddate")
+
+  status MedicationOrderStatus @default(ACTIVE)
+
+  prescriberName String? @map("prescribername")
+  pharmacyName   String? @map("pharmacyname")
+  indications    String? @map("indications")
+  allergyFlag    Boolean @default(false) @map("allergyflag")
+
+  createdAt DateTime @default(now()) @map("createdat")
+  updatedAt DateTime @updatedAt @map("updatedat")
+
   administrations MedicationAdministration[]
-  inventoryItems  MedicationInventory[]
+  inventories     MedicationInventory[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([individualId, status])
+  @@index([individualId])
+  @@map("MedicationOrder")
 }
 
 /**
  * MedicationAdministration = mỗi lần cấp thuốc trong MAR
  */
 model MedicationAdministration {
-  id      String          @id @default(cuid())
-  orderId String
+  id String @id @default(cuid())
+
+  orderId String          @map("orderid")
   order   MedicationOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  individualId      String // lưu thêm để query nhanh
-  scheduledDateTime DateTime
-  actualDateTime    DateTime?
+  individualId String     @map("individualid")
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+
+  scheduledDateTime DateTime              @map("scheduleddatetime")
+  actualDateTime    DateTime?             @map("actualdatetime")
   status            MedicationAdminStatus
-  reason            String? // reason/refused/missed...
-  vitalsSummary     String? // "BP 120/70, HR 76, BG 145"
-  staffId           String? // id DSP
-  staffName         String? // tên DSP, cache để không phải join
+  reason            String?               @map("reason")
+  vitalsSummary     String?               @map("vitalssummary")
+  staffId           String?               @map("staffid")
+  staffName         String?               @map("staffname")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("createdat")
+  updatedAt DateTime @updatedAt @map("updatedat")
 
+  @@unique([orderId, scheduledDateTime]) // ✅ ADD THIS (idempotent key)
   @@index([individualId, scheduledDateTime])
   @@index([orderId, scheduledDateTime])
+  @@map("MedicationAdministration")
 }
 
 /**
  * MedicationInventory = tồn kho thuốc theo từng Individual
  */
 model MedicationInventory {
-  id      String           @id @default(cuid())
-  orderId String?
+  id String @id @default(cuid())
+
+  orderId String?          @map("orderid")
   order   MedicationOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
-  individualId    String
-  medicationName  String // cache tên thuốc để xem nhanh
-  isControlled    Boolean   @default(false)
-  currentQuantity Float
-  unit            String // tablet, ml...
-  minThreshold    Float     @default(0)
-  daysRemaining   Int?
-  lastCountDate   DateTime?
+  individualId String     @map("individualid")
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  medicationName  String    @map("medicationname")
+  isControlled    Boolean   @default(false) @map("iscontrolled")
+  currentQuantity Float     @map("currentquantity")
+  unit            String    @map("unit")
+  minThreshold    Float     @default(0) @map("minthreshold")
+  daysRemaining   Int?      @map("daysremaining")
+  lastCountDate   DateTime? @map("lastcountdate")
+
+  createdAt DateTime @default(now()) @map("createdat")
+  updatedAt DateTime @updatedAt @map("updatedat")
 
   @@index([individualId])
   @@index([individualId, isControlled])
+  @@map("MedicationInventory")
 }
 
 /**
  * MedicationIncident = lỗi thuốc, Missed dose, Medication error...
  */
 model MedicationIncident {
-  id             String                     @id @default(cuid())
-  individualId   String
-  individualName String
-  date           DateTime
-  medicationName String?
-  type           String // "Missed Dose", "Medication Error", ...
+  id String @id @default(cuid())
+
+  individualId String     @map("individualid")
+  individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+
+  individualName String                     @map("individualname")
+  date           DateTime                   @map("date")
+  medicationName String?                    @map("medicationname")
+  type           String                     @map("type")
   severity       MedicationIncidentSeverity
   status         MedicationIncidentStatus   @default(OPEN)
-  notes          String?
+  notes          String?                    @map("notes")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("createdat")
+  updatedAt DateTime @updatedAt @map("updatedat")
 
   @@index([individualId, date])
   @@index([severity])
   @@index([status])
+  @@map("MedicationIncident")
 }

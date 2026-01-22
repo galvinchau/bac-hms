@@ -1,266 +1,404 @@
-import { NextRequest, NextResponse } from "next/server";
+// web/app/api/medication/mar/route.ts
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-function isMissingTableError(err: any) {
-  if (!err) return false;
-  const msg = String(err.message ?? err);
-  return (
-    msg.includes("does not exist") &&
-    (msg.includes("MedicationOrder") ||
-      msg.includes("MedicationAdministration"))
-  );
+const TZ = "America/New_York";
+
+// ✅ Auto-generated rows: status MUST be null because enum has only GIVEN/REFUSED/MISSED/...
+const GENERATED_STATUS = null as any;
+
+/**
+ * Parse YYYY-MM to { year, monthIndex0 }
+ */
+function parseMonth(month: string) {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  if (!year || mon < 1 || mon > 12) return null;
+  return { year, monthIndex0: mon - 1 };
 }
 
 /**
- * Nếu PrismaClient chưa có model Medication* (chưa migrate/generate),
- * tránh gọi .findMany trên undefined.
+ * Convert a "local wall clock" datetime in a specific IANA time zone
+ * to a real JS Date (UTC instant).
+ *
+ * We avoid extra deps by using Intl.DateTimeFormat parts trick.
  */
-function hasMedicationModels(p: any) {
-  return p && p.medicationOrder && p.medicationAdministration;
+function zonedWallClockToUtcDate(
+  year: number,
+  monthIndex0: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string,
+): Date {
+  const utcGuess = new Date(Date.UTC(year, monthIndex0, day, hour, minute, 0));
+
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  const parts = dtf.formatToParts(utcGuess);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value;
+
+  const y = Number(get("year"));
+  const mo = Number(get("month")) - 1;
+  const d = Number(get("day"));
+  const h = Number(get("hour"));
+  const mi = Number(get("minute"));
+  const s = Number(get("second"));
+
+  const tzWallClockAsUTC = Date.UTC(y, mo, d, h, mi, s);
+  const guessUTC = Date.UTC(year, monthIndex0, day, hour, minute, 0);
+
+  const offsetMs = tzWallClockAsUTC - guessUTC;
+  return new Date(utcGuess.getTime() - offsetMs);
 }
 
-/**
- * GET /api/medication/mar?individualId=...&month=YYYY-MM
- */
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const individualId = searchParams.get("individualId");
-    const month = searchParams.get("month"); // "2024-11"
+function parseTimeOfDay(t: string): { hour: number; minute: number } | null {
+  const m = /^(\d{2}):(\d{2})$/.exec((t || "").trim());
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
 
-    if (!individualId) {
-      return NextResponse.json(
-        { error: "Missing required query param: individualId" },
-        { status: 400 }
-      );
-    }
+function startOfMonthUTC(year: number, monthIndex0: number) {
+  return zonedWallClockToUtcDate(year, monthIndex0, 1, 0, 0, TZ);
+}
 
-    const prismaAny = prisma as any;
+function endOfMonthUTC(year: number, monthIndex0: number) {
+  const lastDay = new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+  const dt = zonedWallClockToUtcDate(year, monthIndex0, lastDay, 23, 59, TZ);
+  dt.setUTCSeconds(59, 999);
+  return dt;
+}
 
-    // Nếu PrismaClient chưa có model Medication*, trả về warning + data rỗng
-    if (!hasMedicationModels(prismaAny)) {
-      return NextResponse.json(
-        {
-          month: null,
-          individualId: null,
-          orders: [],
-          administrations: [],
-          warning:
-            "Medication models not found in Prisma client. Please run `npx prisma migrate dev` to create and generate Medication tables.",
-        },
-        { status: 200 }
-      );
-    }
+function clampDateOnlyRangeToMonth(
+  orderStart: Date,
+  orderEnd: Date | null,
+  year: number,
+  monthIndex0: number,
+): {
+  fromY: number;
+  fromM0: number;
+  fromD: number;
+  toY: number;
+  toM0: number;
+  toD: number;
+} | null {
+  const monthFirstLocal = { y: year, m0: monthIndex0, d: 1 };
+  const lastDay = new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+  const monthLastLocal = { y: year, m0: monthIndex0, d: lastDay };
 
-    const now = new Date();
-    const monthValue =
-      month ??
-      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 
-    const [yearStr, monthStr] = monthValue.split("-");
-    const year = Number(yearStr);
-    const monthNum = Number(monthStr);
+  const toLocalYMD = (date: Date) => {
+    const parts = dtf.formatToParts(date);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value;
+    return {
+      y: Number(get("year")),
+      m0: Number(get("month")) - 1,
+      d: Number(get("day")),
+    };
+  };
 
-    if (!year || !monthNum || monthNum < 1 || monthNum > 12) {
-      return NextResponse.json(
-        { error: "Invalid month format. Expected YYYY-MM." },
-        { status: 400 }
-      );
-    }
+  const s = toLocalYMD(orderStart);
+  const e = orderEnd ? toLocalYMD(orderEnd) : null;
 
-    const startOfMonth = new Date(Date.UTC(year, monthNum - 1, 1, 0, 0, 0));
-    const startOfNextMonth = new Date(Date.UTC(year, monthNum, 1, 0, 0, 0));
+  const cmp = (a: any, b: any) => {
+    if (a.y !== b.y) return a.y - b.y;
+    if (a.m0 !== b.m0) return a.m0 - b.m0;
+    return a.d - b.d;
+  };
 
-    const orders = await prismaAny.medicationOrder.findMany({
-      where: {
-        individualId,
-        status: "ACTIVE" as any,
-        startDate: { lt: startOfNextMonth },
-        OR: [{ endDate: null }, { endDate: { gte: startOfMonth } }],
-      },
-      orderBy: [{ medicationName: "asc" }, { startDate: "asc" }],
-    });
+  const max = (a: any, b: any) => (cmp(a, b) >= 0 ? a : b);
+  const min = (a: any, b: any) => (cmp(a, b) <= 0 ? a : b);
 
-    const administrations = await prismaAny.medicationAdministration.findMany({
-      where: {
-        individualId,
-        scheduledDateTime: {
-          gte: startOfMonth,
-          lt: startOfNextMonth,
-        },
-      },
-      orderBy: { scheduledDateTime: "asc" },
-    });
+  const from = max(s, monthFirstLocal);
+  const to = min(e ?? monthLastLocal, monthLastLocal);
 
-    return NextResponse.json(
-      { month: monthValue, individualId, orders, administrations },
-      { status: 200 }
-    );
-  } catch (err: any) {
-    console.error("[GET /api/medication/mar] Error:", err);
+  if (cmp(from, to) > 0) return null;
 
-    // ⚠️ Nếu chưa tạo bảng Medication* bên DB → trả về warning + rỗng
-    if (isMissingTableError(err)) {
-      return NextResponse.json(
-        {
-          month: null,
-          individualId: null,
-          orders: [],
-          administrations: [],
-          warning:
-            "Medication tables not created yet. Returning empty MAR data.",
-        },
-        { status: 200 }
-      );
-    }
+  return {
+    fromY: from.y,
+    fromM0: from.m0,
+    fromD: from.d,
+    toY: to.y,
+    toM0: to.m0,
+    toD: to.d,
+  };
+}
 
-    return NextResponse.json(
-      {
-        error: "Failed to load MAR data.",
-        errorDetail: err?.message ?? String(err),
-      },
-      { status: 500 }
+function* iterateDatesLocal(
+  y: number,
+  m0: number,
+  d1: number,
+  y2: number,
+  m02: number,
+  d2: number,
+) {
+  let cur = new Date(Date.UTC(y, m0, d1));
+  const end = new Date(Date.UTC(y2, m02, d2));
+  while (cur.getTime() <= end.getTime()) {
+    yield {
+      y: cur.getUTCFullYear(),
+      m0: cur.getUTCMonth(),
+      d: cur.getUTCDate(),
+    };
+    cur = new Date(
+      Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth(), cur.getUTCDate() + 1),
     );
   }
 }
 
-/**
- * POST /api/medication/mar
- * (tạm thời nếu chưa có bảng sẽ trả 400, tránh crash)
- */
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
+async function generateAndFetchMar(individualId: string, month: string) {
+  const pm = parseMonth(month);
+  if (!pm) {
+    return {
+      status: 400 as const,
+      body: { error: "Invalid month format. Use YYYY-MM" },
+    };
+  }
 
-    const {
-      id,
-      orderId,
-      individualId: individualIdFromBody,
-      scheduledDateTime,
-      actualDateTime,
-      status,
-      reason,
-      vitalsSummary,
-      staffId,
-      staffName,
-    } = body ?? {};
+  const { year, monthIndex0 } = pm;
+  const monthStartUTC = startOfMonthUTC(year, monthIndex0);
+  const monthEndUTC = endOfMonthUTC(year, monthIndex0);
 
-    if (!orderId || !scheduledDateTime || !status) {
-      return NextResponse.json(
-        {
-          error:
-            "Missing required fields. Required: orderId, scheduledDateTime, status.",
-        },
-        { status: 400 }
-      );
-    }
+  const orders = await prisma.medicationOrder.findMany({
+    where: {
+      individualId,
+      status: "ACTIVE",
+      startDate: { lte: monthEndUTC },
+      OR: [{ endDate: null }, { endDate: { gte: monthStartUTC } }],
+    },
+    orderBy: [{ medicationName: "asc" }, { startDate: "asc" }],
+  });
 
-    const prismaAny = prisma as any;
+  const scheduledOrders = orders.filter(
+    (o: any) =>
+      o.type === "SCHEDULED" &&
+      Array.isArray(o.timesOfDay) &&
+      o.timesOfDay.length > 0,
+  );
 
-    // Nếu PrismaClient chưa có model Medication* → không cho lưu
-    if (!hasMedicationModels(prismaAny)) {
-      return NextResponse.json(
-        {
-          error:
-            "Medication models not generated yet. Please run `npx prisma migrate dev` before saving MAR.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const order = await prismaAny.medicationOrder.findUnique({
-      where: { id: orderId },
+  if (scheduledOrders.length === 0) {
+    const administrations = await prisma.medicationAdministration.findMany({
+      where: {
+        individualId,
+        scheduledDateTime: { gte: monthStartUTC, lte: monthEndUTC },
+      },
+      orderBy: [{ scheduledDateTime: "asc" }],
     });
 
-    if (!order) {
-      return NextResponse.json(
-        { error: "MedicationOrder not found." },
-        { status: 404 }
-      );
-    }
-
-    const individualId = individualIdFromBody ?? order.individualId;
-
-    const scheduled = new Date(scheduledDateTime);
-    if (Number.isNaN(scheduled.getTime())) {
-      return NextResponse.json(
-        { error: "Invalid scheduledDateTime. Must be ISO string." },
-        { status: 400 }
-      );
-    }
-
-    const actual =
-      actualDateTime != null ? new Date(actualDateTime) : undefined;
-    if (actualDateTime && Number.isNaN(actual?.getTime() ?? NaN)) {
-      return NextResponse.json(
-        { error: "Invalid actualDateTime. Must be ISO string." },
-        { status: 400 }
-      );
-    }
-
-    const validStatuses = [
-      "GIVEN",
-      "REFUSED",
-      "MISSED",
-      "HELD",
-      "LATE",
-      "ERROR",
-    ] as const;
-
-    if (!validStatuses.includes(status)) {
-      return NextResponse.json(
-        {
-          error: `Invalid status. Must be one of: ${validStatuses.join(", ")}.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    const data = {
-      orderId,
-      individualId,
-      scheduledDateTime: scheduled,
-      actualDateTime: actual ?? null,
-      status: status as any,
-      reason: reason ?? null,
-      vitalsSummary: vitalsSummary ?? null,
-      staffId: staffId ?? null,
-      staffName: staffName ?? null,
+    return {
+      status: 200 as const,
+      body: { individualId, month, orders, administrations },
     };
+  }
 
-    let admin;
+  const desired: Array<{
+    orderId: string;
+    individualId: string;
+    scheduledDateTime: Date;
+  }> = [];
 
-    if (id) {
-      admin = await prismaAny.medicationAdministration.update({
-        where: { id },
-        data,
-      });
-    } else {
-      admin = await prismaAny.medicationAdministration.create({
-        data,
-      });
+  for (const o of scheduledOrders as any[]) {
+    const range = clampDateOnlyRangeToMonth(
+      o.startDate,
+      o.endDate,
+      year,
+      monthIndex0,
+    );
+    if (!range) continue;
+
+    // dedupe times
+    const timeSet = new Set<string>();
+    for (const t of o.timesOfDay) {
+      const norm = String(t || "").trim();
+      if (/^\d{2}:\d{2}$/.test(norm)) timeSet.add(norm);
     }
 
-    return NextResponse.json(admin, { status: 200 });
-  } catch (err: any) {
-    console.error("[POST /api/medication/mar] Error:", err);
+    const timeList: Array<{ hour: number; minute: number }> = [];
+    for (const t of Array.from(timeSet)) {
+      const parsed = parseTimeOfDay(t);
+      if (parsed) timeList.push(parsed);
+    }
+    if (timeList.length === 0) continue;
 
-    if (isMissingTableError(err)) {
-      return NextResponse.json(
-        {
-          error:
-            "Medication tables not created yet. Please run DB migration before saving MAR.",
-        },
-        { status: 400 }
+    for (const d of iterateDatesLocal(
+      range.fromY,
+      range.fromM0,
+      range.fromD,
+      range.toY,
+      range.toM0,
+      range.toD,
+    )) {
+      for (const tm of timeList) {
+        const scheduledUTC = zonedWallClockToUtcDate(
+          d.y,
+          d.m0,
+          d.d,
+          tm.hour,
+          tm.minute,
+          TZ,
+        );
+        desired.push({
+          orderId: o.id,
+          individualId,
+          scheduledDateTime: scheduledUTC,
+        });
+      }
+    }
+  }
+
+  const orderIds = scheduledOrders.map((o: any) => o.id);
+
+  const existing = await prisma.medicationAdministration.findMany({
+    where: {
+      orderId: { in: orderIds },
+      scheduledDateTime: { gte: monthStartUTC, lte: monthEndUTC },
+    },
+    select: { orderId: true, scheduledDateTime: true },
+  });
+
+  const key = (orderId: string, dt: Date) => `${orderId}__${dt.toISOString()}`;
+  const existingSet = new Set(
+    existing.map((e) => key(e.orderId, e.scheduledDateTime)),
+  );
+
+  const toCreate = desired.filter(
+    (x) => !existingSet.has(key(x.orderId, x.scheduledDateTime)),
+  );
+
+  if (toCreate.length > 0) {
+    try {
+      await prisma.medicationAdministration.createMany({
+        data: toCreate.map((x) => ({
+          orderId: x.orderId,
+          individualId: x.individualId,
+          scheduledDateTime: x.scheduledDateTime,
+          actualDateTime: null,
+          status: GENERATED_STATUS, // ✅ null
+          reason: null,
+          vitalsSummary: null,
+          staffId: null,
+          staffName: null,
+        })),
+        skipDuplicates: true,
+      });
+    } catch (e) {
+      await prisma.$transaction(
+        toCreate.map((x) =>
+          prisma.medicationAdministration
+            .create({
+              data: {
+                orderId: x.orderId,
+                individualId: x.individualId,
+                scheduledDateTime: x.scheduledDateTime,
+                actualDateTime: null,
+                status: GENERATED_STATUS, // ✅ null
+                reason: null,
+                vitalsSummary: null,
+                staffId: null,
+                staffName: null,
+              },
+            })
+            .catch(() => null),
+        ),
       );
     }
+  }
 
-    return NextResponse.json(
-      {
-        error: "Failed to save MAR record.",
-        errorDetail: err?.message ?? String(err),
+  const administrations = await prisma.medicationAdministration.findMany({
+    where: {
+      individualId,
+      scheduledDateTime: { gte: monthStartUTC, lte: monthEndUTC },
+    },
+    orderBy: [{ scheduledDateTime: "asc" }],
+  });
+
+  return {
+    status: 200 as const,
+    body: {
+      individualId,
+      month,
+      orders,
+      administrations,
+      meta: {
+        tz: TZ,
+        monthStartUTC: monthStartUTC.toISOString(),
+        monthEndUTC: monthEndUTC.toISOString(),
+        created: toCreate.length,
       },
-      { status: 500 }
+    },
+  };
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const individualId = (searchParams.get("individualId") || "").trim();
+    const month = (searchParams.get("month") || "").trim();
+
+    if (!individualId) {
+      return NextResponse.json(
+        { error: "Missing individualId" },
+        { status: 400 },
+      );
+    }
+    if (!month) {
+      return NextResponse.json({ error: "Missing month" }, { status: 400 });
+    }
+
+    const result = await generateAndFetchMar(individualId, month);
+    return NextResponse.json(result.body, { status: result.status });
+  } catch (err: any) {
+    console.error("GET /api/medication/mar error:", err);
+    return NextResponse.json(
+      { error: "Internal error", details: String(err?.message || err) },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => null);
+    const individualId = (body?.individualId || "").trim();
+    const month = (body?.month || "").trim();
+
+    if (!individualId) {
+      return NextResponse.json(
+        { error: "Missing individualId" },
+        { status: 400 },
+      );
+    }
+    if (!month) {
+      return NextResponse.json({ error: "Missing month" }, { status: 400 });
+    }
+
+    const result = await generateAndFetchMar(individualId, month);
+    return NextResponse.json(result.body, { status: result.status });
+  } catch (err: any) {
+    console.error("POST /api/medication/mar error:", err);
+    return NextResponse.json(
+      { error: "Internal error", details: String(err?.message || err) },
+      { status: 500 },
     );
   }
 }

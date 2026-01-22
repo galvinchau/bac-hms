@@ -1,13 +1,11 @@
-// app/api/medication/individuals/route.ts
+// Web/app/api/medication/individuals/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   try {
-    // ⚠️ Đảm bảo trong schema.prisma có model tên "Individual"
-    // Nếu tên khác (vd: Client, Person...), sửa lại ở đây
-    const individuals = await prisma.individual.findMany({
-      orderBy: { createdAt: "asc" }, // nếu không có createdAt thì bỏ dòng này
+    // Note: Avoid ordering by createdAt because some schemas don't have it.
+    const items = await prisma.individual.findMany({
       select: {
         id: true,
         code: true,
@@ -15,18 +13,22 @@ export async function GET() {
         middleName: true,
         lastName: true,
       },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      take: 500,
     });
 
-    return NextResponse.json(individuals);
+    // Standard response shape: { items: [...] }
+    return NextResponse.json({ items }, { status: 200 });
   } catch (err: any) {
     console.error("[GET /api/medication/individuals] error:", err);
 
     return NextResponse.json(
       {
+        items: [],
         error: "Failed to load individuals for Medication module.",
-        detail: err?.message ?? String(err),
+        errorDetail: String(err?.message || err),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
