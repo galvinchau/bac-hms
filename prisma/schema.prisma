@@ -691,7 +691,7 @@ model MedicationOrder {
   startDate DateTime  @map("startdate")
   endDate   DateTime? @map("enddate")
 
-  status MedicationOrderStatus @default(ACTIVE)
+  status MedicationAdminStatus?
 
   prescriberName String? @map("prescribername")
   pharmacyName   String? @map("pharmacyname")

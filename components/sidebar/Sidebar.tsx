@@ -64,7 +64,26 @@ const MENU: MenuItem[] = [
   },
   { label: "Schedule", href: "/schedule" },
   { label: "Visited Maintenance", href: "/visited-maintenance" },
-  { label: "Medication", href: "/medication" },
+
+  // ✅ Medication (PA-compliant submenus)
+  {
+    label: "Medication",
+    children: [
+      { label: "Orders", href: "/medication/orders" },
+      { label: "MAR", href: "/medication/mar" },
+      { label: "Treatment Record", href: "/medication/treatment" },
+
+      // ✅ FIX: folders are prn-vitals & inventory-controlled
+      { label: "PRN & Vitals", href: "/medication/prn-vitals" },
+      {
+        label: "Inventory & Controlled",
+        href: "/medication/inventory-controlled",
+      },
+
+      { label: "Incidents & Reports", href: "/medication/incidents" },
+    ],
+  },
+
   { label: "FireDrill", href: "/firedrill" },
 
   // 🔒 Admin-only (menu)
@@ -164,19 +183,19 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     VISIBLE_MENU.forEach((m) => {
       if (!m.children) return;
       const hasActiveChild = m.children.some((c) =>
-        pathname.startsWith(c.href)
+        pathname.startsWith(c.href),
       );
       if (hasActiveChild) foundParent = m.label;
     });
 
     const adminHasActive = ADMIN.some((a) =>
-      a.href ? pathname.startsWith(a.href) : false
+      a.href ? pathname.startsWith(a.href) : false,
     );
     if (adminHasActive) foundParent = "Admin";
 
     // ✅ Account (self change password) active highlight
     const accountHasActive = ACCOUNT.some((a) =>
-      a.href ? pathname.startsWith(a.href) : false
+      a.href ? pathname.startsWith(a.href) : false,
     );
     if (accountHasActive) foundParent = "Account";
 

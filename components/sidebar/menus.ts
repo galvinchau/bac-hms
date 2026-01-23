@@ -43,7 +43,26 @@ export const MAIN_ITEMS: MenuItem[] = [
 
   { label: "Schedule", href: "/schedule" },
   { label: "Visited Maintenance", href: "/visited-maintenance" },
-  { label: "Medication", href: "/medication" },
+
+  // ✅ Medication (PA-compliant submenus)
+  {
+    label: "Medication",
+    children: [
+      { label: "Orders", href: "/medication/orders" },
+      { label: "MAR", href: "/medication/mar" },
+      { label: "Treatment Record", href: "/medication/treatment" },
+
+      // ✅ FIX: match folder names under app/medication/
+      { label: "PRN & Vitals", href: "/medication/prn-vitals" },
+      {
+        label: "Inventory & Controlled",
+        href: "/medication/inventory-controlled",
+      },
+
+      { label: "Incidents & Reports", href: "/medication/incidents" },
+    ],
+  },
+
   { label: "FireDrill", href: "/firedrill" },
 
   // 🔒 ADMIN only (menu visibility)

@@ -68,7 +68,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         if (!silent) setLogoutLoading(false);
       }
     },
-    [router]
+    [router],
   );
 
   // ===== 3) Auto-logout after 30 minutes inactivity =====
@@ -100,10 +100,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!pathname) return false;
 
     // ✅ Add "/schedule" here so Schedule page can expand full width
-    const fullWidthPrefixes = ["/payroll", "/time-keeping", "/schedule"];
+    const fullWidthPrefixes = [
+      "/payroll",
+      "/time-keeping",
+      "/schedule",
+      "/medication",
+    ];
 
     return fullWidthPrefixes.some(
-      (p) => pathname === p || pathname.startsWith(p + "/")
+      (p) => pathname === p || pathname.startsWith(p + "/"),
     );
   }, [pathname]);
 
