@@ -5,8 +5,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // Dùng PostgreSQL (Supabase)
-  url      = env("DATABASE_URL")
+  provider  = "postgresql" // Dùng PostgreSQL (Supabase)
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -691,7 +691,7 @@ model MedicationOrder {
   startDate DateTime  @map("startdate")
   endDate   DateTime? @map("enddate")
 
-  status MedicationAdminStatus?
+  status MedicationOrderStatus @default(ACTIVE)
 
   prescriberName String? @map("prescribername")
   pharmacyName   String? @map("pharmacyname")
@@ -720,13 +720,13 @@ model MedicationAdministration {
   individualId String     @map("individualid")
   individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
 
-  scheduledDateTime DateTime              @map("scheduleddatetime")
-  actualDateTime    DateTime?             @map("actualdatetime")
-  status            MedicationAdminStatus
-  reason            String?               @map("reason")
-  vitalsSummary     String?               @map("vitalssummary")
-  staffId           String?               @map("staffid")
-  staffName         String?               @map("staffname")
+  scheduledDateTime DateTime               @map("scheduleddatetime")
+  actualDateTime    DateTime?              @map("actualdatetime")
+  status            MedicationAdminStatus?
+  reason            String?                @map("reason")
+  vitalsSummary     String?                @map("vitalssummary")
+  staffId           String?                @map("staffid")
+  staffName         String?                @map("staffname")
 
   createdAt DateTime @default(now()) @map("createdat")
   updatedAt DateTime @updatedAt @map("updatedat")
