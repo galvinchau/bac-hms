@@ -142,7 +142,7 @@ export async function sendMobileUserAccessEmail(
 
   // ✅ Download links (use env so you can swap after approvals without code changes)
   const iosDownloadUrl =
-    MOBILE_IOS_DOWNLOAD_URL || "https://testflight.apple.com/join/REPLACE_ME";
+    MOBILE_IOS_DOWNLOAD_URL || "https://apps.apple.com/us/app/blue-angels-care-mobile/id6755545360";
   const androidDownloadUrl =
     MOBILE_ANDROID_DOWNLOAD_URL ||
     "https://play.google.com/store/apps/details?id=org.blueangelscare.mobile&pcampaignid=web_share";
