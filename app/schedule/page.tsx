@@ -9,6 +9,7 @@ type Individual = {
   code: string;
   firstName: string;
   lastName: string;
+  status?: string; // optional: ACTIVE / INACTIVE / PENDING ...
 };
 
 type Service = {
@@ -295,22 +296,45 @@ export default function SchedulePage() {
     "BACKUP_PLAN",
   ];
 
-  // --------- load Individuals (simple=true) ---------
+  // --------- load Individuals (ACTIVE only) ---------
   useEffect(() => {
     async function fetchIndividuals() {
       try {
-        const res = await fetch("/api/individuals?simple=true");
+        // ✅ Only ACTIVE individuals
+        const res = await fetch("/api/individuals?simple=true&status=ACTIVE");
         if (!res.ok) return;
-        const data = (await res.json()) as IndividualsApiResponse;
-        const arr = Array.isArray(data) ? data : [];
+
+        const data = await res.json();
+
+        // Support both shapes: [] OR { items: [] }
+        const raw = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+
+        // ✅ Safety: filter again on client (in case API returns mixed)
+        const arr = (raw as Individual[]).filter(
+          (x) => !x.status || String(x.status).toUpperCase() === "ACTIVE"
+        );
+
         setIndividuals(arr);
-        if (arr.length > 0 && !selectedIndividualId) {
-          setSelectedIndividualId(arr[0].id);
+
+        // If selected individual is no longer in list, reset to first
+        if (arr.length > 0) {
+          const stillExists = selectedIndividualId
+            ? arr.some((i) => i.id === selectedIndividualId)
+            : false;
+
+          if (!stillExists) setSelectedIndividualId(arr[0].id);
+        } else {
+          setSelectedIndividualId("");
         }
       } catch (e) {
         console.error("Failed to load individuals", e);
       }
     }
+
     fetchIndividuals();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -325,10 +349,10 @@ export default function SchedulePage() {
         const list: Service[] = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-          ? data.items
-          : Array.isArray(data?.services)
-          ? data.services
-          : [];
+            ? data.items
+            : Array.isArray(data?.services)
+              ? data.services
+              : [];
         setServices(list);
       } catch (e) {
         console.error("Failed to load services", e);
@@ -347,8 +371,8 @@ export default function SchedulePage() {
         const list: Employee[] = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
-          ? data.items
-          : [];
+            ? data.items
+            : [];
         setDsps(list);
       } catch (e) {
         console.error("Failed to load DSPs", e);
@@ -755,14 +779,14 @@ export default function SchedulePage() {
     const updatedShifts = masterDraft.shifts.map((s) =>
       s.id === editingMasterShift.id
         ? {
-            ...s,
-            serviceId: masterModalServiceId,
-            service: svc ?? undefined,
-            defaultDsp: dsp ?? null,
-            startMinutes: start,
-            endMinutes: end,
-            notes: masterModalNotes || null,
-          }
+          ...s,
+          serviceId: masterModalServiceId,
+          service: svc ?? undefined,
+          defaultDsp: dsp ?? null,
+          startMinutes: start,
+          endMinutes: end,
+          notes: masterModalNotes || null,
+        }
         : s
     );
 
@@ -1124,11 +1148,11 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: prev.shifts.map((s) =>
-                s.id === updated.id ? updated : s
-              ),
-            }
+            ...prev,
+            shifts: prev.shifts.map((s) =>
+              s.id === updated.id ? updated : s
+            ),
+          }
           : prev
       );
 
@@ -1173,9 +1197,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
-            }
+            ...prev,
+            shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+          }
           : prev
       );
 
@@ -1277,9 +1301,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: [...prev.shifts, created],
-            }
+            ...prev,
+            shifts: [...prev.shifts, created],
+          }
           : prev
       );
 
@@ -1440,12 +1464,12 @@ export default function SchedulePage() {
       shift.status === "COMPLETED"
         ? "text-emerald-400"
         : shift.status === "IN_PROGRESS"
-        ? "text-amber-300"
-        : shift.status === "CANCELLED"
-        ? "text-rose-400"
-        : shift.status === "BACKUP_PLAN"
-        ? "text-sky-300"
-        : "text-slate-400";
+          ? "text-amber-300"
+          : shift.status === "CANCELLED"
+            ? "text-rose-400"
+            : shift.status === "BACKUP_PLAN"
+              ? "text-sky-300"
+              : "text-slate-400";
 
     return (
       <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
@@ -1476,11 +1500,10 @@ export default function SchedulePage() {
           <span className="whitespace-nowrap">
             Visit:{" "}
             {shift.visits.length > 0
-              ? `${formatTime(shift.visits[0].checkInAt)}–${
-                  shift.visits[0].checkOutAt
-                    ? formatTime(shift.visits[0].checkOutAt)
-                    : "--:--"
-                }`
+              ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
+                ? formatTime(shift.visits[0].checkOutAt)
+                : "--:--"
+              }`
               : "--:-- – --:--"}
           </span>
           <span>{visitedUnits}u</span>
@@ -1673,33 +1696,30 @@ export default function SchedulePage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("weekly")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "weekly"
+                  className={`px-3 py-1 rounded-full ${activeTab === "weekly"
                       ? "bg-slate-100 text-slate-950"
                       : "text-slate-300 hover:text-slate-50"
-                  }`}
+                    }`}
                 >
                   Weekly detail
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("summary")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "summary"
+                  className={`px-3 py-1 rounded-full ${activeTab === "summary"
                       ? "bg-slate-100 text-slate-950"
                       : "text-slate-300 hover:text-slate-50"
-                  }`}
+                    }`}
                 >
                   Summary & conflicts
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("payroll")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "payroll"
+                  className={`px-3 py-1 rounded-full ${activeTab === "payroll"
                       ? "bg-slate-100 text-slate-950"
                       : "text-slate-300 hover:text-slate-50"
-                  }`}
+                    }`}
                 >
                   Payroll & ISP
                 </button>
@@ -1831,13 +1851,12 @@ export default function SchedulePage() {
                               {row.visitedUnits}
                             </td>
                             <td
-                              className={`py-1 text-right ${
-                                delta > 0
+                              className={`py-1 text-right ${delta > 0
                                   ? "text-emerald-300"
                                   : delta < 0
-                                  ? "text-rose-300"
-                                  : "text-slate-300"
-                              }`}
+                                    ? "text-rose-300"
+                                    : "text-slate-300"
+                                }`}
                             >
                               {delta}
                             </td>
@@ -1926,13 +1945,12 @@ export default function SchedulePage() {
                               {actualHours.toFixed(2)}
                             </td>
                             <td
-                              className={`py-1 text-right ${
-                                delta > 0
+                              className={`py-1 text-right ${delta > 0
                                   ? "text-emerald-300"
                                   : delta < 0
-                                  ? "text-rose-300"
-                                  : "text-slate-300"
-                              }`}
+                                    ? "text-rose-300"
+                                    : "text-slate-300"
+                                }`}
                             >
                               {delta.toFixed(2)}
                             </td>
