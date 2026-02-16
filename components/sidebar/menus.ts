@@ -30,6 +30,9 @@ export const MAIN_ITEMS: MenuItem[] = [
     children: [
       { label: "New Individual", href: "/individual/new", exact: true },
       { label: "Search Individual", href: "/individual" },
+
+      // ✅ NEW
+      { label: "Individual Detail", href: "/individual/detail" },
     ],
   },
 
@@ -63,7 +66,8 @@ export const MAIN_ITEMS: MenuItem[] = [
     ],
   },
 
-  { label: "FireDrill", href: "/firedrill" },
+  // ✅ RENAME
+  { label: "House Management", href: "/firedrill" },
 
   // 🔒 ADMIN only (menu visibility)
   { label: "Billing", href: "/billing" },

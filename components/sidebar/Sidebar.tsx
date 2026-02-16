@@ -53,6 +53,9 @@ const MENU: MenuItem[] = [
     children: [
       { label: "New Individual", href: "/individual/new" },
       { label: "Search Individual", href: "/individual" },
+
+      // ✅ NEW: Individual Detail (page will be created separately)
+      { label: "Individual Detail", href: "/individual/detail" },
     ],
   },
   {
@@ -84,7 +87,8 @@ const MENU: MenuItem[] = [
     ],
   },
 
-  { label: "FireDrill", href: "/firedrill" },
+  // ✅ Rename only (keep route to avoid breaking)
+  { label: "House Management", href: "/firedrill" },
 
   // 🔒 Admin-only (menu)
   { label: "Billing", href: "/billing" },
@@ -113,9 +117,7 @@ const ACCOUNT: MenuItem[] = [
 ];
 
 function norm(s?: string | null) {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase();
+  return String(s ?? "").trim().toLowerCase();
 }
 
 function isOfficeRole(roleOrPosition?: string | null) {
@@ -182,9 +184,7 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
 
     VISIBLE_MENU.forEach((m) => {
       if (!m.children) return;
-      const hasActiveChild = m.children.some((c) =>
-        pathname.startsWith(c.href),
-      );
+      const hasActiveChild = m.children.some((c) => pathname.startsWith(c.href));
       if (hasActiveChild) foundParent = m.label;
     });
 
@@ -390,12 +390,8 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
         >
           <Image src="/Logo.png" alt="Logo" width={28} height={28} />
           <div className="leading-4 text-left">
-            <div className="font-semibold text-yellow-300">
-              Blue Angels Care
-            </div>
-            <div className="text-xs text-bac-muted">
-              Health Management System
-            </div>
+            <div className="font-semibold text-yellow-300">Blue Angels Care</div>
+            <div className="text-xs text-bac-muted">Health Management System</div>
           </div>
         </Link>
       </div>

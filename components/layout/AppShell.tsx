@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Sidebar from "@/components/sidebar/Sidebar";
+import TopNav from "@/components/topnav/TopNav";
 
 type MeUser = {
   email: string;
@@ -31,7 +31,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const data = await res.json().catch(() => null);
         if (!data || cancelled) return;
 
-        // Usually { user: {...} }, but also support direct object
         const user: MeUser = data.user ?? data;
         setMe(user);
       } catch (err) {
@@ -50,15 +49,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ? `${me?.firstName ?? ""} ${me?.lastName ?? ""}`.trim()
       : me?.email) ?? "";
 
-  // ===== 2) Logout (used by button + auto-logout) =====
+  // ===== 2) Logout =====
   const handleLogout = useCallback(
     async (silent: boolean = false) => {
       try {
         if (!silent) setLogoutLoading(true);
 
-        await fetch("/api/auth/logout", {
-          method: "POST",
-        });
+        await fetch("/api/auth/logout", { method: "POST" });
 
         router.push("/login");
         router.refresh();
@@ -75,14 +72,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const INACTIVITY_MS = 30 * 60 * 1000; // 30 minutes
+    const INACTIVITY_MS = 30 * 60 * 1000;
 
     const resetTimer = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        // silent = true => no spinner, just logout
-        handleLogout(true);
-      }, INACTIVITY_MS);
+      timer = setTimeout(() => handleLogout(true), INACTIVITY_MS);
     };
 
     const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
@@ -95,16 +89,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [handleLogout]);
 
-  // ===== 4) Full-width override for wide-table pages (Payroll + Time Keeping + Schedule) =====
+  // ===== 4) Full-width override =====
   const isFullWidthPage = useMemo(() => {
     if (!pathname) return false;
 
-    // ✅ Add "/schedule" here so Schedule page can expand full width
     const fullWidthPrefixes = [
       "/payroll",
       "/time-keeping",
       "/schedule",
       "/medication",
+      "/individual/detail",
     ];
 
     return fullWidthPrefixes.some(
@@ -112,54 +106,45 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
   }, [pathname]);
 
-  // ✅ Keep Payroll/TimeKeeping behavior, but make full-width actually "full"
   const contentContainerClass = isFullWidthPage
     ? "w-full max-w-none"
     : "mx-auto w-full max-w-6xl";
 
-  // ===== 5) Render layout =====
   return (
-    <div className="min-h-screen flex bg-bac-bg text-bac-text">
-      {/* LEFT SIDEBAR */}
-      <aside className="w-64 border-r border-bac-border">
-        <Sidebar onLogoClick={() => router.push("/dashboard")} />
-      </aside>
+    <div className="min-h-screen flex flex-col bg-bac-bg text-bac-text">
+      {/* ✅ TOP NAV (horizontal main menu) */}
+      <TopNav onLogoClick={() => router.push("/dashboard")} />
 
-      {/* MAIN AREA */}
-      <main className="flex-1 flex flex-col">
-        {/* TOPBAR */}
-        <div className="h-12 flex items-center justify-end gap-3 px-4 border-b border-bac-border text-sm">
-          {/* Logged-in user */}
-          {displayName && (
-            <div className="flex items-center gap-2 text-bac-muted">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-bac-panel border border-bac-border text-xs font-semibold uppercase">
-                {displayName.charAt(0)}
-              </div>
-              <div className="flex flex-col leading-tight">
-                <span className="text-xs text-bac-muted">Signed in as</span>
-                <span className="text-sm font-medium text-bac-text">
-                  {displayName}
-                </span>
-              </div>
+      {/* ✅ TOPBAR (user + logout) */}
+      <div className="h-12 flex items-center justify-end gap-3 px-4 border-b border-bac-border text-sm">
+        {displayName && (
+          <div className="flex items-center gap-2 text-bac-muted">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-bac-panel border border-bac-border text-xs font-semibold uppercase">
+              {displayName.charAt(0)}
             </div>
-          )}
+            <div className="flex flex-col leading-tight">
+              <span className="text-xs text-bac-muted">Signed in as</span>
+              <span className="text-sm font-medium text-bac-text">
+                {displayName}
+              </span>
+            </div>
+          </div>
+        )}
 
-          {/* Logout button */}
-          <button
-            type="button"
-            onClick={() => handleLogout(false)}
-            disabled={logoutLoading}
-            className="ml-4 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
-          >
-            {logoutLoading ? "Logging out..." : "Log out"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => handleLogout(false)}
+          disabled={logoutLoading}
+          className="ml-4 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+        >
+          {logoutLoading ? "Logging out..." : "Log out"}
+        </button>
+      </div>
 
-        {/* PAGE CONTENT */}
-        <div className="p-4 flex-1 overflow-auto">
-          <div className={contentContainerClass}>{children}</div>
-        </div>
-      </main>
+      {/* PAGE CONTENT */}
+      <div className="p-4 flex-1 overflow-auto">
+        <div className={contentContainerClass}>{children}</div>
+      </div>
     </div>
   );
 }
