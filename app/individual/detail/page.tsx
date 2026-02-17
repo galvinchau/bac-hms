@@ -1,7 +1,8 @@
+// web/app/individual/detail/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import ProfileModule from "./_components/modules/ProfileModule";
+import POCModule from "./_components/modules/POCModule";
 
 type LeftNavItem = {
   key: string;
@@ -34,7 +35,17 @@ const LEFT_NAV: LeftNavItem[] = [
 
 type IndividualOption = {
   id: string;
+
+  // For dropdown display (staff friendly): can show Medicaid ID first
   label: string;
+
+  // For POCModule (must be "Name (CODE)")
+  pocLabel: string;
+
+  // Useful fields
+  name: string;
+  code: string;
+  medicaidId?: string | null;
 };
 
 type IndividualsSimpleResponse =
@@ -43,90 +54,69 @@ type IndividualsSimpleResponse =
       items?: any[];
     };
 
-type ModuleProps = {
-  individualId: string;
-  individualLabel: string;
-};
+function safeString(v: any): string {
+  return String(v ?? "").trim();
+}
 
-function safeOptionFromApiRow(row: any): IndividualOption | null {
+// Build staff-friendly dropdown label + POC label
+function safeLabelFromApiRow(row: any): IndividualOption | null {
   if (!row) return null;
-  const id = String(row.id ?? row.individualId ?? "").trim();
+
+  const id = safeString(row.id ?? row.individualId);
   if (!id) return null;
 
-  const code = String(row.code ?? row.individualCode ?? "").trim();
-  const name =
-    String(row.name ?? "").trim() ||
-    `${String(row.lastName ?? "").trim()} ${String(row.firstName ?? "").trim()}`.trim();
+  const firstName = safeString(row.firstName);
+  const lastName = safeString(row.lastName);
+  const code = safeString(row.code ?? row.individualCode);
 
-  const nice = code ? `${name} (${code})` : name || id;
-  return { id, label: nice };
-}
-
-function PlaceholderModule({ title, individualLabel }: { title: string; individualLabel: string }) {
-  return (
-    <div className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6">
-      <div className="text-lg font-semibold text-bac-text">{title}</div>
-      <div className="mt-2 text-sm text-bac-muted">
-        This module will be implemented later.
-      </div>
-      <div className="mt-3 text-sm text-bac-text">
-        <span className="text-bac-muted">Selected Individual: </span>
-        {individualLabel || "—"}
-      </div>
-    </div>
+  const medicaidId = safeString(
+    row.medicaidId ??
+      row.medicaidID ??
+      row.medicaid ??
+      row.altId ??
+      row.altID
   );
-}
 
-function makePlaceholder(title: string) {
-  return function PlaceholderWrapper({ individualLabel }: ModuleProps) {
-    return <PlaceholderModule title={title} individualLabel={individualLabel} />;
+  // Display name preference: "LAST FIRST" like your current UI
+  const name =
+    (firstName || lastName)
+      ? `${lastName} ${firstName}`.trim()
+      : (safeString(row.name) || code || id);
+
+  // Dropdown label: show Medicaid ID if available, else show code
+  const dropdownExtra = medicaidId
+    ? ` (${medicaidId})`
+    : code
+      ? ` (${code})`
+      : "";
+
+  // POCModule label MUST be "Name (CODE)" to auto-fill Admission ID correctly
+  const pocExtra = code ? ` (${code})` : "";
+
+  return {
+    id,
+    label: `${name}${dropdownExtra}`.trim(),
+    pocLabel: `${name}${pocExtra}`.trim(),
+    name,
+    code,
+    medicaidId: medicaidId || null,
   };
 }
 
-/**
- * ✅ ALL LEFT MENU MODULES ARE WIRED HERE
- * - Profile uses real module (ProfileModule)
- * - Others: placeholder now; later replace each one with its own file module.
- */
-const MODULES: Record<string, React.ComponentType<ModuleProps>> = {
-  profile: function ProfileWrapper({ individualId }: ModuleProps) {
-    return <ProfileModule individualId={individualId} />;
-  },
-
-  contracts: makePlaceholder("Contracts"),
-  referral: makePlaceholder("Referral Patient Info"),
-  eligibility: makePlaceholder("Eligibility Check"),
-  authorders: makePlaceholder("Auth/Orders"),
-  special: makePlaceholder("Special Requests"),
-  masterweek: makePlaceholder("Master Week"),
-  calendar: makePlaceholder("Calendar"),
-  visits: makePlaceholder("Visits"),
-  poc: makePlaceholder("Plan of Care (POC)"),
-  caregiverhistory: makePlaceholder("Caregiver History"),
-  others: makePlaceholder("Others"),
-  financial: makePlaceholder("Financial"),
-  vacation: makePlaceholder("Vacation"),
-  familyportal: makePlaceholder("Family Portal"),
-  docmgmt: makePlaceholder("Doc Management"),
-  clinical: makePlaceholder("Clinical Info"),
-  cert: makePlaceholder("Certification"),
-  medprofile: makePlaceholder("Med Profile"),
-  mdorders: makePlaceholder("MD Orders"),
-  interim: makePlaceholder("Interim Orders"),
-};
-
 export default function IndividualDetailPage() {
-  const [activeKey, setActiveKey] = useState<string>("profile");
+  const [activeKey, setActiveKey] = useState<string>("poc");
 
-  // Search + list
+  // Search box text
   const [searchText, setSearchText] = useState<string>("");
+
+  // Individuals list (loaded from API)
   const [allIndividuals, setAllIndividuals] = useState<IndividualOption[]>([]);
   const [loadingIndividuals, setLoadingIndividuals] = useState<boolean>(false);
   const [individualsError, setIndividualsError] = useState<string | null>(null);
 
+  // Selected Individual ID
   const [selectedIndividualId, setSelectedIndividualId] = useState<string>("");
 
-  // Load Individuals list
   useEffect(() => {
     let cancelled = false;
 
@@ -135,16 +125,23 @@ export default function IndividualDetailPage() {
         setLoadingIndividuals(true);
         setIndividualsError(null);
 
-        const res = await fetch("/api/individuals?simple=true", { cache: "no-store" });
+        const res = await fetch("/api/individuals?simple=true", {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = (await res.json()) as IndividualsSimpleResponse;
         const rawItems = Array.isArray(data) ? data : data?.items ?? [];
-        const mapped = rawItems.map(safeOptionFromApiRow).filter(Boolean) as IndividualOption[];
+
+        const mapped = rawItems
+          .map(safeLabelFromApiRow)
+          .filter(Boolean) as IndividualOption[];
 
         if (cancelled) return;
 
         setAllIndividuals(mapped);
+
+        // Auto select first
         if (!selectedIndividualId && mapped.length > 0) {
           setSelectedIndividualId(mapped[0].id);
         }
@@ -170,18 +167,29 @@ export default function IndividualDetailPage() {
     return allIndividuals.filter((x) => x.label.toLowerCase().includes(q));
   }, [allIndividuals, searchText]);
 
-  const selectedIndividualLabel = useMemo(() => {
-    const found = allIndividuals.find((x) => x.id === selectedIndividualId);
-    return found?.label ?? "No Individual selected";
+  const selectedIndividual = useMemo(() => {
+    return allIndividuals.find((x) => x.id === selectedIndividualId) || null;
   }, [allIndividuals, selectedIndividualId]);
 
+  const selectedIndividualLabelForHeader = useMemo(() => {
+    // keep header showing dropdown label (may include Medicaid)
+    return selectedIndividual?.label ?? "No Individual selected";
+  }, [selectedIndividual]);
+
+  const selectedIndividualLabelForPOC = useMemo(() => {
+    // IMPORTANT: pass the POC label with CODE in parentheses
+    return selectedIndividual?.pocLabel ?? "No Individual selected";
+  }, [selectedIndividual]);
+
+  // Prev/Next based on FILTERED list
   const selectedIndexInFiltered = useMemo(() => {
     return filteredIndividuals.findIndex((x) => x.id === selectedIndividualId);
   }, [filteredIndividuals, selectedIndividualId]);
 
   const canPrev = selectedIndexInFiltered > 0;
   const canNext =
-    selectedIndexInFiltered >= 0 && selectedIndexInFiltered < filteredIndividuals.length - 1;
+    selectedIndexInFiltered >= 0 &&
+    selectedIndexInFiltered < filteredIndividuals.length - 1;
 
   const goPrev = () => {
     if (!canPrev) return;
@@ -195,7 +203,7 @@ export default function IndividualDetailPage() {
     if (next) setSelectedIndividualId(next.id);
   };
 
-  // If search reduces list and selected is not in filtered, auto-select first
+  // If search reduces list and selected is not in filtered list, auto-select first match
   useEffect(() => {
     if (!filteredIndividuals.length) return;
     const exists = filteredIndividuals.some((x) => x.id === selectedIndividualId);
@@ -204,10 +212,8 @@ export default function IndividualDetailPage() {
   }, [searchText, allIndividuals]);
 
   const activeLabel = useMemo(() => {
-    return LEFT_NAV.find((x) => x.key === activeKey)?.label ?? "Profile";
+    return LEFT_NAV.find((x) => x.key === activeKey)?.label ?? "POC";
   }, [activeKey]);
-
-  const ActiveModule = MODULES[activeKey] ?? makePlaceholder(activeLabel);
 
   return (
     <div className="w-full max-w-none">
@@ -217,8 +223,12 @@ export default function IndividualDetailPage() {
           <aside className="shrink-0 w-[240px] xl:w-[280px] 2xl:w-[320px]">
             <div className="rounded-2xl border border-bac-border bg-bac-panel/30 h-full">
               <div className="px-4 py-3 border-b border-bac-border">
-                <div className="text-sm font-semibold text-bac-text">Individual Detail</div>
-                <div className="text-xs text-bac-muted">Left menu</div>
+                <div className="text-sm font-semibold text-bac-text">
+                  Individual Detail
+                </div>
+                <div className="text-xs text-bac-muted">
+                  Left menu (placeholder)
+                </div>
               </div>
 
               <div className="h-[calc(100%-56px)] overflow-y-auto p-2">
@@ -244,20 +254,24 @@ export default function IndividualDetailPage() {
             </div>
           </aside>
 
-          {/* MAIN */}
+          {/* MAIN CONTENT */}
           <main className="min-w-0 flex-1 w-full max-w-none">
             <div className="h-full w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/20 p-4 overflow-y-auto">
               {/* HEADER ROW */}
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-bac-muted">
                   Individual Detail /{" "}
-                  <span className="text-bac-text font-semibold">{activeLabel}</span>
+                  <span className="text-bac-text font-semibold">
+                    {activeLabel}
+                  </span>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Search */}
+                  {/* Search Individual */}
                   <div className="flex items-center gap-2">
-                    <div className="text-xs text-bac-muted whitespace-nowrap">Search Individual</div>
+                    <div className="text-xs text-bac-muted whitespace-nowrap">
+                      Search Individual
+                    </div>
                     <input
                       value={searchText}
                       onChange={(e) => setSearchText(e.target.value)}
@@ -268,7 +282,9 @@ export default function IndividualDetailPage() {
 
                   {/* Dropdown */}
                   <div className="flex items-center gap-2">
-                    <div className="text-xs text-bac-muted whitespace-nowrap">Individual</div>
+                    <div className="text-xs text-bac-muted whitespace-nowrap">
+                      Individual
+                    </div>
                     <select
                       value={selectedIndividualId}
                       onChange={(e) => setSelectedIndividualId(e.target.value)}
@@ -291,11 +307,13 @@ export default function IndividualDetailPage() {
                     </select>
                   </div>
 
+                  {/* Previous / Next */}
                   <button
                     type="button"
                     onClick={goPrev}
                     disabled={!canPrev || loadingIndividuals}
                     className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-bac-panel/80 disabled:opacity-50 disabled:hover:bg-bac-panel"
+                    title="Previous Individual"
                   >
                     Previous
                   </button>
@@ -305,17 +323,42 @@ export default function IndividualDetailPage() {
                     onClick={goNext}
                     disabled={!canNext || loadingIndividuals}
                     className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-bac-panel/80 disabled:opacity-50 disabled:hover:bg-bac-panel"
+                    title="Next Individual"
                   >
                     Next
                   </button>
                 </div>
               </div>
 
+              {/* Optional small status line */}
+              <div className="mb-3 text-xs text-bac-muted">
+                {loadingIndividuals
+                  ? "Loading individuals..."
+                  : individualsError
+                    ? `Individuals load error: ${individualsError}`
+                    : `Individuals: ${allIndividuals.length}`}
+              </div>
+
               {/* CONTENT */}
-              <ActiveModule
-                individualId={selectedIndividualId}
-                individualLabel={selectedIndividualLabel}
-              />
+              {activeKey === "poc" ? (
+                <POCModule
+                  individualId={selectedIndividualId}
+                  individualLabel={selectedIndividualLabelForPOC}
+                />
+              ) : (
+                <div className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6">
+                  <div className="text-lg font-semibold text-bac-text">
+                    {activeLabel}
+                  </div>
+                  <div className="mt-2 text-sm text-bac-muted">
+                    This is a placeholder layout. We will implement this module later.
+                  </div>
+                  <div className="mt-3 text-sm text-bac-text">
+                    <span className="text-bac-muted">Selected Individual: </span>
+                    {selectedIndividualLabelForHeader}
+                  </div>
+                </div>
+              )}
             </div>
           </main>
         </div>

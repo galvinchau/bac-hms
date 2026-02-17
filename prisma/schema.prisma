@@ -130,6 +130,8 @@ model Individual {
 
   // ISP & BSP form (lưu toàn bộ dữ liệu form dạng JSON)
   ispBspForm IspBspForm?
+
+  pocs Poc[]
 }
 
 /**
@@ -789,4 +791,44 @@ model MedicationIncident {
   @@index([severity])
   @@index([status])
   @@map("MedicationIncident")
+}
+
+model Poc {
+  id           String    @id @default(dbgenerated("gen_random_uuid()::text")) @db.Text
+  individualId String    @map("individualid") @db.Text
+  pocNumber    String    @unique @map("pocnumber") @db.Text
+  startDate    DateTime  @map("startdate") @db.Timestamptz(6)
+  stopDate     DateTime? @map("stopdate") @db.Timestamptz(6)
+  shift        String    @default("All") @db.Text
+  note         String?   @db.Text
+  createdBy    String?   @map("createdby") @db.Text
+  createdAt    DateTime  @default(now()) @map("createdat") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @map("updatedat") @db.Timestamptz(6)
+
+  individual Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  duties     PocDuty[]
+
+  @@map("poc")
+}
+
+model PocDuty {
+  id           String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.Text
+  pocId        String   @map("pocid") @db.Text
+  category     String   @db.Text
+  taskNo       Int      @map("taskno")
+  duty         String   @db.Text
+  minutes      Int?
+  asNeeded     Boolean  @default(false) @map("asneeded")
+  timesWeekMin Int?     @map("timesweekmin")
+  timesWeekMax Int?     @map("timesweekmax")
+  daysOfWeek   Json?    @map("daysofweek") @db.JsonB
+  instruction  String?  @db.Text
+  sortOrder    Int      @default(0) @map("sortorder")
+  createdAt    DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updatedat") @db.Timestamptz(6)
+
+  poc Poc @relation(fields: [pocId], references: [id], onDelete: Cascade)
+
+  @@index([pocId])
+  @@map("poc_duty")
 }
