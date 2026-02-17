@@ -3,6 +3,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import POCModule from "./_components/modules/POCModule";
+import MasterWeekModule from "./_components/modules/MasterWeekModule";
+import ProfileModule from "./_components/modules/ProfileModule";
 
 type LeftNavItem = {
   key: string;
@@ -340,10 +342,20 @@ export default function IndividualDetailPage() {
               </div>
 
               {/* CONTENT */}
-              {activeKey === "poc" ? (
+              {activeKey === "profile" ? (
+                <ProfileModule
+                  individualId={selectedIndividualId}
+                  individualLabel={selectedIndividualLabelForHeader}
+                />
+              ) : activeKey === "poc" ? (
                 <POCModule
                   individualId={selectedIndividualId}
                   individualLabel={selectedIndividualLabelForPOC}
+                />
+              ) : activeKey === "masterweek" ? (
+                <MasterWeekModule
+                  individualId={selectedIndividualId}
+                  individualLabel={selectedIndividualLabelForHeader}
                 />
               ) : (
                 <div className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6">
