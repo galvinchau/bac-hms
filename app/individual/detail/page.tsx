@@ -1,7 +1,7 @@
-// web/app/individual/detail/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import ProfileModule from "./_components/modules/ProfileModule";
 
 type LeftNavItem = {
   key: string;
@@ -9,7 +9,7 @@ type LeftNavItem = {
 };
 
 const LEFT_NAV: LeftNavItem[] = [
-    { key: "profile", label: "Profile" },
+  { key: "profile", label: "Profile" },
   { key: "contracts", label: "Contracts" },
   { key: "referral", label: "Referral Patient Info" },
   { key: "eligibility", label: "Eligibility Check" },
@@ -32,222 +32,195 @@ const LEFT_NAV: LeftNavItem[] = [
   { key: "interim", label: "Interim Orders" },
 ];
 
-function Pill({
-  children,
-  tone = "muted",
-}: {
-  children: React.ReactNode;
-  tone?: "muted" | "active";
-}) {
-  return (
-    <span
-      className={[
-        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-        tone === "active"
-          ? "bg-bac-panel text-yellow-200"
-          : "bg-bac-panel/40 text-bac-muted",
-      ].join(" ")}
-    >
-      {children}
-    </span>
-  );
+type IndividualOption = {
+  id: string;
+  label: string;
+};
+
+type IndividualsSimpleResponse =
+  | Array<any>
+  | {
+      items?: any[];
+    };
+
+type ModuleProps = {
+  individualId: string;
+  individualLabel: string;
+};
+
+function safeOptionFromApiRow(row: any): IndividualOption | null {
+  if (!row) return null;
+  const id = String(row.id ?? row.individualId ?? "").trim();
+  if (!id) return null;
+
+  const code = String(row.code ?? row.individualCode ?? "").trim();
+  const name =
+    String(row.name ?? "").trim() ||
+    `${String(row.lastName ?? "").trim()} ${String(row.firstName ?? "").trim()}`.trim();
+
+  const nice = code ? `${name} (${code})` : name || id;
+  return { id, label: nice };
 }
 
-function POCPlaceholder() {
-  const rows = useMemo(
-    () => [
-      {
-        pocNumber: "7045075",
-        startDate: "02/17/2026",
-        stopDate: "02/19/2026",
-        createdBy: "duongcKSMX",
-        createdDate: "02/16/2026",
-        shift: "All",
-        note: "",
-      },
-      {
-        pocNumber: "6541017",
-        startDate: "05/18/2025",
-        stopDate: "",
-        createdBy: "Bronwenc",
-        createdDate: "07/03/2025",
-        shift: "All",
-        note:
-          "Outcome: TAKING CARE OF BUSINESS ... TRISTAN CLEANS HIS APARTMENT, DOES HIS LAUNDRY, BUYS AND MAKES FOOD, AND ATTENDS HIS SCHEDULED APPOINTMENTS ...",
-      },
-    ],
-    [],
-  );
-
+function PlaceholderModule({ title, individualLabel }: { title: string; individualLabel: string }) {
   return (
-    <div className="w-full max-w-none">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-bac-text">
-            Plan of Care (POC)
-          </h1>
-          <div className="mt-2 flex items-center gap-2">
-            <Pill tone="active">POCs</Pill>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className="rounded-lg bg-bac-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-95"
-          onClick={() => alert("Add POC (placeholder)")}
-        >
-          Add POC
-        </button>
+    <div className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6">
+      <div className="text-lg font-semibold text-bac-text">{title}</div>
+      <div className="mt-2 text-sm text-bac-muted">
+        This module will be implemented later.
       </div>
-
-      <div className="mt-4 w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/40 p-4">
-        <div className="text-sm font-semibold text-bac-text">POC</div>
-
-        {/* Make table take full width of container */}
-        <div className="mt-3 w-full overflow-x-auto">
-          <table className="w-full min-w-[980px] border-separate border-spacing-0">
-            <thead>
-              <tr className="bg-bac-panel">
-                {[
-                  "POC Number",
-                  "Start Date",
-                  "Stop Date",
-                  "POC Note",
-                  "Shift",
-                  "Created By",
-                  "Created Date",
-                  "Print",
-                  "Actions",
-                  "Delete",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-bac-muted whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.pocNumber}
-                  className="border-b border-bac-border last:border-b-0"
-                >
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    <button
-                      type="button"
-                      className="text-bac-primary hover:underline"
-                      onClick={() =>
-                        alert(`Open POC ${r.pocNumber} (placeholder)`)
-                      }
-                    >
-                      {r.pocNumber}
-                    </button>
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    {r.startDate || "--"}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    {r.stopDate || "--"}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text">
-                    {r.note ? (
-                      <div className="max-w-[720px]">
-                        <div className="line-clamp-5 whitespace-pre-line">
-                          {r.note}
-                        </div>
-                        <button
-                          type="button"
-                          className="mt-1 text-xs text-bac-primary hover:underline"
-                          onClick={() => alert("Show more (placeholder)")}
-                        >
-                          Show More
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-bac-muted">--</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    {r.shift || "--"}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    {r.createdBy || "--"}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    {r.createdDate || "--"}
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    <button
-                      type="button"
-                      className="rounded-md border border-bac-border px-2 py-1 text-xs text-bac-text hover:bg-bac-panel"
-                      onClick={() => alert("Print (placeholder)")}
-                    >
-                      Print
-                    </button>
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    <button
-                      type="button"
-                      className="rounded-md border border-bac-border px-2 py-1 text-xs text-bac-text hover:bg-bac-panel"
-                      onClick={() => alert("Actions (placeholder)")}
-                    >
-                      ⋯
-                    </button>
-                  </td>
-                  <td className="px-3 py-3 text-sm text-bac-text whitespace-nowrap">
-                    <button
-                      type="button"
-                      className="rounded-md border border-bac-border px-2 py-1 text-xs text-bac-red hover:bg-bac-panel"
-                      onClick={() => alert("Delete (placeholder)")}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-3 text-xs text-bac-muted">
-          * This is a layout placeholder (no real data yet).
-        </div>
+      <div className="mt-3 text-sm text-bac-text">
+        <span className="text-bac-muted">Selected Individual: </span>
+        {individualLabel || "—"}
       </div>
     </div>
   );
 }
 
+function makePlaceholder(title: string) {
+  return function PlaceholderWrapper({ individualLabel }: ModuleProps) {
+    return <PlaceholderModule title={title} individualLabel={individualLabel} />;
+  };
+}
+
+/**
+ * ✅ ALL LEFT MENU MODULES ARE WIRED HERE
+ * - Profile uses real module (ProfileModule)
+ * - Others: placeholder now; later replace each one with its own file module.
+ */
+const MODULES: Record<string, React.ComponentType<ModuleProps>> = {
+  profile: function ProfileWrapper({ individualId }: ModuleProps) {
+    return <ProfileModule individualId={individualId} />;
+  },
+
+  contracts: makePlaceholder("Contracts"),
+  referral: makePlaceholder("Referral Patient Info"),
+  eligibility: makePlaceholder("Eligibility Check"),
+  authorders: makePlaceholder("Auth/Orders"),
+  special: makePlaceholder("Special Requests"),
+  masterweek: makePlaceholder("Master Week"),
+  calendar: makePlaceholder("Calendar"),
+  visits: makePlaceholder("Visits"),
+  poc: makePlaceholder("Plan of Care (POC)"),
+  caregiverhistory: makePlaceholder("Caregiver History"),
+  others: makePlaceholder("Others"),
+  financial: makePlaceholder("Financial"),
+  vacation: makePlaceholder("Vacation"),
+  familyportal: makePlaceholder("Family Portal"),
+  docmgmt: makePlaceholder("Doc Management"),
+  clinical: makePlaceholder("Clinical Info"),
+  cert: makePlaceholder("Certification"),
+  medprofile: makePlaceholder("Med Profile"),
+  mdorders: makePlaceholder("MD Orders"),
+  interim: makePlaceholder("Interim Orders"),
+};
+
 export default function IndividualDetailPage() {
-  const [activeKey, setActiveKey] = useState<string>("poc");
+  const [activeKey, setActiveKey] = useState<string>("profile");
+
+  // Search + list
+  const [searchText, setSearchText] = useState<string>("");
+  const [allIndividuals, setAllIndividuals] = useState<IndividualOption[]>([]);
+  const [loadingIndividuals, setLoadingIndividuals] = useState<boolean>(false);
+  const [individualsError, setIndividualsError] = useState<string | null>(null);
+
+  const [selectedIndividualId, setSelectedIndividualId] = useState<string>("");
+
+  // Load Individuals list
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        setLoadingIndividuals(true);
+        setIndividualsError(null);
+
+        const res = await fetch("/api/individuals?simple=true", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = (await res.json()) as IndividualsSimpleResponse;
+        const rawItems = Array.isArray(data) ? data : data?.items ?? [];
+        const mapped = rawItems.map(safeOptionFromApiRow).filter(Boolean) as IndividualOption[];
+
+        if (cancelled) return;
+
+        setAllIndividuals(mapped);
+        if (!selectedIndividualId && mapped.length > 0) {
+          setSelectedIndividualId(mapped[0].id);
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        console.error("Load individuals failed:", e);
+        setIndividualsError(String(e?.message || e));
+      } finally {
+        if (!cancelled) setLoadingIndividuals(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filteredIndividuals = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return allIndividuals;
+    return allIndividuals.filter((x) => x.label.toLowerCase().includes(q));
+  }, [allIndividuals, searchText]);
+
+  const selectedIndividualLabel = useMemo(() => {
+    const found = allIndividuals.find((x) => x.id === selectedIndividualId);
+    return found?.label ?? "No Individual selected";
+  }, [allIndividuals, selectedIndividualId]);
+
+  const selectedIndexInFiltered = useMemo(() => {
+    return filteredIndividuals.findIndex((x) => x.id === selectedIndividualId);
+  }, [filteredIndividuals, selectedIndividualId]);
+
+  const canPrev = selectedIndexInFiltered > 0;
+  const canNext =
+    selectedIndexInFiltered >= 0 && selectedIndexInFiltered < filteredIndividuals.length - 1;
+
+  const goPrev = () => {
+    if (!canPrev) return;
+    const prev = filteredIndividuals[selectedIndexInFiltered - 1];
+    if (prev) setSelectedIndividualId(prev.id);
+  };
+
+  const goNext = () => {
+    if (!canNext) return;
+    const next = filteredIndividuals[selectedIndexInFiltered + 1];
+    if (next) setSelectedIndividualId(next.id);
+  };
+
+  // If search reduces list and selected is not in filtered, auto-select first
+  useEffect(() => {
+    if (!filteredIndividuals.length) return;
+    const exists = filteredIndividuals.some((x) => x.id === selectedIndividualId);
+    if (!exists) setSelectedIndividualId(filteredIndividuals[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchText, allIndividuals]);
 
   const activeLabel = useMemo(() => {
-    return LEFT_NAV.find((x) => x.key === activeKey)?.label ?? "POC";
+    return LEFT_NAV.find((x) => x.key === activeKey)?.label ?? "Profile";
   }, [activeKey]);
 
+  const ActiveModule = MODULES[activeKey] ?? makePlaceholder(activeLabel);
+
   return (
-    // ✅ IMPORTANT: remove any implicit centering / max-width by forcing max-w-none
     <div className="w-full max-w-none">
-      {/* ✅ Use full available height */}
       <div className="h-[calc(100vh-56px)] w-full max-w-none">
-        {/* ✅ Container stretches fully; padding stays */}
         <div className="flex h-full w-full max-w-none gap-4 p-4">
           {/* LEFT NAV */}
           <aside className="shrink-0 w-[240px] xl:w-[280px] 2xl:w-[320px]">
             <div className="rounded-2xl border border-bac-border bg-bac-panel/30 h-full">
               <div className="px-4 py-3 border-b border-bac-border">
-                <div className="text-sm font-semibold text-bac-text">
-                  Individual Detail
-                </div>
-                <div className="text-xs text-bac-muted">
-                  Left menu (placeholder)
-                </div>
+                <div className="text-sm font-semibold text-bac-text">Individual Detail</div>
+                <div className="text-xs text-bac-muted">Left menu</div>
               </div>
 
-              {/* ✅ Make left nav scroll inside its own panel */}
               <div className="h-[calc(100%-56px)] overflow-y-auto p-2">
                 {LEFT_NAV.map((item) => {
                   const isActive = item.key === activeKey;
@@ -271,32 +244,78 @@ export default function IndividualDetailPage() {
             </div>
           </aside>
 
-          {/* MAIN CONTENT */}
+          {/* MAIN */}
           <main className="min-w-0 flex-1 w-full max-w-none">
-            {/* ✅ This panel now stretches full width */}
             <div className="h-full w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/20 p-4 overflow-y-auto">
-              <div className="mb-4 flex items-center justify-between gap-3">
+              {/* HEADER ROW */}
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm text-bac-muted">
                   Individual Detail /{" "}
-                  <span className="text-bac-text font-semibold">
-                    {activeLabel}
-                  </span>
+                  <span className="text-bac-text font-semibold">{activeLabel}</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Search */}
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-bac-muted whitespace-nowrap">Search Individual</div>
+                    <input
+                      value={searchText}
+                      onChange={(e) => setSearchText(e.target.value)}
+                      placeholder="Type name or Medicaid ID..."
+                      className="w-[220px] rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary"
+                    />
+                  </div>
+
+                  {/* Dropdown */}
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-bac-muted whitespace-nowrap">Individual</div>
+                    <select
+                      value={selectedIndividualId}
+                      onChange={(e) => setSelectedIndividualId(e.target.value)}
+                      disabled={loadingIndividuals || allIndividuals.length === 0}
+                      className="min-w-[360px] rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary disabled:opacity-60"
+                    >
+                      {loadingIndividuals ? (
+                        <option value="">Loading...</option>
+                      ) : individualsError ? (
+                        <option value="">Failed to load: {individualsError}</option>
+                      ) : filteredIndividuals.length === 0 ? (
+                        <option value="">No match</option>
+                      ) : (
+                        filteredIndividuals.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={goPrev}
+                    disabled={!canPrev || loadingIndividuals}
+                    className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-bac-panel/80 disabled:opacity-50 disabled:hover:bg-bac-panel"
+                  >
+                    Previous
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    disabled={!canNext || loadingIndividuals}
+                    className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-bac-panel/80 disabled:opacity-50 disabled:hover:bg-bac-panel"
+                  >
+                    Next
+                  </button>
                 </div>
               </div>
 
-              {activeKey === "poc" ? (
-                <POCPlaceholder />
-              ) : (
-                <div className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6">
-                  <div className="text-lg font-semibold text-bac-text">
-                    {activeLabel}
-                  </div>
-                  <div className="mt-2 text-sm text-bac-muted">
-                    This is a placeholder layout. We will implement this module
-                    later.
-                  </div>
-                </div>
-              )}
+              {/* CONTENT */}
+              <ActiveModule
+                individualId={selectedIndividualId}
+                individualLabel={selectedIndividualLabel}
+              />
             </div>
           </main>
         </div>
