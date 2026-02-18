@@ -248,8 +248,10 @@ th { background: #e6e6e6; font-weight: 700; text-align: left; }
 .cs-head { text-align:center; }
 .cs-sub { font-style: italic; font-weight: 400; background:#fff; }
 
-.daybox { display:inline-block; width: 12px; height: 12px; border: 1px solid #000; }
-.daybox.checked { background: #000; }
+/* ✅ Clickable completed status cells print reliably (text ✓) */
+.cs-click { cursor: pointer; user-select: none; }
+.cs-mark { font-size: 14px; font-weight: 700; }
+@media print { .cs-click { cursor: default; } }
 
 .footnote { font-size: 11px; text-align:center; margin-top: 10px; }
 .note-box { border: 2px solid #000; padding: 8px 10px; margin-top: 10px; font-size: 12px; }
@@ -361,8 +363,8 @@ th { background: #e6e6e6; font-weight: 700; text-align: left; }
         ${
           dutyRows.length
             ? dutyRows
-                .map((r) => {
-                  const has = (k: string) => (r.days?.has(k) ? "checked" : "");
+                .map((r, idx) => {
+                  const Y = (k: string) => (r.days?.has(k) ? "Y" : "");
                   return `<tr>
   <td>${escapeHtml(r.category)}</td>
   <td>${escapeHtml(r.taskNo)}</td>
@@ -372,18 +374,20 @@ th { background: #e6e6e6; font-weight: 700; text-align: left; }
   <td class="col-asn">${escapeHtml(r.asNeeded)}</td>
   <td class="col-tw">${escapeHtml(r.timesWeek)}</td>
 
-  <td class="col-d"><span class="daybox ${has("SUN")}"></span></td>
-  <td class="col-d"><span class="daybox ${has("MON")}"></span></td>
-  <td class="col-d"><span class="daybox ${has("TUE")}"></span></td>
-  <td class="col-d"><span class="daybox ${has("WED")}"></span></td>
-  <td class="col-d"><span class="daybox ${has("THU")}"></span></td>
-  <td class="col-d"><span class="daybox ${has("FRI")}"></span></td>
-  <td class="col-d"><span class="daybox ${has("SAT")}"></span></td>
+  <!-- ✅ Print-friendly: Y for checked, blank for unchecked -->
+  <td class="col-d">${Y("SUN")}</td>
+  <td class="col-d">${Y("MON")}</td>
+  <td class="col-d">${Y("TUE")}</td>
+  <td class="col-d">${Y("WED")}</td>
+  <td class="col-d">${Y("THU")}</td>
+  <td class="col-d">${Y("FRI")}</td>
+  <td class="col-d">${Y("SAT")}</td>
 
-  <td class="col-cs"></td>
-  <td class="col-cs"></td>
-  <td class="col-cs"></td>
-  <td class="col-cs"></td>
+  <!-- ✅ Click to mark ✓ (prints reliably) -->
+  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Independent"></td>
+  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Verbal"></td>
+  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Physical"></td>
+  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Refused"></td>
 </tr>`;
                 })
                 .join("\n")
@@ -403,6 +407,36 @@ th { background: #e6e6e6; font-weight: 700; text-align: left; }
     </div>
 
   </div>
+
+  <script>
+  (function () {
+    function clearGroup(group) {
+      var cells = document.querySelectorAll('td.cs-click[data-group="' + group + '"]');
+      cells.forEach(function (c) { c.textContent = ""; c.classList.remove("cs-mark"); });
+    }
+
+    document.addEventListener("click", function (e) {
+      var td = e.target && e.target.closest ? e.target.closest("td.cs-click") : null;
+      if (!td) return;
+
+      var group = td.getAttribute("data-group") || "";
+      if (!group) return;
+
+      // toggle: if already marked -> clear; else mark and clear others
+      if (td.textContent && td.textContent.trim() !== "") {
+        td.textContent = "";
+        td.classList.remove("cs-mark");
+        return;
+      }
+
+      clearGroup(group);
+
+      // ✅ mark for print (text is always printed)
+      td.textContent = "✓"; // change to "V" if you prefer
+      td.classList.add("cs-mark");
+    });
+  })();
+  </script>
 </body>
 </html>`;
 
