@@ -23,7 +23,7 @@ type PocDutyRow = {
 };
 
 type POCItem = {
-  id: string;
+  id: string; // normalized id (id/pocId/pocid)
   pocNumber: string;
   startDate: string;
   stopDate?: string | null;
@@ -36,7 +36,6 @@ type POCItem = {
 
 const SHIFT_OPTIONS = ["All", "Day", "Evening", "Night"];
 
-// Default duty catalog (from your screenshots; includes the “extra 3” near bottom as well)
 const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = [
   { category: "Precautions", taskNo: 0, duty: "In Home / Community Support" },
   { category: "Activities", taskNo: 1, duty: "Community Participation" },
@@ -54,7 +53,6 @@ const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = 
   },
   { category: "Special Needs", taskNo: 6, duty: "Safety" },
 
-  // Personal Care 100-115
   { category: "Personal Care", taskNo: 100, duty: "Bath-Tub" },
   { category: "Personal Care", taskNo: 101, duty: "Bath-Shower" },
   { category: "Personal Care", taskNo: 102, duty: "Bath-Bed" },
@@ -72,7 +70,6 @@ const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = 
   { category: "Personal Care", taskNo: 114, duty: "Toileting - Bedpan/Urinal" },
   { category: "Personal Care", taskNo: 115, duty: "Toileting - Toilet" },
 
-  // Nutrition 200+
   { category: "Nutrition", taskNo: 200, duty: "Patient is on a prescribed diet" },
   { category: "Nutrition", taskNo: 201, duty: "Prepare - Breakfast" },
   { category: "Nutrition", taskNo: 202, duty: "Prepare - Lunch" },
@@ -82,7 +79,6 @@ const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = 
   { category: "Nutrition", taskNo: 206, duty: "Record intake - Food" },
   { category: "Nutrition", taskNo: 207, duty: "Record intake - Fluid" },
 
-  // Activity 300+
   { category: "Activity", taskNo: 300, duty: "Transferring" },
   { category: "Activity", taskNo: 301, duty: "Assist with walking" },
   { category: "Activity", taskNo: 302, duty: "Patient walks with assistive devices" },
@@ -90,7 +86,6 @@ const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = 
   { category: "Activity", taskNo: 304, duty: "Range of Motion Exercises" },
   { category: "Activity", taskNo: 305, duty: "Turning and positioning (At least Q2)" },
 
-  // Treatment/Special Needs 400+
   { category: "Treatment / Special Needs", taskNo: 400, duty: "Take Temperature" },
   { category: "Treatment / Special Needs", taskNo: 401, duty: "Take Pulse" },
   { category: "Treatment / Special Needs", taskNo: 402, duty: "Take Blood Pressure" },
@@ -103,7 +98,6 @@ const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = 
   { category: "Treatment / Special Needs", taskNo: 409, duty: "Remind to take medication" },
   { category: "Treatment / Special Needs", taskNo: 410, duty: "Assist with Treatment" },
 
-  // Patient Support Activities 500+
   { category: "Patient Support Activities", taskNo: 500, duty: "Change bed linen" },
   { category: "Patient Support Activities", taskNo: 501, duty: "Patient Laundry" },
   { category: "Patient Support Activities", taskNo: 502, duty: "Light Housekeeping" },
@@ -111,8 +105,6 @@ const DUTY_CATALOG: Array<{ category: string; taskNo: number; duty: string }> = 
   { category: "Patient Support Activities", taskNo: 504, duty: "Do Patient shopping and errands" },
   { category: "Patient Support Activities", taskNo: 505, duty: "Accompany Patient to medical appointment" },
   { category: "Patient Support Activities", taskNo: 506, duty: "Diversional Activities - Speak/Read" },
-
-  // ✅ extra bottom rows
   { category: "Patient Support Activities", taskNo: 507, duty: "Monitor Patient Safety" },
   { category: "Precautions", taskNo: 999, duty: "Companion Support" },
 ];
@@ -133,42 +125,93 @@ function formatMmDdYyyy(isoOrDate: string): string {
   return `${mm}/${dd}/${yy}`;
 }
 
+function toInputDate(iso: any): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return yyyyMmDd(d);
+}
+
 function emptyDays() {
+  return { sun: false, mon: false, tue: false, wed: false, thu: false, fri: false, sat: false };
+}
+
+// Extract name + code from "NAME (CODE)"
+function parseIndividualLabel(label: string): { name: string; code: string } {
+  const raw = (label || "").trim();
+  const m = raw.match(/^(.*)\s*\(([^)]+)\)\s*$/);
+  if (!m) return { name: raw || "—", code: "" };
+  return { name: (m[1] || "").trim() || "—", code: (m[2] || "").trim() };
+}
+
+function rand3(): string {
+  const n = Math.floor(Math.random() * 1000);
+  return String(n).padStart(3, "0");
+}
+
+function makePocNumber(): string {
+  const year = String(new Date().getFullYear());
+  return `${year}${rand3()}`; // 7 digits
+}
+
+function normalizeDays(d: any) {
+  const base = emptyDays();
+  if (!d || typeof d !== "object") return base;
   return {
-    sun: false,
-    mon: false,
-    tue: false,
-    wed: false,
-    thu: false,
-    fri: false,
-    sat: false,
+    sun: Boolean(d.sun),
+    mon: Boolean(d.mon),
+    tue: Boolean(d.tue),
+    wed: Boolean(d.wed),
+    thu: Boolean(d.thu),
+    fri: Boolean(d.fri),
+    sat: Boolean(d.sat),
   };
 }
 
-function parseIndividualLabel(label: string): { patientName: string; admissionId: string } {
-  const raw = String(label || "").trim();
-  if (!raw || raw === "—" || raw.toLowerCase().includes("no individual")) {
-    return { patientName: "—", admissionId: "—" };
-  }
-
-  // Expected: "NAME (CODE)"
-  const m = raw.match(/^(.*)\s+\(([^)]+)\)\s*$/);
-  if (m) {
-    const name = (m[1] || "").trim() || raw;
-    const code = (m[2] || "").trim() || "—";
-    return { patientName: name, admissionId: code };
-  }
-
-  return { patientName: raw, admissionId: "—" };
+function buildEmptyRows(): PocDutyRow[] {
+  return DUTY_CATALOG.map((x) => ({
+    category: x.category,
+    taskNo: x.taskNo,
+    duty: x.duty,
+    minutes: "",
+    asNeeded: false,
+    timesWeekMin: "",
+    timesWeekMax: "",
+    days: emptyDays(),
+    instruction: "",
+  }));
 }
 
-function random3Digits(): string {
-  return String(Math.floor(Math.random() * 1000)).padStart(3, "0");
-}
+/** ✅ NEW: Normalize API item -> always has .id */
+function normalizePocItem(x: any): POCItem {
+  const rawId =
+    x?.id ??
+    x?.pocId ??
+    x?.pocid ??
+    x?.POCID ??
+    x?.pocID ??
+    "";
 
-function generatePocNumber(): string {
-  const yyyy = String(new Date().getFullYear());
-  return `${yyyy}${random3Digits()}`; // 7 digits: yyyy + 3 digits
+  const id = String(rawId ?? "").trim();
+
+  const duties =
+    x?.duties ??
+    x?.pocDuties ??
+    x?.pocDuty ??
+    x?.PocDuty ??
+    [];
+
+  return {
+    id,
+    pocNumber: String(x?.pocNumber ?? x?.pocnumber ?? x?.poc_no ?? x?.pocNo ?? ""),
+    startDate: String(x?.startDate ?? x?.startdate ?? ""),
+    stopDate: x?.stopDate ?? x?.stopdate ?? null,
+    shift: String(x?.shift ?? "All"),
+    note: x?.note ?? null,
+    createdBy: x?.createdBy ?? x?.createdby ?? null,
+    createdAt: String(x?.createdAt ?? x?.createdat ?? x?.createdDate ?? x?.createddate ?? x?.created_on ?? ""),
+    duties: Array.isArray(duties) ? duties : [],
+  };
 }
 
 export default function POCModule({
@@ -182,44 +225,58 @@ export default function POCModule({
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<POCItem[]>([]);
 
-  // Modal state
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
   const [maximized, setMaximized] = useState(false);
 
+  // Edit mode
+  const [mode, setMode] = useState<"create" | "edit">("create");
+  const [editingId, setEditingId] = useState<string>("");
+
+  // Patient Name + Admission ID
+  const parsed = useMemo(() => parseIndividualLabel(individualLabel || ""), [individualLabel]);
+  const patientName = parsed.name || "—";
+  const admissionId = parsed.code || "—";
+
+  // POC auto number
   const [pocNumber, setPocNumber] = useState("");
+
   const [startDate, setStartDate] = useState(yyyyMmDd(new Date()));
   const [stopDate, setStopDate] = useState<string>("");
   const [shift, setShift] = useState("All");
   const [note, setNote] = useState("");
 
-  const { patientName, admissionId } = useMemo(() => parseIndividualLabel(individualLabel), [individualLabel]);
+  const [scrollKey, setScrollKey] = useState(0);
+  const tableScrollId = useMemo(() => `poc-table-scroll-${scrollKey}`, [scrollKey]);
+  const bottomScrollId = useMemo(() => `poc-bottom-scroll-${scrollKey}`, [scrollKey]);
 
-  const [rows, setRows] = useState<PocDutyRow[]>(() =>
-    DUTY_CATALOG.map((x) => ({
-      category: x.category,
-      taskNo: x.taskNo,
-      duty: x.duty,
-      minutes: "",
-      asNeeded: false,
-      timesWeekMin: "",
-      timesWeekMax: "",
-      days: emptyDays(),
-      instruction: "",
-    }))
-  );
+  const [rows, setRows] = useState<PocDutyRow[]>(() => buildEmptyRows());
 
   const load = async () => {
     if (!individualId) return;
     try {
       setLoading(true);
       setError(null);
+
       const res = await fetch(`/api/poc?individualId=${encodeURIComponent(individualId)}`, {
         cache: "no-store",
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setItems(Array.isArray(data?.items) ? data.items : []);
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+      const rawItems = Array.isArray(data?.items) ? data.items : [];
+      const normalized = rawItems.map(normalizePocItem);
+
+      // ✅ Guard: if any item missing id, show visible error (debug friendly)
+      const missing = normalized.find((x) => !x.id);
+      if (missing) {
+        console.warn("POC item missing id. Raw item:", missing);
+        throw new Error("POC records returned without id/pocId. Please check API/Prisma mapping.");
+      }
+
+      setItems(normalized);
     } catch (e: any) {
       console.error("Load POC failed:", e);
       setError(String(e?.message || e));
@@ -233,38 +290,82 @@ export default function POCModule({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [individualId]);
 
-  const createdAtLabel = (x: POCItem) => formatMmDdYyyy(x.createdAt);
-  const startLabel = (x: POCItem) => formatMmDdYyyy(x.startDate);
-  const stopLabel = (x: POCItem) => (x.stopDate ? formatMmDdYyyy(x.stopDate) : "");
+  const createdAtLabel = (x: POCItem) => (x.createdAt ? formatMmDdYyyy(x.createdAt) : "");
+  const startLabel = (x: POCItem) => (x.startDate ? formatMmDdYyyy(x.startDate) : "");
+  const stopLabel = (x: POCItem) => (x.stopDate ? formatMmDdYyyy(String(x.stopDate)) : "");
 
   const resetModal = () => {
-    setPocNumber(generatePocNumber());
+    setMode("create");
+    setEditingId("");
+
     setStartDate(yyyyMmDd(new Date()));
     setStopDate("");
     setShift("All");
     setNote("");
-    setRows(
-      DUTY_CATALOG.map((x) => ({
-        category: x.category,
-        taskNo: x.taskNo,
-        duty: x.duty,
-        minutes: "",
-        asNeeded: false,
-        timesWeekMin: "",
-        timesWeekMax: "",
-        days: emptyDays(),
-        instruction: "",
-      }))
-    );
+    setRows(buildEmptyRows());
+
+    setPocNumber(makePocNumber());
+
+    setMaximized(false);
+    setScrollKey((n) => n + 1);
   };
 
   const openAdd = () => {
     resetModal();
-    setMaximized(false);
     setOpen(true);
   };
 
-  const close = () => setOpen(false);
+  const openEdit = (poc: POCItem) => {
+    const id = String(poc?.id || "").trim();
+    if (!id) {
+      alert("Cannot edit: missing POC id (id/pocId). Please check API response.");
+      return;
+    }
+
+    // Build rows from DB duties (match by taskNo)
+    const base = buildEmptyRows();
+    const byTask = new Map<number, any>();
+    (poc?.duties || []).forEach((d: any) => {
+      const t = Number(d?.taskNo ?? d?.taskno);
+      if (!Number.isNaN(t)) byTask.set(t, d);
+    });
+
+    const merged = base.map((r) => {
+      const d = byTask.get(r.taskNo);
+      if (!d) return r;
+      return {
+        ...r,
+        minutes: d.minutes === null || d.minutes === undefined ? "" : String(d.minutes),
+        asNeeded: Boolean(d.asNeeded ?? d.asneeded),
+        timesWeekMin:
+          d.timesWeekMin === null || d.timesWeekMin === undefined ? "" : String(d.timesWeekMin),
+        timesWeekMax:
+          d.timesWeekMax === null || d.timesWeekMax === undefined ? "" : String(d.timesWeekMax),
+        days: normalizeDays(d.daysOfWeek ?? d.daysofweek),
+        instruction: d.instruction ? String(d.instruction) : "",
+      };
+    });
+
+    setMode("edit");
+    setEditingId(id);
+
+    setPocNumber(String(poc.pocNumber || ""));
+    setStartDate(toInputDate(poc.startDate));
+    setStopDate(toInputDate(poc.stopDate));
+    setShift(String(poc.shift || "All"));
+    setNote(String(poc.note || ""));
+    setRows(merged);
+
+    setOpen(true);
+    setMaximized(false);
+    setScrollKey((n) => n + 1);
+  };
+
+  const close = () => {
+    setOpen(false);
+    setMaximized(false);
+    setScrollKey((n) => n + 1);
+  };
 
   const updateRow = (idx: number, patch: Partial<PocDutyRow>) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -279,17 +380,64 @@ export default function POCModule({
     );
   };
 
-  const postCreate = async (payload: any) => {
+  function isDuplicatePocNumberError(e: any): boolean {
+    const msg = String(e?.message || e || "").toLowerCase();
+    return msg.includes("unique") || msg.includes("duplicate") || msg.includes("pocnumber");
+  }
+
+  const dutiesPayload = useMemo(() => {
+    return rows.map((r, idx) => ({
+      category: r.category,
+      taskNo: r.taskNo,
+      duty: r.duty,
+      minutes: r.minutes ? Number(r.minutes) : null,
+      asNeeded: r.asNeeded,
+      timesWeekMin: r.timesWeekMin ? Number(r.timesWeekMin) : null,
+      timesWeekMax: r.timesWeekMax ? Number(r.timesWeekMax) : null,
+      daysOfWeek: r.days,
+      instruction: r.instruction ? r.instruction : null,
+      sortOrder: idx,
+    }));
+  }, [rows]);
+
+  const postCreate = async (pocNo: string) => {
     const res = await fetch("/api/poc", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        individualId,
+        pocNumber: pocNo,
+        startDate,
+        stopDate: stopDate ? stopDate : null,
+        shift,
+        note: note ? note : null,
+        createdBy: "office",
+        duties: dutiesPayload,
+      }),
     });
+
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error || `HTTP ${res.status}`);
-    }
-    return data;
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  };
+
+  const patchUpdate = async (id: string) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) throw new Error("Missing id");
+
+    const res = await fetch(`/api/poc/${encodeURIComponent(safeId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        startDate,
+        stopDate: stopDate ? stopDate : null,
+        shift,
+        note: note ? note : null,
+        duties: dutiesPayload,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   };
 
   const onSave = async () => {
@@ -307,53 +455,48 @@ export default function POCModule({
     try {
       setSaving(true);
 
-      const dutiesPayload = rows.map((r, idx) => ({
-        category: r.category,
-        taskNo: r.taskNo,
-        duty: r.duty,
-        minutes: r.minutes ? Number(r.minutes) : null,
-        asNeeded: r.asNeeded,
-        timesWeekMin: r.timesWeekMin ? Number(r.timesWeekMin) : null,
-        timesWeekMax: r.timesWeekMax ? Number(r.timesWeekMax) : null,
-        daysOfWeek: r.days,
-        instruction: r.instruction ? r.instruction : null,
-        sortOrder: idx,
-      }));
+      if (mode === "edit") {
+        const id = String(editingId || "").trim();
+        if (!id) throw new Error("Missing id");
+        await patchUpdate(id);
+        setOpen(false);
+        setMaximized(false);
+        await load();
+        return;
+      }
 
-      // Try up to 8 times in case of duplicate pocNumber (DB unique constraint recommended)
-      let lastErr: any = null;
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const nextNumber = attempt === 0 ? pocNumber : generatePocNumber();
+      // create mode
+      let pocNo = (pocNumber || "").trim();
+      if (!pocNo) pocNo = makePocNumber();
+
+      const tried = new Set<string>();
+      for (let attempt = 1; attempt <= 7; attempt++) {
+        tried.add(pocNo);
         try {
-          await postCreate({
-            individualId,
-            pocNumber: nextNumber,
-            startDate,
-            stopDate: stopDate ? stopDate : null,
-            shift,
-            note: note ? note : null,
-            createdBy: "office", // later can be replaced by your auth user
-            duties: dutiesPayload,
-          });
-          setPocNumber(nextNumber);
-          lastErr = null;
-          break;
-        } catch (e: any) {
-          lastErr = e;
-          // If duplicate, regenerate and retry. Otherwise stop.
-          const msg = String(e?.message || "");
-          if (msg.includes("duplicate") || msg.includes("Unique") || msg.includes("P2002") || msg.includes("409")) {
+          await postCreate(pocNo);
+          setOpen(false);
+          setMaximized(false);
+          await load();
+          return;
+        } catch (err: any) {
+          if (isDuplicatePocNumberError(err)) {
+            let next = makePocNumber();
+            let guard = 0;
+            while (tried.has(next) && guard < 30) {
+              next = makePocNumber();
+              guard++;
+            }
+            pocNo = next;
+            setPocNumber(pocNo);
             continue;
           }
-          throw e;
+          throw err;
         }
       }
-      if (lastErr) throw lastErr;
 
-      setOpen(false);
-      await load();
+      alert("Save failed: Could not generate a unique POC Number. Please try again.");
     } catch (e: any) {
-      console.error("Create POC failed:", e);
+      console.error("Save POC failed:", e);
       alert(`Save failed: ${String(e?.message || e)}`);
     } finally {
       setSaving(false);
@@ -361,9 +504,14 @@ export default function POCModule({
   };
 
   const onDelete = async (id: string) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) {
+      alert("Delete failed: Missing id");
+      return;
+    }
     if (!confirm("Delete this POC?")) return;
     try {
-      const res = await fetch(`/api/poc/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/poc/${encodeURIComponent(safeId)}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       await load();
@@ -373,10 +521,81 @@ export default function POCModule({
     }
   };
 
+  // Print action: open print-friendly page (then Ctrl+P -> Save as PDF)
+  const onPrint = (id: string) => {
+    const safeId = String(id || "").trim();
+    if (!safeId) {
+      alert("Print failed: Missing id");
+      return;
+    }
+    window.open(`/api/poc/${encodeURIComponent(safeId)}/print`, "_blank", "noopener,noreferrer");
+  };
+
+  const [openMenuId, setOpenMenuId] = useState<string>("");
+
+  const onUploadDocument = (id: string) => {
+    alert(`Upload Document (coming soon). POC ID: ${id}`);
+    setOpenMenuId("");
+  };
+
+  const onViewHistory = (id: string) => {
+    alert(`View History (coming soon). POC ID: ${id}`);
+    setOpenMenuId("");
+  };
+
+  useEffect(() => {
+    if (!open) return;
+
+    const tableEl = document.getElementById(tableScrollId);
+    const bottomEl = document.getElementById(bottomScrollId);
+    if (!tableEl || !bottomEl) return;
+
+    let syncing = false;
+
+    const syncBottomSize = () => {
+      const contentWidth = tableEl.scrollWidth;
+      const spacer = bottomEl.querySelector<HTMLDivElement>("[data-spacer='1']");
+      if (spacer) spacer.style.width = `${contentWidth}px`;
+    };
+
+    const onTableScroll = () => {
+      if (syncing) return;
+      syncing = true;
+      bottomEl.scrollLeft = tableEl.scrollLeft;
+      syncing = false;
+    };
+
+    const onBottomScroll = () => {
+      if (syncing) return;
+      syncing = true;
+      tableEl.scrollLeft = bottomEl.scrollLeft;
+      syncing = false;
+    };
+
+    syncBottomSize();
+
+    tableEl.addEventListener("scroll", onTableScroll, { passive: true });
+    bottomEl.addEventListener("scroll", onBottomScroll, { passive: true });
+
+    const ro = new ResizeObserver(() => syncBottomSize());
+    ro.observe(tableEl);
+
+    return () => {
+      tableEl.removeEventListener("scroll", onTableScroll as any);
+      bottomEl.removeEventListener("scroll", onBottomScroll as any);
+      ro.disconnect();
+    };
+  }, [open, maximized, tableScrollId, bottomScrollId]);
+
   const notesCount = useMemo(() => note.length, [note]);
 
   return (
-    <div className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6">
+    <div
+      className="w-full max-w-none rounded-2xl border border-bac-border bg-bac-panel/30 p-6"
+      onMouseDown={() => {
+        if (openMenuId) setOpenMenuId("");
+      }}
+    >
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-xl font-semibold text-bac-text">Plan of Care (POC)</div>
@@ -411,6 +630,7 @@ export default function POCModule({
                 <th className="px-3 py-2">Delete</th>
               </tr>
             </thead>
+
             <tbody className="text-bac-text">
               {loading ? (
                 <tr>
@@ -433,15 +653,65 @@ export default function POCModule({
               ) : (
                 items.map((x) => (
                   <tr key={x.id} className="border-t border-bac-border/60">
-                    <td className="px-3 py-2 font-semibold">{x.pocNumber}</td>
+                    <td className="px-3 py-2 font-semibold">
+                      <button
+                        type="button"
+                        className="text-bac-primary hover:underline"
+                        onClick={() => openEdit(x)}
+                        title="Edit POC"
+                      >
+                        {x.pocNumber}
+                      </button>
+                    </td>
+
                     <td className="px-3 py-2">{startLabel(x)}</td>
                     <td className="px-3 py-2">{stopLabel(x)}</td>
                     <td className="px-3 py-2">{x.note || ""}</td>
                     <td className="px-3 py-2">{x.shift}</td>
                     <td className="px-3 py-2">{x.createdBy || ""}</td>
                     <td className="px-3 py-2">{createdAtLabel(x)}</td>
-                    <td className="px-3 py-2 text-bac-muted">—</td>
-                    <td className="px-3 py-2 text-bac-muted">—</td>
+
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => onPrint(x.id)}
+                        className="rounded-lg border border-bac-border bg-bac-panel px-2 py-1 text-xs text-bac-text hover:bg-bac-panel/70"
+                        title="Print / Save as PDF"
+                      >
+                        Print
+                      </button>
+                    </td>
+
+                    <td className="px-3 py-2 relative">
+                      <button
+                        type="button"
+                        onClick={() => setOpenMenuId((cur) => (cur === x.id ? "" : x.id))}
+                        className="rounded-lg border border-bac-border bg-bac-panel px-2 py-1 text-xs text-bac-text hover:bg-bac-panel/70"
+                        title="Actions"
+                      >
+                        ⋯
+                      </button>
+
+                      {openMenuId === x.id && (
+                        <div className="absolute right-0 mt-2 w-[180px] rounded-xl border border-bac-border bg-bac-panel shadow-xl z-20">
+                          <button
+                            type="button"
+                            onClick={() => onUploadDocument(x.id)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-bac-panel/70"
+                          >
+                            Upload Document
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onViewHistory(x.id)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-bac-panel/70"
+                          >
+                            View History
+                          </button>
+                        </div>
+                      )}
+                    </td>
+
                     <td className="px-3 py-2">
                       <button
                         type="button"
@@ -459,25 +729,26 @@ export default function POCModule({
         </div>
       </div>
 
-      {/* MODAL */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2">
           <div
             className={[
               "rounded-2xl border border-bac-border bg-bac-panel text-bac-text shadow-xl",
-              maximized ? "fixed inset-2 w-auto max-w-none" : "w-full max-w-[1200px]",
+              maximized ? "fixed inset-3 w-auto max-w-none" : "w-full max-w-[1200px]",
             ].join(" ")}
+            onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-bac-border px-5 py-4">
-              <div className="text-lg font-semibold">New POC</div>
+              <div className="text-lg font-semibold">{mode === "edit" ? "Edit POC" : "New POC"}</div>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setMaximized((v) => !v)}
                   className="rounded-lg border border-bac-border bg-bac-panel px-3 py-1 text-sm hover:bg-bac-panel/70"
+                  title={maximized ? "Restore" : "Maximize"}
                 >
-                  {maximized ? "Restore" : "Maximize"}
+                  {maximized ? "Restore" : "Max"}
                 </button>
 
                 <button
@@ -490,11 +761,9 @@ export default function POCModule({
               </div>
             </div>
 
-            {/* ✅ scroll Y + scroll X for whole modal */}
-            <div className={maximized ? "h-[calc(100vh-110px)]" : "max-h-[75vh]"}>
-              <div className="h-full overflow-y-auto overflow-x-auto px-5 py-4">
-                {/* Header fields */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 min-w-[1100px]">
+            <div className={maximized ? "flex h-[calc(100vh-90px)] flex-col" : "flex max-h-[75vh] flex-col"}>
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div className="rounded-xl border border-bac-border bg-bac-panel/40 p-3">
                     <div className="text-xs text-bac-muted">Patient Name:</div>
                     <div className="mt-1 text-sm font-semibold">{patientName}</div>
@@ -529,9 +798,9 @@ export default function POCModule({
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 min-w-[1100px]">
+                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div>
-                    <div className="text-xs text-bac-muted">POC Number</div>
+                    <div className="text-xs text-bac-muted">POC Number *</div>
                     <input
                       value={pocNumber}
                       readOnly
@@ -560,7 +829,7 @@ export default function POCModule({
                   <div className="text-xs text-bac-muted lg:text-right">Notes limit: 8000 characters</div>
                 </div>
 
-                <div className="mt-3 min-w-[1100px]">
+                <div className="mt-3">
                   <div className="text-xs text-bac-muted">Notes</div>
                   <textarea
                     value={note}
@@ -571,23 +840,20 @@ export default function POCModule({
                   <div className="mt-1 text-xs text-bac-muted">{notesCount}/8000</div>
                 </div>
 
-                {/* Duties table */}
-                <div className="mt-4 min-w-[1100px]">
+                <div className="mt-4">
                   <div className="text-sm font-semibold text-bac-text">Duties</div>
 
-                  <div className="mt-2 overflow-x-auto rounded-xl border border-bac-border">
-                    {/* ✅ give the table enough width so horizontal scroll appears */}
-                    <table className="w-full min-w-[1600px] text-xs">
+                  <div id={tableScrollId} className="mt-2 overflow-x-auto rounded-xl border border-bac-border">
+                    <table className="w-full min-w-[1650px] text-xs table-fixed">
                       <thead className="bg-bac-panel">
                         <tr className="text-left text-yellow-200">
-                          <th className="px-2 py-2 w-[160px]">Category</th>
+                          <th className="px-2 py-2 w-[180px]">Category</th>
                           <th className="px-2 py-2 w-[70px]">Task #</th>
-                          <th className="px-2 py-2 w-[430px]">Duty</th>
+                          <th className="px-2 py-2 w-[360px]">Duty</th>
                           <th className="px-2 py-2 w-[110px]">Minutes</th>
-                          <th className="px-2 py-2 w-[110px]">As Needed</th>
+                          <th className="px-2 py-2 w-[95px]">As Needed</th>
                           <th className="px-2 py-2 w-[220px]">Times a Week (Min)-(Max)</th>
-                          {/* ✅ wider Days column */}
-                          <th className="px-2 py-2 w-[260px]">Days Of Week</th>
+                          <th className="px-2 py-2 w-[320px]">Days Of Week</th>
                           <th className="px-2 py-2 w-[380px]">Instruction</th>
                         </tr>
                       </thead>
@@ -603,7 +869,7 @@ export default function POCModule({
                               <input
                                 value={r.minutes}
                                 onChange={(e) => updateRow(idx, { minutes: e.target.value })}
-                                className="w-[90px] rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
+                                className="w-full rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
                               />
                             </td>
 
@@ -620,20 +886,19 @@ export default function POCModule({
                                 <input
                                   value={r.timesWeekMin}
                                   onChange={(e) => updateRow(idx, { timesWeekMin: e.target.value })}
-                                  className="w-[70px] rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
+                                  className="w-[90px] rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
                                 />
                                 <span className="text-bac-muted">-</span>
                                 <input
                                   value={r.timesWeekMax}
                                   onChange={(e) => updateRow(idx, { timesWeekMax: e.target.value })}
-                                  className="w-[70px] rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
+                                  className="w-[90px] rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
                                 />
                               </div>
                             </td>
 
                             <td className="px-2 py-2 align-top">
-                              {/* ✅ no wrap, single row */}
-                              <div className="flex items-center gap-3 whitespace-nowrap">
+                              <div className="flex items-center gap-4 whitespace-nowrap">
                                 {(
                                   [
                                     ["sun", "S"],
@@ -646,11 +911,7 @@ export default function POCModule({
                                   ] as const
                                 ).map(([k, label]) => (
                                   <label key={k} className="inline-flex items-center gap-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={r.days[k]}
-                                      onChange={() => toggleDay(idx, k)}
-                                    />
+                                    <input type="checkbox" checked={r.days[k]} onChange={() => toggleDay(idx, k)} />
                                     <span className="text-bac-muted">{label}</span>
                                   </label>
                                 ))}
@@ -662,7 +923,7 @@ export default function POCModule({
                                 value={r.instruction}
                                 onChange={(e) => updateRow(idx, { instruction: e.target.value })}
                                 rows={2}
-                                className="w-[360px] rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
+                                className="w-full rounded-lg border border-bac-border bg-bac-panel px-2 py-1 outline-none"
                               />
                             </td>
                           </tr>
@@ -685,13 +946,21 @@ export default function POCModule({
                       disabled={saving}
                       className="rounded-xl bg-bac-primary px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
                     >
-                      {saving ? "Saving..." : "Save"}
+                      {saving ? "Saving..." : mode === "edit" ? "Save Changes" : "Save"}
                     </button>
                   </div>
                 </div>
+              </div>
 
-                {/* ✅ gives a clear bottom space so the horizontal scrollbar is easy to grab */}
-                <div className="h-3" />
+              <div className="border-t border-bac-border bg-bac-panel/60 px-5 py-2">
+                <div className="text-[11px] text-bac-muted mb-1">Horizontal scroll</div>
+                <div
+                  id={bottomScrollId}
+                  className="h-[14px] overflow-x-auto overflow-y-hidden rounded bg-bac-panel/40"
+                  aria-label="Horizontal scroll bar"
+                >
+                  <div data-spacer="1" className="h-[1px]" />
+                </div>
               </div>
             </div>
           </div>
