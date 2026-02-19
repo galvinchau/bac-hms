@@ -182,24 +182,12 @@ function buildEmptyRows(): PocDutyRow[] {
   }));
 }
 
-/** ✅ NEW: Normalize API item -> always has .id */
+/** Normalize API item -> always has .id */
 function normalizePocItem(x: any): POCItem {
-  const rawId =
-    x?.id ??
-    x?.pocId ??
-    x?.pocid ??
-    x?.POCID ??
-    x?.pocID ??
-    "";
-
+  const rawId = x?.id ?? x?.pocId ?? x?.pocid ?? x?.POCID ?? x?.pocID ?? "";
   const id = String(rawId ?? "").trim();
 
-  const duties =
-    x?.duties ??
-    x?.pocDuties ??
-    x?.pocDuty ??
-    x?.PocDuty ??
-    [];
+  const duties = x?.duties ?? x?.pocDuties ?? x?.pocDuty ?? x?.PocDuty ?? [];
 
   return {
     id,
@@ -269,7 +257,6 @@ export default function POCModule({
       const rawItems = Array.isArray(data?.items) ? data.items : [];
       const normalized = rawItems.map(normalizePocItem);
 
-      // ✅ Guard: if any item missing id, show visible error (debug friendly)
       const missing = normalized.find((x) => !x.id);
       if (missing) {
         console.warn("POC item missing id. Raw item:", missing);
@@ -322,7 +309,6 @@ export default function POCModule({
       return;
     }
 
-    // Build rows from DB duties (match by taskNo)
     const base = buildEmptyRows();
     const byTask = new Map<number, any>();
     (poc?.duties || []).forEach((d: any) => {
@@ -337,10 +323,8 @@ export default function POCModule({
         ...r,
         minutes: d.minutes === null || d.minutes === undefined ? "" : String(d.minutes),
         asNeeded: Boolean(d.asNeeded ?? d.asneeded),
-        timesWeekMin:
-          d.timesWeekMin === null || d.timesWeekMin === undefined ? "" : String(d.timesWeekMin),
-        timesWeekMax:
-          d.timesWeekMax === null || d.timesWeekMax === undefined ? "" : String(d.timesWeekMax),
+        timesWeekMin: d.timesWeekMin === null || d.timesWeekMin === undefined ? "" : String(d.timesWeekMin),
+        timesWeekMax: d.timesWeekMax === null || d.timesWeekMax === undefined ? "" : String(d.timesWeekMax),
         days: normalizeDays(d.daysOfWeek ?? d.daysofweek),
         instruction: d.instruction ? String(d.instruction) : "",
       };
@@ -465,7 +449,6 @@ export default function POCModule({
         return;
       }
 
-      // create mode
       let pocNo = (pocNumber || "").trim();
       if (!pocNo) pocNo = makePocNumber();
 
@@ -529,6 +512,22 @@ export default function POCModule({
       return;
     }
     window.open(`/api/poc/${encodeURIComponent(safeId)}/print`, "_blank", "noopener,noreferrer");
+  };
+
+  // ✅ NEW: Daily Logs action (open list page pre-filtered by POC + Individual)
+  const onDailyLogs = (poc: POCItem) => {
+    const pocId = String(poc?.id || "").trim();
+    if (!pocId) {
+      alert("Daily Logs failed: Missing POC id");
+      return;
+    }
+    const q = new URLSearchParams();
+    q.set("individualId", individualId);
+    q.set("pocId", pocId);
+    if (poc.pocNumber) q.set("pocNumber", String(poc.pocNumber));
+    if (poc.startDate) q.set("pocStart", String(poc.startDate));
+    if (poc.stopDate) q.set("pocStop", String(poc.stopDate || ""));
+    window.open(`/poc/daily-logs?${q.toString()}`, "_blank", "noopener,noreferrer");
   };
 
   const [openMenuId, setOpenMenuId] = useState<string>("");
@@ -615,7 +614,7 @@ export default function POCModule({
 
       <div className="mt-4 rounded-xl border border-bac-border bg-bac-panel/40">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1120px] text-sm">
             <thead className="bg-bac-panel">
               <tr className="text-left text-yellow-200">
                 <th className="px-3 py-2">POC Number</th>
@@ -625,6 +624,10 @@ export default function POCModule({
                 <th className="px-3 py-2">Shift</th>
                 <th className="px-3 py-2">Created By</th>
                 <th className="px-3 py-2">Created Date</th>
+
+                {/* ✅ NEW */}
+                <th className="px-3 py-2">Daily Logs</th>
+
                 <th className="px-3 py-2">Print</th>
                 <th className="px-3 py-2">Actions</th>
                 <th className="px-3 py-2">Delete</th>
@@ -634,19 +637,19 @@ export default function POCModule({
             <tbody className="text-bac-text">
               {loading ? (
                 <tr>
-                  <td className="px-3 py-3 text-bac-muted" colSpan={10}>
+                  <td className="px-3 py-3 text-bac-muted" colSpan={11}>
                     Loading...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td className="px-3 py-3 text-red-300" colSpan={10}>
+                  <td className="px-3 py-3 text-red-300" colSpan={11}>
                     Failed to load: {error}
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-bac-muted" colSpan={10}>
+                  <td className="px-3 py-3 text-bac-muted" colSpan={11}>
                     No POC records.
                   </td>
                 </tr>
@@ -670,6 +673,21 @@ export default function POCModule({
                     <td className="px-3 py-2">{x.shift}</td>
                     <td className="px-3 py-2">{x.createdBy || ""}</td>
                     <td className="px-3 py-2">{createdAtLabel(x)}</td>
+
+                    {/* ✅ NEW: icon button */}
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => onDailyLogs(x)}
+                        className="rounded-lg border border-bac-border bg-bac-panel px-2 py-1 text-xs text-bac-text hover:bg-bac-panel/70"
+                        title="Open Daily Logs for this POC"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <span aria-hidden>📖✍️</span>
+                          <span className="hidden xl:inline">Open</span>
+                        </span>
+                      </button>
+                    </td>
 
                     <td className="px-3 py-2">
                       <button
