@@ -202,6 +202,49 @@ function truncate(s: string, n: number) {
   return x.slice(0, n - 1) + "…";
 }
 
+/* =========================================================
+   ✅ Close/Return helpers (avoid 404 due to double-encoding)
+   ========================================================= */
+
+function safeDecodeURIComponentOnce(s: string) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * Some callers accidentally encode returnTo twice.
+ * Example: "/individual/detail" -> "%2Findividual%2Fdetail" -> "%252Findividual%252Fdetail"
+ * We decode up to 2 times safely.
+ */
+function normalizeReturnTo(raw: string) {
+  let s = String(raw || "").trim();
+  if (!s) return "";
+
+  // decode at most 2 times
+  const d1 = safeDecodeURIComponentOnce(s);
+  const d2 = safeDecodeURIComponentOnce(d1);
+  s = d2;
+
+  // Must be a relative path
+  if (s.startsWith("http://") || s.startsWith("https://")) return "";
+
+  // If someone passed "%2Findividual%2Fdetail" without decoding properly, ensure leading slash
+  if (!s.startsWith("/")) {
+    // If it still contains encoded slashes, decode again
+    const d3 = safeDecodeURIComponentOnce(s);
+    s = d3;
+    if (!s.startsWith("/")) s = "/" + s;
+  }
+
+  // avoid weird whitespace
+  s = s.replace(/\s+/g, "");
+
+  return s;
+}
+
 function DailyLogsListInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -219,7 +262,8 @@ function DailyLogsListInner() {
   const today = todayYmdPA();
   const endDate = pocStop || today;
 
-  const returnTo = searchParams.get("returnTo") || "";
+  const returnToRaw = searchParams.get("returnTo") || "";
+  const returnTo = normalizeReturnTo(returnToRaw);
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -283,10 +327,17 @@ function DailyLogsListInner() {
     if (!isYmd(pocStart) || !isYmd(endDate)) return;
 
     try {
+      // ✅ FIX: pass pocId so API can read DSP from poc_daily_log (who updated/submitted)
       const res = await fetch(
-        `/api/poc/schedule-dsp?${qs({ individualId: preIndividualId, dateFrom: pocStart, dateTo: endDate })}`,
+        `/api/poc/schedule-dsp?${qs({
+          pocId: prePocId || null,
+          individualId: preIndividualId,
+          dateFrom: pocStart,
+          dateTo: endDate,
+        })}`,
         { method: "GET" }
       );
+
       const json = (await readJsonOrThrow(res)) as {
         ok: boolean;
         map: Record<string, { dspId: string | null; dspName: string | null }>;
@@ -294,7 +345,22 @@ function DailyLogsListInner() {
         detail?: string;
       };
       if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
-      setScheduleDspMap(json.map || {});
+
+      const nextMap = json.map || {};
+      setScheduleDspMap(nextMap);
+
+      // ✅ Load names for dspIds from schedule map (merge into dspNameMap)
+      const ids = Array.from(
+        new Set(Object.values(nextMap).map((x) => String(x?.dspId || "").trim()).filter(Boolean))
+      );
+
+      if (ids.length) {
+        const res2 = await fetch(`/api/poc/dsp-names?${qs({ ids: ids.join(",") })}`, { method: "GET" });
+        const j2 = (await readJsonOrThrow(res2)) as { ok: boolean; map: Record<string, string> };
+        if (res2.ok && j2.ok && j2.map) {
+          setDspNameMap((prev) => ({ ...(prev || {}), ...j2.map }));
+        }
+      }
     } catch {
       setScheduleDspMap({});
     }
@@ -347,7 +413,7 @@ function DailyLogsListInner() {
   useEffect(() => {
     loadScheduleDsp();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preIndividualId, pocStart, endDate]);
+  }, [prePocId, preIndividualId, pocStart, endDate]);
 
   useEffect(() => {
     loadRange();
@@ -416,11 +482,15 @@ function DailyLogsListInner() {
   }
 
   function onClose() {
+    // ✅ Always return to Individual Detail (POC screen) without 404
+    // Priority:
+    // 1) valid returnTo from query
+    // 2) fallback: /individual/detail
     if (returnTo) {
       router.push(returnTo);
       return;
     }
-    router.back();
+    router.push("/individual/detail");
   }
 
   const dutiesForDay = useMemo(() => {
@@ -490,10 +560,7 @@ function DailyLogsListInner() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10"
-            onClick={onClose}
-          >
+          <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
             Close
           </button>
           <button
@@ -578,13 +645,19 @@ function DailyLogsListInner() {
                     )
                   : "—";
 
-                // DSP Name:
-                // 1) from log dspId
-                // 2) from schedule map
-                const dspFromLog =
-                  item?.dspId && dspNameMap[String(item.dspId)] ? dspNameMap[String(item.dspId)] : "";
-                const dspFromSchedule = scheduleDspMap[d]?.dspName || "";
-                const dspName = dspFromLog || dspFromSchedule || "—";
+                // DSP Name priority:
+                // 1) from daily log item.dspId (dspNameMap)
+                // 2) scheduleDspMap[date].dspName
+                // 3) scheduleDspMap[date].dspId -> dspNameMap
+                const logDspId = item?.dspId ? String(item.dspId) : "";
+                const dspFromLog = logDspId && dspNameMap[logDspId] ? dspNameMap[logDspId] : "";
+
+                const sched = scheduleDspMap[d];
+                const schedName = sched?.dspName ? String(sched.dspName) : "";
+                const schedId = sched?.dspId ? String(sched.dspId) : "";
+                const dspFromScheduleId = schedId && dspNameMap[schedId] ? dspNameMap[schedId] : "";
+
+                const dspName = dspFromLog || schedName || dspFromScheduleId || "—";
 
                 // ✅ NOTES 1 dòng để khỏi đội row height
                 const notesText = item ? "Open to view/edit" : "Not created yet (will auto-create on open)";

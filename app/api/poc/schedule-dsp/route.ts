@@ -6,11 +6,10 @@ export const runtime = "nodejs";
 
 /**
  * Return map by date: { "YYYY-MM-DD": { dspId, dspName } }
- * We try a few common table/column variants because DB naming may differ.
  *
- * ✅ IMPORTANT:
- * - In your DB screenshot, Visit has dspId (good source for "who worked/updated that day")
- * - Some ScheduleShift tables may NOT have dspId / assignedStaffId, so Visit is tried FIRST.
+ * Priority:
+ * 1) DSP from existing daily logs (poc_daily_log.dspid) for the given POC + Individual (most accurate: who updated/submitted).
+ * 2) Fallback to planned DSP from schedule shift tables (ScheduleShift / scheduleshift / schedule_shift / Schedule).
  */
 
 function jsonOk(map: Record<string, { dspId: string | null; dspName: string | null }>) {
@@ -89,68 +88,53 @@ async function readEmployeeNames(ids: string[]) {
   return map;
 }
 
-// Try read shifts by different table/column variants.
-// Must return rows with: date (YYYY-MM-DD), dspId (string|null)
-async function readShifts(individualId: string, dateFrom: string, dateTo: string) {
+/** read DSP from existing daily logs (best source) */
+async function readDailyLogDsps(pocId: string, individualId: string, dateFrom: string, dateTo: string) {
   const candidates: Array<{ label: string; sql: string }> = [
-    // ✅ 1) VISIT FIRST (your DB shows Visit has dspId)
     {
-      label: "Visit (camel) - date column",
+      label: "poc_daily_log (snake)",
       sql: `
         SELECT
-          v.date::date AS "date",
-          v."dspId" AS "dspId"
-        FROM public."Visit" v
-        WHERE v."individualId" = $1
-          AND v.date::date >= $2::date
-          AND v.date::date <= $3::date
-        ORDER BY v.date::date ASC
+          l.date::date AS "date",
+          l.dspid AS "dspId"
+        FROM public.poc_daily_log l
+        WHERE l.pocid = $1
+          AND l.individualid = $2
+          AND l.date::date >= $3::date
+          AND l.date::date <= $4::date
+        ORDER BY l.date::date ASC
       `,
     },
     {
-      label: "visit (snake) - date column",
+      label: "POC_Daily_Log (camel-ish)",
       sql: `
         SELECT
-          v.date::date AS "date",
-          v.dspid AS "dspId"
-        FROM public.visit v
-        WHERE v.individualid = $1
-          AND v.date::date >= $2::date
-          AND v.date::date <= $3::date
-        ORDER BY v.date::date ASC
+          l.date::date AS "date",
+          l."dspId" AS "dspId"
+        FROM public."POC_Daily_Log" l
+        WHERE l."pocId" = $1
+          AND l."individualId" = $2
+          AND l.date::date >= $3::date
+          AND l.date::date <= $4::date
+        ORDER BY l.date::date ASC
       `,
     },
-    // If Visit stores timestamps instead of date: derive PA date from checkIn/start
-    {
-      label: "Visit (camel) - checkIn timestamp",
-      sql: `
-        SELECT
-          ((v."checkIn" AT TIME ZONE 'America/New_York')::date) AS "date",
-          v."dspId" AS "dspId"
-        FROM public."Visit" v
-        WHERE v."individualId" = $1
-          AND ((v."checkIn" AT TIME ZONE 'America/New_York')::date) >= $2::date
-          AND ((v."checkIn" AT TIME ZONE 'America/New_York')::date) <= $3::date
-        ORDER BY ((v."checkIn" AT TIME ZONE 'America/New_York')::date) ASC
-      `,
-    },
-    {
-      label: "visit (snake) - checkin timestamp",
-      sql: `
-        SELECT
-          ((v.checkin AT TIME ZONE 'America/New_York')::date) AS "date",
-          v.dspid AS "dspId"
-        FROM public.visit v
-        WHERE v.individualid = $1
-          AND ((v.checkin AT TIME ZONE 'America/New_York')::date) >= $2::date
-          AND ((v.checkin AT TIME ZONE 'America/New_York')::date) <= $3::date
-        ORDER BY ((v.checkin AT TIME ZONE 'America/New_York')::date) ASC
-      `,
-    },
+  ];
 
-    // ✅ 2) FALLBACK: ScheduleShift variants (keep your original)
+  for (const c of candidates) {
+    try {
+      const rows = (await prisma.$queryRawUnsafe(c.sql, pocId, individualId, dateFrom, dateTo)) as any[];
+      if (Array.isArray(rows) && rows.length) return rows;
+    } catch {}
+  }
+  return [] as any[];
+}
+
+/** fallback planned DSP from schedules */
+async function readShiftDsps(individualId: string, dateFrom: string, dateTo: string) {
+  const candidates: Array<{ label: string; sql: string }> = [
     {
-      label: "schedule_shift (snake)",
+      label: "schedule_shift (snake: dspid)",
       sql: `
         SELECT
           s.date::date AS "date",
@@ -163,7 +147,7 @@ async function readShifts(individualId: string, dateFrom: string, dateTo: string
       `,
     },
     {
-      label: "scheduleshift (snake)",
+      label: "scheduleshift (snake: dspid)",
       sql: `
         SELECT
           s.date::date AS "date",
@@ -176,7 +160,7 @@ async function readShifts(individualId: string, dateFrom: string, dateTo: string
       `,
     },
     {
-      label: "ScheduleShift (camel)",
+      label: "ScheduleShift (camel: dspId)",
       sql: `
         SELECT
           s.date::date AS "date",
@@ -189,7 +173,20 @@ async function readShifts(individualId: string, dateFrom: string, dateTo: string
       `,
     },
     {
-      label: "Schedule (camel)",
+      label: "ScheduleShift (camel: assignedStaffId)",
+      sql: `
+        SELECT
+          s.date::date AS "date",
+          s."assignedStaffId" AS "dspId"
+        FROM public."ScheduleShift" s
+        WHERE s."individualId" = $1
+          AND s.date::date >= $2::date
+          AND s.date::date <= $3::date
+        ORDER BY s.date::date ASC
+      `,
+    },
+    {
+      label: "Schedule (camel: assignedStaffId)",
       sql: `
         SELECT
           s.date::date AS "date",
@@ -207,9 +204,7 @@ async function readShifts(individualId: string, dateFrom: string, dateTo: string
     try {
       const rows = (await prisma.$queryRawUnsafe(c.sql, individualId, dateFrom, dateTo)) as any[];
       if (Array.isArray(rows) && rows.length) return rows;
-    } catch {
-      // try next
-    }
+    } catch {}
   }
 
   return [] as any[];
@@ -218,7 +213,9 @@ async function readShifts(individualId: string, dateFrom: string, dateTo: string
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+
     const individualId = (searchParams.get("individualId") || "").trim();
+    const pocId = (searchParams.get("pocId") || "").trim(); // ✅ new
     const dateFrom = (searchParams.get("dateFrom") || "").trim();
     const dateTo = (searchParams.get("dateTo") || "").trim();
 
@@ -226,13 +223,32 @@ export async function GET(req: Request) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) return jsonErr(400, "Invalid dateFrom");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) return jsonErr(400, "Invalid dateTo");
 
-    const rows = await readShifts(individualId, dateFrom, dateTo);
+    // 1) From daily logs
+    const logRows = pocId ? await readDailyLogDsps(pocId, individualId, dateFrom, dateTo) : [];
 
-    // choose 1 DSP per day: first non-null dspId
+    // 2) Fallback from schedule shifts
+    const shiftRows = await readShiftDsps(individualId, dateFrom, dateTo);
+
     const map: Record<string, { dspId: string | null; dspName: string | null }> = {};
     const ids: string[] = [];
 
-    for (const r of rows || []) {
+    // First fill from logs (priority)
+    for (const r of logRows || []) {
+      const d = String(r?.date || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+
+      const dspId = r?.dspId ? String(r.dspId).trim() : "";
+      if (!map[d]) {
+        map[d] = { dspId: dspId || null, dspName: null };
+        if (dspId) ids.push(dspId);
+      } else if (!map[d].dspId && dspId) {
+        map[d].dspId = dspId;
+        ids.push(dspId);
+      }
+    }
+
+    // Then fill missing from schedule shifts
+    for (const r of shiftRows || []) {
       const d = String(r?.date || "").slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
 
@@ -241,7 +257,6 @@ export async function GET(req: Request) {
         map[d] = { dspId: dspId || null, dspName: null };
         if (dspId) ids.push(dspId);
       } else {
-        // already exists → keep the first non-null
         if (!map[d].dspId && dspId) {
           map[d].dspId = dspId;
           ids.push(dspId);
