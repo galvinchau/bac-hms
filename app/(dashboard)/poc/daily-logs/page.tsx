@@ -1,7 +1,7 @@
 // web/app/(dashboard)/poc/daily-logs/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type Status = "DRAFT" | "SUBMITTED";
@@ -93,10 +93,10 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-/** ✅ FIX: parse YYYY-MM-DD safely to avoid timezone shift */
+// ✅ FIX timezone shift: do NOT do new Date("YYYY-MM-DD") directly (it becomes UTC midnight and shows previous day in -0500)
 function fmtDatePA(ymdOrIso: string) {
   const s = String(ymdOrIso || "").trim();
-  if (!s) return "";
+  if (!s) return s;
 
   const d = isYmd(s) ? new Date(`${s}T12:00:00.000Z`) : new Date(s);
   if (Number.isNaN(d.getTime())) return ymdOrIso;
@@ -106,10 +106,11 @@ function fmtDatePA(ymdOrIso: string) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(d); // MM/DD/YYYY
+  }).format(d);
 }
 
-export default function DailyLogsListPage() {
+/** ✅ Inner client component that uses useSearchParams() */
+function DailyLogsListInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -182,10 +183,7 @@ export default function DailyLogsListPage() {
       const res = await fetch(`/api/poc/daily-logs?${query}`, { method: "GET" });
       const json = (await readJsonOrThrow(res)) as ApiResponse;
 
-      if (!res.ok || !json.ok) {
-        throw new Error(json.detail || json.error || `HTTP ${res.status}`);
-      }
-
+      if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
       setData(json);
     } catch (e: any) {
       setErr(String(e?.message || e));
@@ -216,7 +214,6 @@ export default function DailyLogsListPage() {
       date: args.date || null,
       dspId: args.dspId ?? null,
     });
-
     return `/poc/daily-logs/${encodeURIComponent(args.id)}${q ? `?${q}` : ""}`;
   }
 
@@ -226,13 +223,7 @@ export default function DailyLogsListPage() {
 
     const exist = byDate.get(ymd);
     if (exist?.id) {
-      router.push(
-        buildDetailUrl({
-          id: exist.id,
-          date: ymd,
-          dspId: exist.dspId ?? null,
-        })
-      );
+      router.push(buildDetailUrl({ id: exist.id, date: ymd, dspId: exist.dspId ?? null }));
       return;
     }
 
@@ -259,13 +250,7 @@ export default function DailyLogsListPage() {
       };
       if (!res.ok || !json.ok || !json.id) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
-      router.push(
-        buildDetailUrl({
-          id: json.id,
-          date: ymd,
-          dspId: null,
-        })
-      );
+      router.push(buildDetailUrl({ id: json.id, date: ymd, dspId: null }));
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
@@ -420,5 +405,22 @@ export default function DailyLogsListPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DailyLogsListPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-4">
+          <div className="rounded-lg border p-4 bg-white">
+            <div className="text-lg font-semibold">Daily Logs</div>
+            <div className="mt-2 text-sm text-neutral-600">Loading...</div>
+          </div>
+        </div>
+      }
+    >
+      <DailyLogsListInner />
+    </Suspense>
   );
 }
