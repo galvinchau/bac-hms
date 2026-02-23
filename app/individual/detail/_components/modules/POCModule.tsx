@@ -504,7 +504,7 @@ export default function POCModule({
     }
   };
 
-  // Print action: open print-friendly page (then Ctrl+P -> Save as PDF)
+  // ✅ Print action: open POC Daily Logs Report (full range Start -> Stop), then Ctrl+P -> Save as PDF
   const onPrint = (id: string) => {
     const safeId = String(id || "").trim();
     if (!safeId) {
@@ -514,7 +514,7 @@ export default function POCModule({
     window.open(`/api/poc/${encodeURIComponent(safeId)}/print`, "_blank", "noopener,noreferrer");
   };
 
-  // ✅ NEW: Daily Logs action (open list page pre-filtered by POC + Individual)
+  // ✅ Daily Logs action (open list page pre-filtered by POC + Individual)
   const onDailyLogs = (poc: POCItem) => {
     const pocId = String(poc?.id || "").trim();
     if (!pocId) {
@@ -625,7 +625,6 @@ export default function POCModule({
                 <th className="px-3 py-2">Created By</th>
                 <th className="px-3 py-2">Created Date</th>
 
-                {/* ✅ NEW */}
                 <th className="px-3 py-2">Daily Logs</th>
 
                 <th className="px-3 py-2">Print</th>
@@ -674,7 +673,6 @@ export default function POCModule({
                     <td className="px-3 py-2">{x.createdBy || ""}</td>
                     <td className="px-3 py-2">{createdAtLabel(x)}</td>
 
-                    {/* ✅ NEW: icon button */}
                     <td className="px-3 py-2">
                       <button
                         type="button"
@@ -694,7 +692,7 @@ export default function POCModule({
                         type="button"
                         onClick={() => onPrint(x.id)}
                         className="rounded-lg border border-bac-border bg-bac-panel px-2 py-1 text-xs text-bac-text hover:bg-bac-panel/70"
-                        title="Print / Save as PDF"
+                        title="Print POC Daily Logs Report (full range)"
                       >
                         Print
                       </button>

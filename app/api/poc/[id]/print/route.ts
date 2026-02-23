@@ -2,6 +2,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+/* =========================================================
+   Helpers
+========================================================= */
+
 function escapeHtml(input: any) {
   const s = String(input ?? "");
   return s
@@ -22,17 +26,57 @@ function fmtDateMMDDYYYY(d: any) {
   return `${mm}/${dd}/${yyyy}`;
 }
 
-function fmtDateTimeMMDDYYYY_hhmm(d: Date) {
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const yyyy = String(d.getFullYear());
-  let hh = d.getHours();
-  const ampm = hh >= 12 ? "PM" : "AM";
-  hh = hh % 12;
-  if (hh === 0) hh = 12;
-  const hhs = String(hh).padStart(2, "0");
-  const mins = String(d.getMinutes()).padStart(2, "0");
-  return `${mm}/${dd}/${yyyy} ${hhs}:${mins} ${ampm}`;
+function fmtPA_DateHeader(d: Date) {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+  return fmt.format(d).replace(",", "");
+}
+
+function fmtPA_Time(d: any) {
+  if (!d) return "";
+  const dt = typeof d === "string" ? new Date(d) : d;
+  if (Number.isNaN(dt?.getTime?.())) return "";
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return fmt.format(dt).replace(",", "");
+}
+
+function yyyyMmDd(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseISODateOnlyToUTC(dateOnly: any): Date | null {
+  if (!dateOnly) return null;
+  if (dateOnly instanceof Date) return new Date(dateOnly);
+  const s = String(dateOnly).trim();
+  if (!s) return null;
+  if (s.includes("T")) {
+    const dt = new Date(s);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+  const dt = new Date(`${s}T00:00:00.000Z`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function addDays(d: Date, n: number) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
 }
 
 function normalizeDays(daysOfWeek: any): Set<string> {
@@ -81,20 +125,102 @@ function normalizeDays(daysOfWeek: any): Set<string> {
   return set;
 }
 
-function hasAnyCheckedDay(days: Set<string>) {
-  return (
-    days.has("SUN") ||
-    days.has("MON") ||
-    days.has("TUE") ||
-    days.has("WED") ||
-    days.has("THU") ||
-    days.has("FRI") ||
-    days.has("SAT")
-  );
+function dowTokenForPA(dateUTC: Date): string {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  });
+  const w = fmt.format(dateUTC).toUpperCase();
+  if (w.startsWith("SUN")) return "SUN";
+  if (w.startsWith("MON")) return "MON";
+  if (w.startsWith("TUE")) return "TUE";
+  if (w.startsWith("WED")) return "WED";
+  if (w.startsWith("THU")) return "THU";
+  if (w.startsWith("FRI")) return "FRI";
+  if (w.startsWith("SAT")) return "SAT";
+  return "";
 }
 
-export async function GET(_req: Request, ctx: any) {
+function statusLabel(x: any): string {
+  const v = String(x ?? "").toUpperCase();
+  if (v === "INDEPENDENT") return "Independent";
+  if (v === "VERBAL_PROMPT") return "Verbal Prompt";
+  if (v === "PHYSICAL_ASSIST") return "Physical Assist";
+  if (v === "REFUSED") return "Refused";
+  return "";
+}
+
+function pickFirstNonEmpty(...vals: any[]) {
+  for (const v of vals) {
+    const s = String(v ?? "").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+/**
+ * ✅ Timezone-safe: convert various date shapes to YYYY-MM-DD without shifting day
+ */
+function toISODateNoShift(x: any): string {
+  if (!x) return "";
+  if (typeof x === "string") {
+    const s = x.trim();
+    if (!s) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s.includes("T") && s.length >= 10) return s.substring(0, 10);
+    return s;
+  }
+  if (x instanceof Date) return yyyyMmDd(x);
+  return "";
+}
+
+/* =========================================================
+   API Fetchers
+========================================================= */
+
+async function apiGetDailyLogsList(origin: string, q: URLSearchParams) {
+  const url = `${origin}/api/poc/daily-logs?${q.toString()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function apiGetDailyLogDetail(origin: string, id: string) {
+  const url = `${origin}/api/poc/daily-logs/${encodeURIComponent(id)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function apiGetDspNames(origin: string, dspIds: string[]) {
+  const ids = Array.from(
+    new Set((dspIds || []).map((x) => String(x).trim()).filter(Boolean))
+  );
+  if (!ids.length) return {} as Record<string, string>;
+
+  const q = new URLSearchParams();
+  q.set("ids", ids.join(","));
+  const url = `${origin}/api/poc/dsp-names?${q.toString()}`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return {} as Record<string, string>;
+
+  const map =
+    data?.map && typeof data.map === "object" ? data.map : ({} as any);
+  return map as Record<string, string>;
+}
+
+/* =========================================================
+   Route
+========================================================= */
+
+export async function GET(req: Request, ctx: any) {
   try {
+    const origin = new URL(req.url).origin;
+
     const params = (await ctx?.params) ?? {};
     const id = String(params?.id ?? "").trim();
     if (!id) return new NextResponse("Missing id", { status: 400 });
@@ -109,22 +235,24 @@ export async function GET(_req: Request, ctx: any) {
 
     if (!poc) return new NextResponse("POC not found", { status: 404 });
 
+    const individual = poc.individual ?? null;
+
+    // Header info
+    const companyName = "BLUE ANGELS CARE";
+    const tzLabel = "America/New_York (PA)";
     const now = new Date();
 
-    // Company block (static)
-    const companyName = "BLUE ANGELS CARE";
-    const vendorName = "Blue Angels Care LLC";
-    const officeName = "Blue Angels Care LLC";
-    const officePhone = "8146002313";
-
-    const individual = poc.individual ?? null;
+    const pocNumber =
+      String(poc.pocNumber ?? "").trim() || String(poc.id ?? "").trim();
+    const shift = String(poc.shift ?? "All").trim() || "All";
+    const pocIdDisplay = String(poc.id ?? "").trim();
 
     const admissionId =
       (individual?.code && String(individual.code).trim()) ||
       (individual?.medicaidId && String(individual.medicaidId).trim()) ||
       "";
 
-    const patientName = (() => {
+    const individualName = (() => {
       const first = String(individual?.firstName ?? "").trim();
       const last = String(individual?.lastName ?? "").trim();
       const label = `${last} ${first}`.trim();
@@ -133,310 +261,454 @@ export async function GET(_req: Request, ctx: any) {
       return name ? name.toUpperCase() : "";
     })();
 
-    const patientDob = fmtDateMMDDYYYY(individual?.dob ?? individual?.dateOfBirth);
-    const patientPhone = String(individual?.phone ?? individual?.phone1 ?? "").trim();
+    // Range
+    const startUTC = parseISODateOnlyToUTC(poc.startDate) ?? new Date();
+    const stopUTC =
+      parseISODateOnlyToUTC(poc.stopDate) ??
+      parseISODateOnlyToUTC(poc.startDate) ??
+      new Date();
 
-    const addr1 = String(
-      individual?.address1 ?? individual?.address ?? individual?.street ?? ""
-    ).trim();
-    const city = String(individual?.city ?? "").trim();
-    const state = String(individual?.state ?? "").trim();
-    const zip = String(individual?.zip ?? individual?.postalCode ?? "").trim();
-    const addressLine = [addr1].filter(Boolean).join(" ");
-    const addressLine2 = [city, state, zip].filter(Boolean).join(" ");
+    const dateFromISO = yyyyMmDd(startUTC);
+    const dateToISO = yyyyMmDd(stopUTC);
 
-    const pocIdDisplay = String(poc.pocNumber ?? poc.id ?? "").trim();
-    const shift = String(poc.shift ?? "All").trim();
-    const startDate = fmtDateMMDDYYYY(poc.startDate);
-    const stopDate = fmtDateMMDDYYYY(poc.stopDate);
+    // Build days list inclusive
+    const days: Array<{
+      dateUTC: Date;
+      dateISO: string;
+      dow: string;
+      header: string;
+    }> = [];
+    {
+      const totalGuard = 400;
+      let cur = new Date(startUTC);
+      let i = 0;
+      while (cur.getTime() <= stopUTC.getTime() && i < totalGuard) {
+        const dateISO = yyyyMmDd(cur);
+        const dow = dowTokenForPA(cur);
+        days.push({
+          dateUTC: new Date(cur),
+          dateISO,
+          dow,
+          header: fmtPA_DateHeader(cur),
+        });
+        cur = addDays(cur, 1);
+        i++;
+      }
+    }
 
-    // ✅ ONLY print duties that have at least 1 checked day (SUN..SAT)
-    const dutyRows = (poc.duties ?? [])
+    // ✅ Duties: only those with at least 1 checked day
+    const allDutiesRaw = Array.isArray(poc.duties) ? poc.duties : [];
+    const duties = allDutiesRaw
       .map((d: any) => {
-        const days = normalizeDays(d.daysOfWeek);
-        return { d, days };
-      })
-      .filter(({ d, days }) => {
-        if (!hasAnyCheckedDay(days)) return false;
+        const daysSet = normalizeDays(d.daysOfWeek);
+        const hasChecked =
+          daysSet.has("SUN") ||
+          daysSet.has("MON") ||
+          daysSet.has("TUE") ||
+          daysSet.has("WED") ||
+          daysSet.has("THU") ||
+          daysSet.has("FRI") ||
+          daysSet.has("SAT");
+        if (!hasChecked) return null;
 
-        const category = String(d?.category ?? "").trim();
+        const dutyId = String(d.id ?? d.pocDutyId ?? d.pocdutyid ?? "").trim();
         const taskNo = d?.taskNo == null ? "" : String(d.taskNo).trim();
         const desc = String(d?.duty ?? d?.description ?? "").trim();
-        return Boolean(category && (taskNo || desc));
-      })
-      .map(({ d, days }) => {
-        const timesWeek =
-          d.timesWeekMin == null && d.timesWeekMax == null
-            ? ""
-            : d.timesWeekMin != null && d.timesWeekMax != null
-              ? `${d.timesWeekMin}-${d.timesWeekMax}`
-              : d.timesWeekMin != null
-                ? `${d.timesWeekMin}`
-                : `${d.timesWeekMax}`;
+        if (!taskNo && !desc) return null;
 
         return {
-          category: String(d.category ?? "").trim(),
-          taskNo: d.taskNo == null ? "" : String(d.taskNo),
-          description: String(d.duty ?? d.description ?? "").trim(),
-          minutes: d.minutes == null ? "" : String(d.minutes),
-          instruction: String(d.instruction ?? "").trim(),
-          asNeeded: d.asNeeded ? "Yes" : "No",
-          timesWeek,
-          days,
+          id: dutyId,
+          taskNo,
+          duty: desc,
+          daysSet,
+          sortOrder: d?.sortOrder ?? 0,
         };
-      });
+      })
+      .filter(Boolean) as Array<{
+      id: string;
+      taskNo: string;
+      duty: string;
+      daysSet: Set<string>;
+      sortOrder: number;
+    }>;
 
+    // =====================================================
+    // Fetch daily logs list via API
+    // =====================================================
+    const individualId = String(individual?.id ?? poc.individualId ?? "").trim();
+
+    const q = new URLSearchParams();
+    q.set("pocId", id);
+    q.set("individualId", individualId);
+    q.set("dateFrom", dateFromISO);
+    q.set("dateTo", dateToISO);
+    q.set("pageSize", "500");
+
+    const listData = await apiGetDailyLogsList(origin, q);
+
+    const listItems: any[] =
+      (Array.isArray(listData?.items) ? listData.items : []) ||
+      (Array.isArray(listData?.rows) ? listData.rows : []) ||
+      (Array.isArray(listData?.data) ? listData.data : []);
+
+    // Map daily logs by dateISO
+    const dailyLogByDate = new Map<string, any>();
+    for (const l of listItems) {
+      const d =
+        l?.date ?? l?.logDate ?? l?.day ?? l?.serviceDate ?? l?.forDate ?? null;
+      const iso = toISODateNoShift(d) || toISODateNoShift(l?.createdAt) || "";
+      if (iso) dailyLogByDate.set(iso, l);
+    }
+
+    const dailyLogIds = Array.from(dailyLogByDate.values())
+      .map((x) => String(x?.id ?? x?.dailyLogId ?? "").trim())
+      .filter(Boolean);
+
+    // Fetch detail for each daily log id
+    const detailsById = new Map<string, any>();
+    await Promise.all(
+      dailyLogIds.map(async (logId) => {
+        try {
+          const detail = await apiGetDailyLogDetail(origin, logId);
+          detailsById.set(logId, detail);
+        } catch {
+          // ignore
+        }
+      })
+    );
+
+    // ✅ Build dspIdByLogId (prefer detail.item.dspId, fallback list dspId)
+    const dspIdByLogId = new Map<string, string>();
+    for (const day of days) {
+      const log = dailyLogByDate.get(day.dateISO) ?? null;
+      const logId = log ? String(log?.id ?? log?.dailyLogId ?? "").trim() : "";
+      if (!logId) continue;
+
+      const raw = detailsById.get(logId) ?? {};
+      const detail = raw?.item ?? raw;
+
+      const dspId =
+        String(
+          detail?.dspId ??
+            detail?.dspid ??
+            log?.dspId ??
+            log?.dspid ??
+            ""
+        ).trim() || "";
+      if (dspId) dspIdByLogId.set(logId, dspId);
+    }
+
+    // Lookup DSP names
+    const dspIdsAll = Array.from(new Set(Array.from(dspIdByLogId.values())));
+    const dspNameMap = await apiGetDspNames(origin, dspIdsAll);
+
+    // Build task map: key = dailyLogId::pocDutyId -> task row
+    const taskLogMap = new Map<string, any>();
+    for (const logId of dailyLogIds) {
+      const raw = detailsById.get(logId) ?? {};
+      // /api/poc/daily-logs/[id] returns { ok:true, item:{...} }
+      const detail = raw?.item ?? raw;
+
+      const tasks =
+        (Array.isArray(detail?.tasks) ? detail.tasks : null) ??
+        (Array.isArray(detail?.items) ? detail.items : null) ??
+        (Array.isArray(detail?.taskLogs) ? detail.taskLogs : null) ??
+        (Array.isArray(detail?.dailyLog?.tasks) ? detail.dailyLog.tasks : null) ??
+        [];
+
+      for (const t of tasks) {
+        // daily-log detail uses `id` as the dutyId
+        const pocDutyId = pickFirstNonEmpty(
+          t?.pocDutyId,
+          t?.dutyId,
+          t?.pocDutyID,
+          t?.pocdutyid,
+          t?.id
+        );
+        if (!pocDutyId) continue;
+
+        const key = `${logId}::${pocDutyId}`;
+
+        const ts = pickFirstNonEmpty(
+          t?.timestamp,
+          t?.completedAt,
+          t?.updatedAt,
+          t?.createdAt
+        );
+
+        const existing = taskLogMap.get(key);
+        if (!existing) {
+          taskLogMap.set(key, t);
+        } else {
+          const existingTs = pickFirstNonEmpty(
+            existing?.timestamp,
+            existing?.completedAt,
+            existing?.updatedAt,
+            existing?.createdAt
+          );
+          const a = existingTs ? new Date(existingTs).getTime() : 0;
+          const b = ts ? new Date(ts).getTime() : 0;
+          if (b >= a) taskLogMap.set(key, t);
+        }
+      }
+    }
+
+    const totalDays = days.length;
+
+    // =====================================================
+    // Render HTML
+    // =====================================================
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>POC Print</title>
+  <title>POC Daily Logs Report</title>
   <style>
-@page { size: Letter; margin: 18px; }
+@page { size: Letter; margin: 14px; }
 body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; }
 
-.page { width: 100%; font-size: 13px; }
-.title { text-align:center; flex: 1; font-size: 22px; font-weight: 700; margin-top: 4px; }
-.meta { text-align:right; font-size: 13px; margin-top: 6px; }
+.headerTop {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  border-bottom: 2px solid #000;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+.brand { font-weight: 900; font-size: 22px; letter-spacing: 0.5px; color: #0B2E6B; }
+.centerTitle { text-align:center; flex: 1; }
+.centerTitle .t1 { font-size: 18px; font-weight: 800; }
+.centerTitle .t2 { margin-top: 2px; font-size: 12px; font-weight: 700; }
+.topRight { text-align:right; font-size: 12px; font-weight: 700; }
+.tz { font-size: 11px; margin-top: 3px; }
 
-.top-row { display: flex; align-items: flex-start; justify-content: space-between; }
-.brand { display:flex; align-items:flex-start; justify-content:flex-start; }
+.metaGrid {
+  display:grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin: 10px 0 10px;
+}
+.metaBox {
+  border: 2px solid #000;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.metaRow { display:flex; gap:10px; }
+.metaLabel { font-weight: 800; width: 95px; }
+.metaVal { font-weight: 700; }
 
-/* ✅ Company name: no box, left aligned */
-.logo-text {
-  font-weight: 800;
-  font-size: 22px;            /* same as title */
-  letter-spacing: 0.6px;
-  color: #0B2E6B;             /* dark blue */
-  white-space: nowrap;        /* force 1 line */
-  line-height: 1.0;
-  margin-top: 2px;
+.daySection {
+  border: 2px solid #000;
+  border-radius: 8px;
+  margin-top: 10px;
+  page-break-inside: avoid;
+}
+.dayHeader {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 6px 10px;
+  border-bottom: 2px solid #000;
+  font-weight: 900;
+}
+.dayHeader .date { font-size: 14px; }
+.badge {
+  border: 2px solid #000;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 900;
+}
+.badge.empty { background:#fff; }
+.badge.updated { background:#e9f3ff; }
+.badge.done { background:#e9ffe9; }
+
+.dayNoteLine {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #333;
 }
 
-.box { border: 2px solid #000; padding: 10px 12px; margin-top: 10px; }
-.box .center-line { text-align:center; font-size: 14px; font-weight: 700; }
-.box .line { text-align:center; font-size: 13px; margin-top: 4px; }
-.box .line b { font-weight: 700; }
+.tableWrap { padding: 8px 8px 10px; }
 
-.grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-.row { display:flex; gap: 10px; align-items: baseline; font-size: 13px; }
-.row .label { width: 120px; font-weight: 700; }
-.row .value { flex: 1; border-bottom: 1px solid #000; min-height: 14px; padding-bottom: 2px; }
-
-.divider { border-top: 2px solid #000; margin: 10px 0; }
-
-.section-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
-.section-row { display:flex; gap: 10px; font-size: 13px; }
-.section-row .label { width: 140px; font-weight: 700; }
-.section-row .blank { flex: 1; border-bottom: 1px solid #000; min-height: 14px; }
-
-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+/* ✅ Auto-fit feel: make DSP wider, push Note to the right */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
 th, td { border: 1px solid #000; padding: 5px 6px; vertical-align: top; }
-th { background: #e6e6e6; font-weight: 700; text-align: left; }
+th { background: #e6e6e6; font-weight: 800; text-align: left; }
 
-.col-cat { width: 120px; }
-.col-task { width: 75px; }
-.col-desc { width: auto; }
-.col-min { width: 55px; text-align:center; }
-.col-inst { width: 150px; }
-.col-asn { width: 90px; text-align:center; }
-.col-tw { width: 75px; text-align:center; }
-.col-d { width: 30px; text-align:center; }
+.col-task { width: 56px; text-align:center; }
+/* duty a bit narrower */
+.col-duty { width: 280px; }
+.col-status { width: 120px; }
+.col-ts { width: 150px; }
 
-/* ✅ Completed Status columns */
-.col-cs { width: 92px; text-align:center; background:#fff; }
-.cs-head { text-align:center; }
-.cs-sub { font-style: italic; font-weight: 400; background:#fff; }
+/* ✅ DSP wider so it doesn't get hidden by Note */
+.col-dsp { width: 220px; }
 
-/* ✅ Clickable completed status cells print reliably (text ✓) */
-.cs-click { cursor: pointer; user-select: none; }
-.cs-mark { font-size: 14px; font-weight: 700; }
-@media print { .cs-click { cursor: default; } }
+/* ✅ Note becomes flexible (takes remaining space) */
+.col-note { width: auto; }
 
-.footnote { font-size: 11px; text-align:center; margin-top: 10px; }
-.note-box { border: 2px solid #000; padding: 8px 10px; margin-top: 10px; font-size: 12px; }
-.note-title { font-weight: 700; margin-bottom: 6px; }
-.note-text { text-align:center; font-weight: 700; }
-.note-sub { text-align:center; font-weight: 700; margin-top: 6px; }
-.tight { line-height: 1.15; }
+td.col-duty { white-space: normal; word-break: break-word; }
+td.col-note { white-space: normal; word-break: break-word; }
+
+/* prevent DSP text from overlapping; if too long, show ellipsis */
+td.col-status, td.col-ts, td.col-dsp {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pageBreak { page-break-after: always; }
   </style>
 </head>
 <body>
-  <div class="page">
 
-    <div class="top-row">
-      <div class="brand">
-        <div class="logo-text">${escapeHtml(companyName)}</div>
-      </div>
-
-      <div class="title">Plan of Care (POC)</div>
-
-      <div class="meta tight">
-        <div class="page-no">Page 1 of 1</div>
-        <div>Report Date:&nbsp; ${escapeHtml(fmtDateTimeMMDDYYYY_hhmm(now))}</div>
-      </div>
+  <div class="headerTop">
+    <div>
+      <div class="brand">${escapeHtml(companyName)}</div>
+      <div class="tz">Timezone: ${escapeHtml(tzLabel)}</div>
     </div>
 
-    <div class="box">
-      <div class="center-line">Vendor:&nbsp; ${escapeHtml(vendorName)}</div>
-      <div class="line"><b>Office:</b>&nbsp; ${escapeHtml(officeName)}</div>
-      <div class="line"><b>Office Phone No :</b>&nbsp; ${escapeHtml(officePhone)}</div>
-      <div class="line" style="margin-top:8px;"><b>POC Frequency :</b></div>
+    <div class="centerTitle">
+      <div class="t1">POC Daily Logs Report</div>
+      <div class="t2">POC Number: ${escapeHtml(pocNumber)}</div>
     </div>
 
-    <div class="grid2">
-      <div class="row"><div class="label">Admission ID:</div><div class="value">${escapeHtml(admissionId)}</div></div>
-      <div class="row"><div class="label">POC ID:</div><div class="value">${escapeHtml(pocIdDisplay)}</div></div>
-
-      <div class="row"><div class="label">Shift:</div><div class="value">${escapeHtml(shift)}</div></div>
-      <div class="row"><div class="label"></div><div class="value" style="border-bottom:0;"></div></div>
-
-      <div class="row"><div class="label">Start Date:</div><div class="value">${escapeHtml(startDate)}</div></div>
-      <div class="row"><div class="label">Stop Date:</div><div class="value">${escapeHtml(stopDate)}</div></div>
+    <div class="topRight">
+      <div>Generated: ${escapeHtml(fmtPA_Time(now))}</div>
+      <div>Shift: ${escapeHtml(shift)}</div>
     </div>
+  </div>
 
-    <div class="divider"></div>
-
-    <div class="grid2">
-      <div class="row"><div class="label">Patient Name:</div><div class="value">${escapeHtml(patientName)}</div></div>
-      <div class="row"><div class="label">Patient DOB (Age):</div><div class="value">${escapeHtml(patientDob)}</div></div>
-
-      <div class="row"><div class="label">Address:</div><div class="value">${escapeHtml(addressLine)}</div></div>
-      <div class="row"><div class="label">Patient Phone #:</div><div class="value">${escapeHtml(patientPhone)}</div></div>
-
-      <div class="row"><div class="label"></div><div class="value">${escapeHtml(addressLine2)}</div></div>
-      <div class="row"><div class="label"></div><div class="value" style="border-bottom:0;"></div></div>
+  <div class="metaGrid">
+    <div class="metaBox">
+      <div class="metaRow"><div class="metaLabel">Individual:</div><div class="metaVal">${escapeHtml(individualName)}</div></div>
+      <div class="metaRow"><div class="metaLabel">Admission ID:</div><div class="metaVal">${escapeHtml(admissionId)}</div></div>
     </div>
-
-    <div class="section-grid">
-      <div class="section-row"><div class="label">Advanced Directives:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">Allergies:</div><div class="blank"></div></div>
-
-      <div class="section-row"><div class="label">Emergency Contact:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">Emergency Contact Phone #:</div><div class="blank"></div></div>
-
-      <div class="section-row"><div class="label">Physician:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">Physician Phone #:</div><div class="blank"></div></div>
-
-      <div class="section-row"><div class="label">Nurse:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">Contract Name:</div><div class="blank">ODP</div></div>
-
-      <div class="section-row"><div class="label">Mental Status:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">Nutritional Requirements:</div><div class="blank"></div></div>
-
-      <div class="section-row"><div class="label">Safety Measures:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">DME & Supplies:</div><div class="blank"></div></div>
-
-      <div class="section-row"><div class="label">Functional Limitations:</div><div class="blank"></div></div>
-      <div class="section-row"><div class="label">Activities Permitted:</div><div class="blank"></div></div>
+    <div class="metaBox">
+      <div class="metaRow"><div class="metaLabel">Date From:</div><div class="metaVal">${escapeHtml(fmtDateMMDDYYYY(startUTC))}</div></div>
+      <div class="metaRow"><div class="metaLabel">Date To:</div><div class="metaVal">${escapeHtml(fmtDateMMDDYYYY(stopUTC))}</div></div>
     </div>
+    <div class="metaBox">
+      <div class="metaRow"><div class="metaLabel">POC ID:</div><div class="metaVal">${escapeHtml(pocIdDisplay)}</div></div>
+      <div class="metaRow"><div class="metaLabel">Total Days:</div><div class="metaVal">${escapeHtml(String(totalDays))}</div></div>
+    </div>
+  </div>
 
+  ${days
+    .map((day, idx) => {
+      const log = dailyLogByDate.get(day.dateISO) ?? null;
+      const dailyLogId = log
+        ? String(log?.id ?? log?.dailyLogId ?? "").trim()
+        : "";
+
+      const s = String(log?.status ?? "").toUpperCase();
+      const badge = log ? (s === "SUBMITTED" ? "DONE" : "UPDATED") : "EMPTY";
+      const badgeClass =
+        badge === "DONE" ? "done" : badge === "UPDATED" ? "updated" : "empty";
+
+      const dutiesForDay = duties
+        .filter((d) => d.daysSet?.has(day.dow))
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+      const noteLine = !log ? "No daily log created" : "";
+
+      // DSP name for the day (if stored)
+      const dspIdForDay = dailyLogId ? (dspIdByLogId.get(dailyLogId) || "") : "";
+      const dspNameForDay = dspIdForDay
+        ? (dspNameMap[dspIdForDay] || dspIdForDay)
+        : "";
+
+      const rowsHtml = dutiesForDay.length
+        ? dutiesForDay
+            .map((d) => {
+              let st = "";
+              let ts = "";
+              let dsp = dspNameForDay;
+              let note = "";
+
+              if (dailyLogId && d.id) {
+                const t = taskLogMap.get(`${dailyLogId}::${d.id}`) ?? null;
+                if (t) {
+                  st = statusLabel(
+                    t?.status ?? t?.completionStatus ?? t?.taskStatus
+                  );
+
+                  const rawTs = pickFirstNonEmpty(
+                    t?.timestamp,
+                    t?.completedAt,
+                    t?.updatedAt,
+                    t?.createdAt
+                  );
+                  ts = rawTs ? fmtPA_Time(rawTs) : "";
+
+                  note = pickFirstNonEmpty(
+                    t?.note,
+                    t?.notes,
+                    t?.comment,
+                    t?.memo
+                  );
+
+                  // If task row has dspName/dsp override, use it
+                  const dspOverride = pickFirstNonEmpty(
+                    t?.dsp,
+                    t?.dspName,
+                    t?.editedBy,
+                    t?.updatedBy
+                  );
+                  if (dspOverride) dsp = dspOverride;
+
+                  // ✅ If still no DSP stored, show "Locked @ <timestamp>" like UI
+                  // IMPORTANT: no backslash here (fixes unicode escape build error)
+                  if (!dsp && st) {
+                    dsp = ts ? `Locked @ ${ts}` : "Locked";
+                  }
+                }
+              }
+
+              return `<tr>
+  <td class="col-task">${escapeHtml(d.taskNo)}</td>
+  <td class="col-duty">${escapeHtml(d.duty)}</td>
+  <td class="col-status">${escapeHtml(st)}</td>
+  <td class="col-ts">${escapeHtml(ts)}</td>
+  <td class="col-dsp">${escapeHtml(dsp)}</td>
+  <td class="col-note">${escapeHtml(note)}</td>
+</tr>`;
+            })
+            .join("\n")
+        : `<tr><td colspan="6" style="text-align:center;">No duties scheduled for this day</td></tr>`;
+
+      return `
+<div class="daySection">
+  <div class="dayHeader">
+    <div class="date">${escapeHtml(day.header)}</div>
+    <div class="badge ${badgeClass}">${escapeHtml(badge)}</div>
+  </div>
+  ${noteLine ? `<div class="dayNoteLine">${escapeHtml(noteLine)}</div>` : ""}
+  <div class="tableWrap">
     <table>
       <thead>
         <tr>
-          <th class="col-cat" rowspan="2">Category</th>
-          <th class="col-task" rowspan="2">Task<br/>Number</th>
-          <th class="col-desc" rowspan="2">Description</th>
-          <th class="col-min" rowspan="2">Min.</th>
-          <th class="col-inst" rowspan="2">Instruction</th>
-          <th class="col-asn" rowspan="2">As<br/>Requested</th>
-          <th class="col-tw" rowspan="2">Times a<br/>Week</th>
-
-          <th class="col-d" rowspan="2">S</th>
-          <th class="col-d" rowspan="2">M</th>
-          <th class="col-d" rowspan="2">T</th>
-          <th class="col-d" rowspan="2">W</th>
-          <th class="col-d" rowspan="2">T</th>
-          <th class="col-d" rowspan="2">F</th>
-          <th class="col-d" rowspan="2">S</th>
-
-          <th class="cs-head" colspan="4">Completed Status</th>
-        </tr>
-        <tr>
-          <th class="col-cs cs-sub">Independent</th>
-          <th class="col-cs cs-sub">Verbal Prompt</th>
-          <th class="col-cs cs-sub">Physical Assist</th>
-          <th class="col-cs cs-sub">Refused</th>
+          <th class="col-task">Task#</th>
+          <th class="col-duty">Duty</th>
+          <th class="col-status">Status</th>
+          <th class="col-ts">Timestamp (PA)</th>
+          <th class="col-dsp">DSP</th>
+          <th class="col-note">Note</th>
         </tr>
       </thead>
       <tbody>
-        ${
-          dutyRows.length
-            ? dutyRows
-                .map((r, idx) => {
-                  const Y = (k: string) => (r.days?.has(k) ? "Y" : "");
-                  return `<tr>
-  <td>${escapeHtml(r.category)}</td>
-  <td>${escapeHtml(r.taskNo)}</td>
-  <td>${escapeHtml(r.description)}</td>
-  <td class="col-min">${escapeHtml(r.minutes)}</td>
-  <td>${escapeHtml(r.instruction)}</td>
-  <td class="col-asn">${escapeHtml(r.asNeeded)}</td>
-  <td class="col-tw">${escapeHtml(r.timesWeek)}</td>
-
-  <!-- ✅ Print-friendly: Y for checked, blank for unchecked -->
-  <td class="col-d">${Y("SUN")}</td>
-  <td class="col-d">${Y("MON")}</td>
-  <td class="col-d">${Y("TUE")}</td>
-  <td class="col-d">${Y("WED")}</td>
-  <td class="col-d">${Y("THU")}</td>
-  <td class="col-d">${Y("FRI")}</td>
-  <td class="col-d">${Y("SAT")}</td>
-
-  <!-- ✅ Click to mark ✓ (prints reliably) -->
-  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Independent"></td>
-  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Verbal"></td>
-  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Physical"></td>
-  <td class="col-cs cs-click" data-group="cs-${idx}" data-value="Refused"></td>
-</tr>`;
-                })
-                .join("\n")
-            : `<tr><td colspan="18" style="text-align:center;">No duties</td></tr>`
-        }
+        ${rowsHtml}
       </tbody>
     </table>
-
-    <div class="footnote tight">
-      When entering the Task Number via the Phone System, press the POUND KEY (#) after each entry to speed up the task-entry process.
-    </div>
-
-    <div class="note-box">
-      <div class="note-title">POC Note:</div>
-      <div class="note-text">CALL 911 FOR MEDICAL EMERGENCIES OR FALLS AND THEN NOTIFY THE HOME CARE AGENCY AT THE OFFICE PHONE</div>
-      <div class="note-sub">LISTED ABOVE</div>
-    </div>
-
   </div>
+</div>
+${idx < days.length - 1 ? `<div class="pageBreak"></div>` : ""}`;
+    })
+    .join("\n")}
 
-  <script>
-  (function () {
-    function clearGroup(group) {
-      var cells = document.querySelectorAll('td.cs-click[data-group="' + group + '"]');
-      cells.forEach(function (c) { c.textContent = ""; c.classList.remove("cs-mark"); });
-    }
-
-    document.addEventListener("click", function (e) {
-      var td = e.target && e.target.closest ? e.target.closest("td.cs-click") : null;
-      if (!td) return;
-
-      var group = td.getAttribute("data-group") || "";
-      if (!group) return;
-
-      // toggle: if already marked -> clear; else mark and clear others
-      if (td.textContent && td.textContent.trim() !== "") {
-        td.textContent = "";
-        td.classList.remove("cs-mark");
-        return;
-      }
-
-      clearGroup(group);
-
-      // ✅ mark for print (text is always printed)
-      td.textContent = "✓"; // change to "V" if you prefer
-      td.classList.add("cs-mark");
-    });
-  })();
-  </script>
 </body>
 </html>`;
 
@@ -449,6 +721,9 @@ th { background: #e6e6e6; font-weight: 700; text-align: left; }
     });
   } catch (e: any) {
     console.error("GET /api/poc/[id]/print error:", e);
-    return new NextResponse("Internal Server Error", { status: 500 });
+    return new NextResponse(
+      `Internal Server Error\n${String(e?.message || e)}`,
+      { status: 500 }
+    );
   }
 }

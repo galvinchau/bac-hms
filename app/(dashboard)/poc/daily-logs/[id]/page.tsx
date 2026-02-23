@@ -89,7 +89,9 @@ async function readJsonOrThrow(res: Response) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
   if (!ct.includes("application/json")) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`API returned non-JSON (${res.status}). ${txt.slice(0, 120)}`);
+    throw new Error(
+      `API returned non-JSON (${res.status}). ${txt.slice(0, 120)}`
+    );
   }
   return res.json();
 }
@@ -178,7 +180,10 @@ function hasAnyTrue(obj: any) {
 function getDowKeyFromYmd(ymd: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
   const dt = new Date(`${ymd}T12:00:00.000Z`);
-  const wk = new Intl.DateTimeFormat("en-US", { timeZone: TZ_PA, weekday: "short" }).format(dt);
+  const wk = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ_PA,
+    weekday: "short",
+  }).format(dt);
 
   const map: Record<string, string> = {
     Sun: "sun",
@@ -232,7 +237,15 @@ function getTaskDutyId(t: TaskDetail, dutyById: Record<string, DutyItem>): strin
 function deriveActorFromMe(me: any): { actorId: string; actorName: string } {
   const u = me?.user || me;
 
-  const actorId = String(u?.employeeId || u?.dspId || u?.employee?.id || u?.id || u?.userId || u?.uid || "").trim();
+  const actorId = String(
+    u?.employeeId ||
+      u?.dspId ||
+      u?.employee?.id ||
+      u?.id ||
+      u?.userId ||
+      u?.uid ||
+      ""
+  ).trim();
 
   const actorName = String(
     u?.name ||
@@ -269,10 +282,35 @@ function tryReadSignedInNameFromHeader(): string {
         .split("\n")
         .map((x) => x.trim())
         .filter(Boolean);
-      if (after.length >= 2 && after[0] === "Signed in as" && after[1]) return after[1];
+      if (after.length >= 2 && after[0] === "Signed in as" && after[1])
+        return after[1];
     }
   } catch {}
   return "";
+}
+
+/**
+ * ✅ Always return some usable actor name.
+ * Priority:
+ * - actorName state
+ * - resolve actorId -> dspNames
+ * - read header "Signed in as <name>"
+ * - fallback
+ */
+function pickActorName(actorName: string, actorId: string, dspNames: Record<string, string>) {
+  const nm = String(actorName || "").trim();
+  if (nm) return nm;
+
+  const id0 = String(actorId || "").trim();
+  if (id0) {
+    const nm2 = String(dspNames?.[id0] || "").trim();
+    if (nm2) return nm2;
+  }
+
+  const headerName = tryReadSignedInNameFromHeader();
+  if (headerName) return headerName;
+
+  return "Signed-in User";
 }
 
 /* ===================== Lock / History helpers ===================== */
@@ -390,28 +428,19 @@ export default function DailyLogDetailPage() {
   }
 
   function bestActorDisplayNameStrict(): string {
-    const nm = String(actorName || "").trim();
-    if (nm) return nm;
-
-    const id0 = String(actorId || "").trim();
-    if (id0) {
-      const nm2 = bestNameFromId(id0);
-      if (nm2) return nm2;
-    }
-
-    const headerName = tryReadSignedInNameFromHeader();
-    if (headerName) return headerName;
-
-    return "Signed-in User";
+    return pickActorName(actorName, actorId, dspNames);
   }
 
   function getLockMeta(t: TaskDetail) {
     const lockName = String((t as any)?.lockedByName || "").trim();
     const lockId = String((t as any)?.lockedById || "").trim();
-    const lockAt = String((t as any)?.lockedAt || "").trim() || (String(t.timestamp || "").trim() ? String(t.timestamp) : "");
+    const lockAt =
+      String((t as any)?.lockedAt || "").trim() ||
+      (String(t.timestamp || "").trim() ? String(t.timestamp) : "");
 
-    // ✅ IMPORTANT: if lockName missing but lockId exists -> resolve via dspNames map
-    const resolvedName = lockName || (lockId ? bestNameFromId(lockId) : "") || (lockId ? lockId : "");
+    // ✅ If lockName missing but lockId exists -> resolve via dspNames map
+    const resolvedName =
+      lockName || (lockId ? bestNameFromId(lockId) : "") || (lockId ? lockId : "");
     return { name: resolvedName || "", at: lockAt || "", id: lockId || "" };
   }
 
@@ -421,7 +450,8 @@ export default function DailyLogDetailPage() {
     const editAt = String((t as any)?.lastEditedAt || "").trim();
     const reason = String((t as any)?.lastEditReason || "").trim();
 
-    const resolvedName = editName || (editId ? bestNameFromId(editId) : "") || (editId ? editId : "");
+    const resolvedName =
+      editName || (editId ? bestNameFromId(editId) : "") || (editId ? editId : "");
     return { name: resolvedName || "", at: editAt || "", reason, id: editId || "" };
   }
 
@@ -435,6 +465,7 @@ export default function DailyLogDetailPage() {
       if (a.actorId) setActorId(a.actorId);
       if (a.actorName) setActorName(a.actorName);
 
+      // If name missing, attempt to resolve via dsp-names and/or header
       if (!a.actorName) {
         if (a.actorId) await loadDspNamesByIds([a.actorId]);
         const nm2 = a.actorId ? bestNameFromId(a.actorId) : "";
@@ -458,7 +489,12 @@ export default function DailyLogDetailPage() {
     setDutiesLoaded(false);
     try {
       const res = await fetch(`/api/poc/duties?${qs({ pocId: pid })}`, { method: "GET" });
-      const json = (await readJsonOrThrow(res)) as { ok: boolean; items: DutyItem[]; error?: string; detail?: string };
+      const json = (await readJsonOrThrow(res)) as {
+        ok: boolean;
+        items: DutyItem[];
+        error?: string;
+        detail?: string;
+      };
       if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
       const map: Record<string, DutyItem> = {};
@@ -488,7 +524,12 @@ export default function DailyLogDetailPage() {
     setErr(null);
     try {
       const res = await fetch(`/api/poc/daily-logs/${encodeURIComponent(id)}`, { method: "GET" });
-      const json = (await readJsonOrThrow(res)) as { ok: boolean; item?: DailyLogDetail; error?: string; detail?: string };
+      const json = (await readJsonOrThrow(res)) as {
+        ok: boolean;
+        item?: DailyLogDetail;
+        error?: string;
+        detail?: string;
+      };
       if (!res.ok || !json.ok || !json.item) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
       setItem(json.item);
@@ -528,6 +569,7 @@ export default function DailyLogDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // ✅ Extra safety: grab header name shortly after render if actorName still empty
   useEffect(() => {
     const t = window.setTimeout(() => {
       if (!String(actorName || "").trim()) {
@@ -566,26 +608,28 @@ export default function DailyLogDetailPage() {
     if (taskIsLocked(cur)) return;
 
     const iso = nowIso();
+
+    // ✅ Always get best possible display name (header fallback)
     const resolvedName = bestActorDisplayNameStrict();
 
-    // ✅ ensure lock has both id + name for display
     updateTask(tid, {
       timestamp: iso,
       lockedAt: iso,
       lockedById: actorId || null,
-      lockedByName: resolvedName,
+      lockedByName: resolvedName || "Signed-in User",
     });
 
     appendTaskHistory(tid, {
       at: iso,
       byId: actorId || null,
-      byName: resolvedName,
+      byName: resolvedName || "Signed-in User",
       reason: null,
       action: "LOCK",
     });
 
     setDspLocked(true);
 
+    // If daily log dspId empty, set it to actorId
     setItem((prev) => {
       if (!prev) return prev;
       const curDsp = String(prev.dspId || "").trim();
@@ -614,7 +658,7 @@ export default function DailyLogDetailPage() {
     appendTaskHistory(taskId, {
       at: iso,
       byId: actorId || null,
-      byName: resolvedName,
+      byName: resolvedName || "Signed-in User",
       reason,
       action: "EDIT_ENABLE",
     });
@@ -673,7 +717,10 @@ export default function DailyLogDetailPage() {
     return isTaskTemporarilyEditable(String(t.id || ""));
   }
 
-  function mergeServerItemKeepingLocalMeta(serverItem: DailyLogDetail, localBefore?: DailyLogDetail | null): DailyLogDetail {
+  function mergeServerItemKeepingLocalMeta(
+    serverItem: DailyLogDetail,
+    localBefore?: DailyLogDetail | null
+  ): DailyLogDetail {
     if (!localBefore) return serverItem;
 
     const localById = new Map<string, TaskDetail>();
@@ -690,9 +737,15 @@ export default function DailyLogDetailPage() {
       out.lockedByName = String(out.lockedByName || "").trim() ? out.lockedByName : (lv as any).lockedByName ?? null;
 
       out.lastEditedAt = String(out.lastEditedAt || "").trim() ? out.lastEditedAt : (lv as any).lastEditedAt ?? null;
-      out.lastEditedById = String(out.lastEditedById || "").trim() ? out.lastEditedById : (lv as any).lastEditedById ?? null;
-      out.lastEditedByName = String(out.lastEditedByName || "").trim() ? out.lastEditedByName : (lv as any).lastEditedByName ?? null;
-      out.lastEditReason = String(out.lastEditReason || "").trim() ? out.lastEditReason : (lv as any).lastEditReason ?? null;
+      out.lastEditedById = String(out.lastEditedById || "").trim()
+        ? out.lastEditedById
+        : (lv as any).lastEditedById ?? null;
+      out.lastEditedByName = String(out.lastEditedByName || "").trim()
+        ? out.lastEditedByName
+        : (lv as any).lastEditedByName ?? null;
+      out.lastEditReason = String(out.lastEditReason || "").trim()
+        ? out.lastEditReason
+        : (lv as any).lastEditReason ?? null;
 
       const svHist = normalizeHistory((out as any).editHistory);
       const lvHist = normalizeHistory((lv as any).editHistory);
@@ -722,11 +775,17 @@ export default function DailyLogDetailPage() {
 
     try {
       const editedMetaByTask = editReasonByTaskRef.current || {};
+
+      // ✅ Best actor display (will fallback to header name)
       const actorDisplay = bestActorDisplayNameStrict();
+
+      // ✅ Ensure daily-log DSP set to actorId when possible
+      const effectiveDspId =
+        String(item.dspId || "").trim() ? item.dspId : (actorId ? actorId : item.dspId ?? null);
 
       const payload: any = {
         status: nextStatus || item.status,
-        dspId: item.dspId ?? null,
+        dspId: effectiveDspId ?? null,
 
         auditReason: auditReason ?? null,
         auditActorId: actorId || null,
@@ -770,6 +829,19 @@ export default function DailyLogDetailPage() {
 
           const lockAt = (t as any).lockedAt ?? (t.timestamp ? t.timestamp : null);
 
+          // ✅ HARD GUARANTEE:
+          // If task is locked (has lockAt/timestamp) but lockedByName is missing,
+          // stamp lockedByName = actorDisplay (the current logged-in user)
+          const isLocked = !!String(lockAt || "").trim() || !!String(t.timestamp || "").trim();
+          const currentLockedByName = String((t as any).lockedByName || "").trim();
+          const currentLockedById = String((t as any).lockedById || "").trim();
+
+          const lockedByNameOut =
+            currentLockedByName || (isLocked ? actorDisplay : "") || null;
+
+          const lockedByIdOut =
+            currentLockedById || (isLocked && actorId ? actorId : "") || null;
+
           return {
             pocDutyId: String((t as any)?.pocDutyId || (t as any)?.id || "").trim(),
             status: t.status,
@@ -777,8 +849,8 @@ export default function DailyLogDetailPage() {
             timestamp: t.timestamp ?? null,
 
             lockedAt: lockAt,
-            lockedById: (t as any).lockedById ?? null,
-            lockedByName: (t as any).lockedByName ?? null,
+            lockedById: lockedByIdOut,
+            lockedByName: lockedByNameOut,
 
             ...editedMeta,
             editHistory: nextHist.length ? nextHist : null,
@@ -792,7 +864,12 @@ export default function DailyLogDetailPage() {
         body: JSON.stringify(payload),
       });
 
-      const json = (await readJsonOrThrow(res)) as { ok: boolean; item?: DailyLogDetail; error?: string; detail?: string };
+      const json = (await readJsonOrThrow(res)) as {
+        ok: boolean;
+        item?: DailyLogDetail;
+        error?: string;
+        detail?: string;
+      };
       if (!res.ok || !json.ok || !json.item) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
       const merged = mergeServerItemKeepingLocalMeta(json.item, localBefore);
@@ -861,7 +938,9 @@ export default function DailyLogDetailPage() {
       <div className={`${pageWrap} p-4`}>
         <div className={`${card} ${cardInner}`}>
           <div className="text-lg font-semibold text-white">Daily Log Detail</div>
-          <div className={`mt-2 text-sm ${softText}`}>{loading ? "Loading..." : err ? `Error: ${err}` : "Not found."}</div>
+          <div className={`mt-2 text-sm ${softText}`}>
+            {loading ? "Loading..." : err ? `Error: ${err}` : "Not found."}
+          </div>
           <div className="mt-3">
             <button className={btn} onClick={onBack}>
               Back
@@ -949,7 +1028,11 @@ export default function DailyLogDetailPage() {
               >
                 Cancel
               </button>
-              <button className={btnPrimary} onClick={onTaskEditContinue} disabled={saving || !String(taskEditReason || "").trim()}>
+              <button
+                className={btnPrimary}
+                onClick={onTaskEditContinue}
+                disabled={saving || !String(taskEditReason || "").trim()}
+              >
                 Enable Edit
               </button>
             </div>
@@ -1043,7 +1126,11 @@ export default function DailyLogDetailPage() {
             <div className="rounded-md border border-white/10 bg-white/5 p-3">
               <div className={`text-xs text-[#f5c84c]`}>Status</div>
               <div className="mt-1 font-semibold text-base text-white">{item.status}</div>
-              {item.submittedAt ? <div className={`text-[11px] ${softText} mt-1`}>Submitted: {fmtLocalPA(item.submittedAt)}</div> : null}
+              {item.submittedAt ? (
+                <div className={`text-[11px] ${softText} mt-1`}>
+                  Submitted: {fmtLocalPA(item.submittedAt)}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1077,20 +1164,36 @@ export default function DailyLogDetailPage() {
                 ({(visibleTasks || []).length}/{(item.tasks || []).length})
               </span>
             </div>
-            <div className={`no-print text-xs ${softText}`}>Timezone: {TZ_PA}. If Timestamp is empty, server stamps now().</div>
+            <div className={`no-print text-xs ${softText}`}>
+              Timezone: {TZ_PA}. If Timestamp is empty, server stamps now().
+            </div>
           </div>
 
           <div className="mt-2 overflow-auto">
             <table className="print-table w-full table-auto text-sm border border-white/10">
               <thead className="bg-white/5">
                 <tr className="text-left">
-                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Task #</th>
-                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Duty</th>
-                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Status</th>
-                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Timestamp (PA)</th>
-                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">DSP</th>
-                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Note</th>
-                  <th className="no-print px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Quick</th>
+                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">
+                    Task #
+                  </th>
+                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">
+                    Duty
+                  </th>
+                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">
+                    Status
+                  </th>
+                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">
+                    Timestamp (PA)
+                  </th>
+                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">
+                    DSP
+                  </th>
+                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">
+                    Note
+                  </th>
+                  <th className="no-print px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">
+                    Quick
+                  </th>
                 </tr>
               </thead>
 
@@ -1105,10 +1208,14 @@ export default function DailyLogDetailPage() {
                   const edit = getEditMeta(t);
 
                   const lockWho = String(lock.name || "").trim() || String(lock.id || "").trim();
-                  const lockLine = locked ? `Locked${lockWho ? ` by ${lockWho}` : ""}${lock.at ? ` @ ${fmtLocalPA(lock.at)}` : ""}` : "";
+                  const lockLine = locked
+                    ? `Locked${lockWho ? ` by ${lockWho}` : ""}${lock.at ? ` @ ${fmtLocalPA(lock.at)}` : ""}`
+                    : "";
 
                   const editLine = edit.name
-                    ? `Edited by ${edit.name}${edit.at ? ` @ ${fmtLocalPA(edit.at)}` : ""}${edit.reason ? ` • ${edit.reason}` : ""}`
+                    ? `Edited by ${edit.name}${edit.at ? ` @ ${fmtLocalPA(edit.at)}` : ""}${
+                        edit.reason ? ` • ${edit.reason}` : ""
+                      }`
                     : "";
 
                   const showMiniHistory = editEnabled || hasAnyEditAction(hist);
