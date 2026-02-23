@@ -12,7 +12,7 @@ type ApiItem = {
   pocNumber?: string | null;
   individualId: string;
   dspId: string | null;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD (but API might return ISO)
   status: Status;
   submittedAt: string | null;
   createdAt: string;
@@ -40,6 +40,11 @@ type DutyItem = {
   instruction?: string | null;
   daysOfWeek?: any;
   sortOrder?: number | null;
+};
+
+type AuthMe = {
+  ok: boolean;
+  user?: any;
 };
 
 function qs(obj: Record<string, string | number | null | undefined>) {
@@ -214,35 +219,40 @@ function safeDecodeURIComponentOnce(s: string) {
   }
 }
 
-/**
- * Some callers accidentally encode returnTo twice.
- * Example: "/individual/detail" -> "%2Findividual%2Fdetail" -> "%252Findividual%252Fdetail"
- * We decode up to 2 times safely.
- */
 function normalizeReturnTo(raw: string) {
   let s = String(raw || "").trim();
   if (!s) return "";
 
-  // decode at most 2 times
   const d1 = safeDecodeURIComponentOnce(s);
   const d2 = safeDecodeURIComponentOnce(d1);
   s = d2;
 
-  // Must be a relative path
   if (s.startsWith("http://") || s.startsWith("https://")) return "";
 
-  // If someone passed "%2Findividual%2Fdetail" without decoding properly, ensure leading slash
   if (!s.startsWith("/")) {
-    // If it still contains encoded slashes, decode again
     const d3 = safeDecodeURIComponentOnce(s);
     s = d3;
     if (!s.startsWith("/")) s = "/" + s;
   }
 
-  // avoid weird whitespace
   s = s.replace(/\s+/g, "");
-
   return s;
+}
+
+function deriveActorFromMe(me: any): { actorId: string; actorName: string } {
+  const u = me?.user || me;
+
+  const actorId = String(u?.employeeId || u?.dspId || u?.employee?.id || u?.id || "").trim();
+  const actorName = String(u?.name || u?.fullName || u?.displayName || u?.email || "").trim();
+
+  return { actorId, actorName };
+}
+
+function isDifferentIso(a?: string | null, b?: string | null) {
+  const aa = String(a || "").trim();
+  const bb = String(b || "").trim();
+  if (!aa || !bb) return false;
+  return aa !== bb;
 }
 
 function DailyLogsListInner() {
@@ -274,12 +284,10 @@ function DailyLogsListInner() {
   const [data, setData] = useState<ApiResponse | null>(null);
 
   const [duties, setDuties] = useState<DutyItem[]>([]);
-  const [dspNameMap, setDspNameMap] = useState<Record<string, string>>({});
 
-  // NOTE: schedule dsp map may still be empty in your DB (we will debug next)
-  const [scheduleDspMap, setScheduleDspMap] = useState<
-    Record<string, { dspId: string | null; dspName: string | null }>
-  >({});
+  // ✅ Current user (for autofill when creating new day)
+  const [actorId, setActorId] = useState("");
+  const [actorName, setActorName] = useState("");
 
   const statusParam = useMemo(() => {
     const list: Status[] = [];
@@ -310,6 +318,20 @@ function DailyLogsListInner() {
     return out;
   }, [pocStart, endDate]);
 
+  async function loadMe() {
+    try {
+      const res = await fetch(`/api/auth/me`, { method: "GET" });
+      const json = (await readJsonOrThrow(res)) as AuthMe;
+      if (!res.ok || !json?.ok) return;
+
+      const { actorId, actorName } = deriveActorFromMe(json);
+      if (actorId) setActorId(actorId);
+      if (actorName) setActorName(actorName);
+    } catch {
+      // ignore
+    }
+  }
+
   async function loadDutiesOnce() {
     if (!prePocId) return;
     try {
@@ -319,50 +341,6 @@ function DailyLogsListInner() {
       setDuties(Array.isArray(json.items) ? json.items : []);
     } catch {
       setDuties([]);
-    }
-  }
-
-  async function loadScheduleDsp() {
-    if (!preIndividualId || !pocStart || !endDate) return;
-    if (!isYmd(pocStart) || !isYmd(endDate)) return;
-
-    try {
-      // ✅ FIX: pass pocId so API can read DSP from poc_daily_log (who updated/submitted)
-      const res = await fetch(
-        `/api/poc/schedule-dsp?${qs({
-          pocId: prePocId || null,
-          individualId: preIndividualId,
-          dateFrom: pocStart,
-          dateTo: endDate,
-        })}`,
-        { method: "GET" }
-      );
-
-      const json = (await readJsonOrThrow(res)) as {
-        ok: boolean;
-        map: Record<string, { dspId: string | null; dspName: string | null }>;
-        error?: string;
-        detail?: string;
-      };
-      if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
-
-      const nextMap = json.map || {};
-      setScheduleDspMap(nextMap);
-
-      // ✅ Load names for dspIds from schedule map (merge into dspNameMap)
-      const ids = Array.from(
-        new Set(Object.values(nextMap).map((x) => String(x?.dspId || "").trim()).filter(Boolean))
-      );
-
-      if (ids.length) {
-        const res2 = await fetch(`/api/poc/dsp-names?${qs({ ids: ids.join(",") })}`, { method: "GET" });
-        const j2 = (await readJsonOrThrow(res2)) as { ok: boolean; map: Record<string, string> };
-        if (res2.ok && j2.ok && j2.map) {
-          setDspNameMap((prev) => ({ ...(prev || {}), ...j2.map }));
-        }
-      }
-    } catch {
-      setScheduleDspMap({});
     }
   }
 
@@ -387,23 +365,18 @@ function DailyLogsListInner() {
 
       if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
       setData(json);
-
-      const ids = Array.from(new Set((json.items || []).map((x) => String(x?.dspId || "").trim()).filter(Boolean)));
-      if (ids.length) {
-        const res2 = await fetch(`/api/poc/dsp-names?${qs({ ids: ids.join(",") })}`, { method: "GET" });
-        const j2 = (await readJsonOrThrow(res2)) as { ok: boolean; map: Record<string, string> };
-        if (res2.ok && j2.ok && j2.map) setDspNameMap(j2.map);
-      } else {
-        setDspNameMap({});
-      }
     } catch (e: any) {
       setErr(String(e?.message || e));
       setData(null);
-      setDspNameMap({});
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     loadDutiesOnce();
@@ -411,19 +384,17 @@ function DailyLogsListInner() {
   }, [prePocId]);
 
   useEffect(() => {
-    loadScheduleDsp();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prePocId, preIndividualId, pocStart, endDate]);
-
-  useEffect(() => {
     loadRange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusParam, prePocId, preIndividualId, pocStart, endDate]);
 
+  // ✅ CRITICAL FIX:
+  // Normalize API date -> YYYY-MM-DD so submitted days match generatedDates keys.
   const byDate = useMemo(() => {
     const m = new Map<string, ApiItem>();
     (data?.items || []).forEach((x) => {
-      if (x?.date) m.set(String(x.date), x);
+      const key = normalizeToYmd(String(x?.date || ""));
+      if (key) m.set(key, x);
     });
     return m;
   }, [data]);
@@ -453,6 +424,8 @@ function DailyLogsListInner() {
     setLoading(true);
     setErr(null);
     try {
+      const createDspId = actorId || null;
+
       const res = await fetch(`/api/poc/daily-logs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -460,7 +433,7 @@ function DailyLogsListInner() {
           pocId: prePocId,
           individualId: preIndividualId,
           date: ymd,
-          dspId: null,
+          dspId: createDspId,
         }),
       });
 
@@ -473,7 +446,7 @@ function DailyLogsListInner() {
       };
       if (!res.ok || !json.ok || !json.id) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
-      router.push(buildDetailUrl({ id: json.id, date: ymd, dspId: null }));
+      router.push(buildDetailUrl({ id: json.id, date: ymd, dspId: createDspId }));
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
@@ -482,10 +455,6 @@ function DailyLogsListInner() {
   }
 
   function onClose() {
-    // ✅ Always return to Individual Detail (POC screen) without 404
-    // Priority:
-    // 1) valid returnTo from query
-    // 2) fallback: /individual/detail
     if (returnTo) {
       router.push(returnTo);
       return;
@@ -547,8 +516,9 @@ function DailyLogsListInner() {
     );
   }
 
+  const showWho = actorName ? `Signed in: ${actorName}` : "";
+
   return (
-    // ✅ GIÃN TOÀN KHUNG: w-full + px nhỏ hơn
     <div className="min-h-[calc(100vh-64px)] w-full px-4 py-6 bg-[#070B14] text-white">
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -558,6 +528,7 @@ function DailyLogsListInner() {
             <span className="font-mono">{fmtDatePA(endDate)}</span>
             <span className="ml-2 text-xs text-white/40">(Timezone: {TZ_PA})</span>
           </p>
+          {showWho ? <p className="mt-1 text-xs text-white/50">{showWho}</p> : null}
         </div>
         <div className="flex items-center gap-2">
           <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
@@ -566,7 +537,6 @@ function DailyLogsListInner() {
           <button
             className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-50"
             onClick={() => {
-              loadScheduleDsp();
               loadRange();
             }}
             disabled={loading}
@@ -591,6 +561,13 @@ function DailyLogsListInner() {
           <div className="text-sm text-white/70">
             Total days: <b>{generatedDates.length}</b> • Existing logs: <b>{data?.total ?? 0}</b>
           </div>
+
+          <div className="text-xs text-white/50">
+            Status meaning: <span className="text-white/70">EMPTY</span> (no log) •{" "}
+            <span className="text-yellow-200">DRAFT</span> (created) •{" "}
+            <span className="text-emerald-200">UPDATED</span> (draft updated) •{" "}
+            <span className="text-green-200">DONE</span> (submitted)
+          </div>
         </div>
 
         {err ? (
@@ -606,32 +583,33 @@ function DailyLogsListInner() {
         </div>
 
         <div className="overflow-auto">
-          <table className="w-full table-fixed text-[13px]">
+          {/* ✅ table-auto for natural column sizing */}
+          <table className="w-full table-auto text-[13px]">
             <thead className="bg-[#0A1020]">
               <tr className="text-left">
-                <th className="px-3 py-2 border-b border-white/10 w-[120px] text-[#FFD66B] font-bold">Date</th>
-                <th className="px-3 py-2 border-b border-white/10 w-[110px] text-[#FFD66B] font-bold">Status</th>
-                <th className="px-3 py-2 border-b border-white/10 w-[300px] text-[#FFD66B] font-bold">Duty</th>
-                <th className="px-3 py-2 border-b border-white/10 w-[320px] text-[#FFD66B] font-bold">
-                  Instruction
-                </th>
-                <th className="px-3 py-2 border-b border-white/10 w-[200px] text-[#FFD66B] font-bold">DSP Name</th>
+                <th className="px-3 py-2 border-b border-white/10 w-[140px] text-[#FFD66B] font-bold">Date</th>
+                <th className="px-3 py-2 border-b border-white/10 w-[160px] text-[#FFD66B] font-bold">Status</th>
 
-                {/* ✅ GIÃN NOTES */}
-                <th className="px-3 py-2 border-b border-white/10 w-[420px] text-[#FFD66B] font-bold">Notes</th>
+                {/* ✅ No fixed width: let it auto-size */}
+                <th className="px-3 py-2 border-b border-white/10 text-[#FFD66B] font-bold">Duty</th>
+                <th className="px-3 py-2 border-b border-white/10 text-[#FFD66B] font-bold">Instruction</th>
+
+                {/* ✅ Notes moved right next to Instruction */}
+                <th className="px-3 py-2 border-b border-white/10 text-[#FFD66B] font-bold">Notes</th>
               </tr>
             </thead>
 
             <tbody>
               {generatedDates.map((d) => {
                 const item = byDate.get(d);
-                const status = item?.status || "DRAFT";
                 const empty = !item;
+
+                const status: Status | null = item?.status ? item.status : null;
 
                 const list = dutiesForDay(d);
 
                 const dutyPreview = list.length
-                  ? truncate(list.slice(0, 2).map((x) => x.duty).filter(Boolean).join(" • "), 120)
+                  ? truncate(list.slice(0, 2).map((x) => x.duty).filter(Boolean).join(" • "), 160)
                   : "—";
 
                 const instrPreview = list.length
@@ -641,26 +619,37 @@ function DailyLogsListInner() {
                         .map((x) => String(x.instruction || "").trim())
                         .filter(Boolean)
                         .join(" • ") || "—",
-                      120
+                      160
                     )
                   : "—";
 
-                // DSP Name priority:
-                // 1) from daily log item.dspId (dspNameMap)
-                // 2) scheduleDspMap[date].dspName
-                // 3) scheduleDspMap[date].dspId -> dspNameMap
-                const logDspId = item?.dspId ? String(item.dspId) : "";
-                const dspFromLog = logDspId && dspNameMap[logDspId] ? dspNameMap[logDspId] : "";
+                const notesText = item ? "Open to view/edit" : "Not created yet (auto-create on open)";
 
-                const sched = scheduleDspMap[d];
-                const schedName = sched?.dspName ? String(sched.dspName) : "";
-                const schedId = sched?.dspId ? String(sched.dspId) : "";
-                const dspFromScheduleId = schedId && dspNameMap[schedId] ? dspNameMap[schedId] : "";
+                // ✅ Better status labeling (DONE / UPDATED / DRAFT / EMPTY)
+                const looksUpdated =
+                  !!item &&
+                  (item.status === "SUBMITTED" ||
+                    !!String(item.submittedAt || "").trim() ||
+                    !!String(item.dspId || "").trim() ||
+                    isDifferentIso(item.updatedAt, item.createdAt));
 
-                const dspName = dspFromLog || schedName || dspFromScheduleId || "—";
+                // ✅ Requirement: when submitted -> DONE with green check before word DONE
+                const statusLabel = empty
+                  ? "EMPTY"
+                  : status === "SUBMITTED"
+                  ? "✅ DONE"
+                  : looksUpdated
+                  ? "UPDATED"
+                  : "DRAFT";
 
-                // ✅ NOTES 1 dòng để khỏi đội row height
-                const notesText = item ? "Open to view/edit" : "Not created yet (will auto-create on open)";
+                const statusClass =
+                  empty
+                    ? "bg-white/5 border-white/10 text-white/60"
+                    : status === "SUBMITTED"
+                    ? "bg-green-500/10 border-green-500/30 text-green-200"
+                    : looksUpdated
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
+                    : "bg-yellow-500/10 border-yellow-500/30 text-yellow-200";
 
                 return (
                   <tr
@@ -669,50 +658,30 @@ function DailyLogsListInner() {
                     onClick={() => openDay(d)}
                     title="Open detail"
                   >
-                    {/* ✅ THU NHỎ ROW: py-1.5 */}
-                    <td className="px-3 py-1.5 align-middle">
+                    <td className="px-3 py-1.5 align-middle whitespace-nowrap">
                       <div className="font-bold leading-tight">{fmtDatePA(d)}</div>
                     </td>
 
-                    <td className="px-3 py-1.5 align-middle">
-                      {item ? (
-                        <span
-                          className={
-                            "inline-block px-2 py-1 rounded-full text-[11px] border " +
-                            (status === "SUBMITTED"
-                              ? "bg-green-500/10 border-green-500/30 text-green-200"
-                              : "bg-yellow-500/10 border-yellow-500/30 text-yellow-200")
-                          }
-                        >
-                          {status}
-                        </span>
-                      ) : (
-                        <span className="inline-block px-2 py-1 rounded-full text-[11px] border bg-white/5 border-white/10 text-white/60">
-                          EMPTY
-                        </span>
-                      )}
+                    <td className="px-3 py-1.5 align-middle whitespace-nowrap">
+                      <span className={"inline-block px-2 py-1 rounded-full text-[11px] border " + statusClass}>
+                        {statusLabel}
+                      </span>
                     </td>
 
                     <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/90 leading-tight truncate" title={dutyPreview}>
+                      <div className="text-white/90 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={dutyPreview}>
                         {dutyPreview}
                       </div>
                     </td>
 
                     <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/80 leading-tight truncate" title={instrPreview}>
+                      <div className="text-white/80 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={instrPreview}>
                         {instrPreview}
                       </div>
                     </td>
 
                     <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/80 leading-tight truncate" title={dspName}>
-                        {dspName}
-                      </div>
-                    </td>
-
-                    <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/70 leading-tight truncate" title={notesText}>
+                      <div className="text-white/70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={notesText}>
                         {notesText}
                       </div>
                     </td>
@@ -722,7 +691,7 @@ function DailyLogsListInner() {
 
               {generatedDates.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-white/60" colSpan={6}>
+                  <td className="px-4 py-8 text-center text-white/60" colSpan={5}>
                     No dates generated. Check POC Start/Stop.
                   </td>
                 </tr>

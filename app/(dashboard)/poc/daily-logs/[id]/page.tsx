@@ -1,23 +1,40 @@
 // web/app/(dashboard)/poc/daily-logs/[id]/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 type Status = "DRAFT" | "SUBMITTED";
-
-// ✅ Match DB enum: public.poc_duty_completion_status
 type TaskStatus = "INDEPENDENT" | "VERBAL_PROMPT" | "PHYSICAL_ASSIST" | "REFUSED";
 
+type TaskEditHistory = {
+  at: string; // ISO
+  byId?: string | null;
+  byName?: string | null;
+  reason?: string | null;
+  action: "LOCK" | "EDIT_ENABLE" | "EDIT_SAVE";
+};
+
 type TaskDetail = {
-  id: string; // may be pocDutyId OR taskLogId depending on API shape
-  pocDutyId: string; // may be pocDutyId OR taskLogId depending on API shape
+  id: string;
+  pocDutyId: string;
   taskNo?: number | null;
   duty: string;
   category?: string | null;
   status: TaskStatus | null;
   note?: string | null;
-  timestamp?: string | null; // ISO
+  timestamp?: string | null;
+
+  lockedAt?: string | null;
+  lockedById?: string | null;
+  lockedByName?: string | null;
+
+  lastEditedAt?: string | null;
+  lastEditedById?: string | null;
+  lastEditedByName?: string | null;
+  lastEditReason?: string | null;
+
+  editHistory?: TaskEditHistory[] | null;
 };
 
 type DailyLogDetail = {
@@ -25,12 +42,19 @@ type DailyLogDetail = {
   pocId: string;
   pocNumber?: string | null;
   individualId: string;
+
   dspId: string | null;
-  date: string; // may be YYYY-MM-DD OR ISO DateTime
+  dspLockedAt?: string | null;
+  date: string;
   status: Status;
   submittedAt: string | null;
   createdAt: string;
   updatedAt: string;
+
+  auditReason?: string | null;
+  auditUpdatedAt?: string | null;
+  auditActorName?: string | null;
+
   tasks: TaskDetail[];
 };
 
@@ -41,8 +65,13 @@ type DutyItem = {
   taskNo?: number | null;
   duty: string;
   instruction?: string | null;
-  daysOfWeek?: any; // jsonb in DB
+  daysOfWeek?: any;
   sortOrder?: number | null;
+};
+
+type AuthMe = {
+  ok: boolean;
+  user?: any;
 };
 
 function qs(obj: Record<string, string | number | null | undefined>) {
@@ -71,9 +100,6 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
-/**
- * ✅ Normalize any date string (YYYY-MM-DD or ISO) into YYYY-MM-DD.
- */
 function toYmdAny(input: string) {
   const s = String(input || "").trim();
   if (!s) return "";
@@ -86,9 +112,6 @@ function toYmdAny(input: string) {
   return `${y}-${m}-${dd}`;
 }
 
-/**
- * ✅ Create a safe Date object for display in PA.
- */
 function dateFromYmdNoShift(ymd: string) {
   if (!isYmd(ymd)) return null;
   const d = new Date(`${ymd}T12:00:00.000Z`);
@@ -145,10 +168,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-/* =========================================================
-   ✅ Days-of-week filtering helpers (DB format confirmed)
-   DB jsonb: {"sun":true,"mon":true,"tue":true,"wed":true,"thu":true,"fri":true,"sat":true}
-   ========================================================= */
+/* ===================== Days-of-week filtering ===================== */
 
 function hasAnyTrue(obj: any) {
   if (!obj || typeof obj !== "object") return false;
@@ -157,8 +177,6 @@ function hasAnyTrue(obj: any) {
 
 function getDowKeyFromYmd(ymd: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
-
-  // Midday UTC to avoid timezone shift across days
   const dt = new Date(`${ymd}T12:00:00.000Z`);
   const wk = new Intl.DateTimeFormat("en-US", { timeZone: TZ_PA, weekday: "short" }).format(dt);
 
@@ -175,12 +193,6 @@ function getDowKeyFromYmd(ymd: string): string | null {
   return map[wk] ?? null;
 }
 
-/**
- * ✅ Strictly filter by DB jsonb keys:
- * - If daysOfWeek is null/undefined => treat as "applies all days"
- * - If object exists but all false => "no days selected" => false
- * - Else check today key: sun/mon/tue/wed/thu/fri/sat
- */
 function dutyAppliesToDay(daysOfWeek: any, ymd: string): boolean {
   if (!daysOfWeek) return true;
 
@@ -188,34 +200,23 @@ function dutyAppliesToDay(daysOfWeek: any, ymd: string): boolean {
   if (!key) return true;
 
   let v: any = daysOfWeek;
-
-  // Some APIs may send jsonb as string
   if (typeof v === "string") {
     const raw = v.trim();
     if (!raw) return true;
     try {
       v = JSON.parse(raw);
     } catch {
-      // If not JSON, be permissive (don’t hide)
       return true;
     }
   }
 
   if (v && typeof v === "object" && !Array.isArray(v)) {
-    // If object has no true values -> none selected -> should be filtered out
     if (!hasAnyTrue(v)) return false;
     return v[key] === true;
   }
-
-  // Unknown format => be permissive
   return true;
 }
 
-/**
- * ✅ Because API shape can vary:
- * Sometimes t.id is the poc_duty.id, sometimes t.pocDutyId is.
- * We'll match using whichever exists in dutyById.
- */
 function getTaskDutyId(t: TaskDetail, dutyById: Record<string, DutyItem>): string {
   const a = String((t as any)?.pocDutyId || "").trim();
   const b = String((t as any)?.id || "").trim();
@@ -223,23 +224,228 @@ function getTaskDutyId(t: TaskDetail, dutyById: Record<string, DutyItem>): strin
   if (a && dutyById[a]) return a;
   if (b && dutyById[b]) return b;
 
-  // fallback: prefer pocDutyId if present, else id
   return a || b;
+}
+
+/* ===================== Auth actor ===================== */
+
+function deriveActorFromMe(me: any): { actorId: string; actorName: string } {
+  const u = me?.user || me;
+
+  const actorId = String(u?.employeeId || u?.dspId || u?.employee?.id || u?.id || u?.userId || u?.uid || "").trim();
+
+  const actorName = String(
+    u?.name ||
+      u?.fullName ||
+      u?.displayName ||
+      u?.profile?.name ||
+      u?.employee?.name ||
+      u?.employee?.fullName ||
+      u?.username ||
+      u?.userName ||
+      u?.email ||
+      ""
+  ).trim();
+
+  return { actorId, actorName };
+}
+
+function tryReadSignedInNameFromHeader(): string {
+  try {
+    const nodes = Array.from(document.querySelectorAll("*")) as HTMLElement[];
+    for (const el of nodes) {
+      const txt = String(el.textContent || "").trim();
+      if (txt === "Signed in as") {
+        const next = el.nextElementSibling as HTMLElement | null;
+        const name = String(next?.textContent || "").trim();
+        if (name) return name;
+      }
+    }
+    const bodyText = String(document.body?.innerText || "");
+    const idx = bodyText.indexOf("Signed in as");
+    if (idx >= 0) {
+      const after = bodyText
+        .slice(idx)
+        .split("\n")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (after.length >= 2 && after[0] === "Signed in as" && after[1]) return after[1];
+    }
+  } catch {}
+  return "";
+}
+
+/* ===================== Lock / History helpers ===================== */
+
+function taskIsLocked(t: TaskDetail) {
+  if (String((t as any)?.lockedAt || "").trim()) return true;
+  if (String(t.timestamp || "").trim()) return true;
+  return false;
+}
+
+function normalizeHistory(arr: any): TaskEditHistory[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((x) => ({
+      at: String(x?.at || x?.timestamp || x?.time || ""),
+      byId: x?.byId ?? x?.actorId ?? null,
+      byName: x?.byName ?? x?.actorName ?? null,
+      reason: x?.reason ?? null,
+      action: (x?.action as any) || "EDIT_SAVE",
+    }))
+    .filter((x) => !!x.at);
+}
+
+function hasAnyEditAction(hist: TaskEditHistory[]) {
+  return hist.some((h) => h.action === "EDIT_ENABLE" || h.action === "EDIT_SAVE");
+}
+
+function actionLabel(a: TaskEditHistory["action"]) {
+  if (a === "LOCK") return "LOCK";
+  if (a === "EDIT_ENABLE") return "EDIT ENABLED";
+  return "EDIT SAVED";
 }
 
 export default function DailyLogDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
   const id = String(params?.id || "").trim();
+
+  const returnToRaw = searchParams.get("returnTo") || "";
+  const returnTo = String(returnToRaw || "").trim();
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [item, setItem] = useState<DailyLogDetail | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // ✅ Duty list (by POC) to filter tasks by Days Of Week
   const [dutyById, setDutyById] = useState<Record<string, DutyItem>>({});
   const [dutiesLoaded, setDutiesLoaded] = useState(false);
+
+  const [actorId, setActorId] = useState<string>("");
+  const [actorName, setActorName] = useState<string>("");
+
+  const [dspNames, setDspNames] = useState<Record<string, string>>({});
+
+  const [dspLocked, setDspLocked] = useState(false);
+
+  const [reasonOpen, setReasonOpen] = useState(false);
+  const [reasonText, setReasonText] = useState("");
+  const [pendingNextStatus, setPendingNextStatus] = useState<Status | undefined>(undefined);
+
+  const [taskEditOpen, setTaskEditOpen] = useState(false);
+  const [taskEditReason, setTaskEditReason] = useState("");
+  const [taskEditId, setTaskEditId] = useState<string>("");
+  const [taskEditLabel, setTaskEditLabel] = useState<string>("");
+
+  const editableTaskIdsRef = useRef<Set<string>>(new Set());
+  const editReasonByTaskRef = useRef<Record<string, string>>({});
+
+  function isTaskTemporarilyEditable(taskId: string) {
+    return editableTaskIdsRef.current.has(taskId);
+  }
+
+  function markTaskEditable(taskId: string, reason: string) {
+    editableTaskIdsRef.current.add(taskId);
+    editReasonByTaskRef.current[taskId] = reason;
+  }
+
+  function clearTaskEditSession() {
+    editableTaskIdsRef.current = new Set();
+    editReasonByTaskRef.current = {};
+  }
+
+  function clearTaskEditable(taskId: string) {
+    const set = editableTaskIdsRef.current;
+    set.delete(taskId);
+    editableTaskIdsRef.current = set;
+
+    const map = editReasonByTaskRef.current;
+    delete map[taskId];
+    editReasonByTaskRef.current = map;
+  }
+
+  async function loadDspNamesByIds(ids: string[]) {
+    const unique = Array.from(new Set(ids.map((x) => String(x || "").trim()).filter(Boolean)));
+    if (!unique.length) return;
+
+    const missing = unique.filter((id) => !dspNames[id]);
+    if (!missing.length) return;
+
+    try {
+      const res = await fetch(`/api/poc/dsp-names?${qs({ ids: missing.join(",") })}`, { method: "GET" });
+      const json = (await readJsonOrThrow(res)) as { ok: boolean; map?: Record<string, string> };
+      if (!res.ok || !json?.ok) return;
+
+      const m = json.map || {};
+      setDspNames((prev) => ({ ...(prev || {}), ...m }));
+    } catch {}
+  }
+
+  function bestNameFromId(id: string) {
+    const k = String(id || "").trim();
+    if (!k) return "";
+    return String(dspNames[k] || "").trim();
+  }
+
+  function bestActorDisplayNameStrict(): string {
+    const nm = String(actorName || "").trim();
+    if (nm) return nm;
+
+    const id0 = String(actorId || "").trim();
+    if (id0) {
+      const nm2 = bestNameFromId(id0);
+      if (nm2) return nm2;
+    }
+
+    const headerName = tryReadSignedInNameFromHeader();
+    if (headerName) return headerName;
+
+    return "Signed-in User";
+  }
+
+  function getLockMeta(t: TaskDetail) {
+    const lockName = String((t as any)?.lockedByName || "").trim();
+    const lockId = String((t as any)?.lockedById || "").trim();
+    const lockAt = String((t as any)?.lockedAt || "").trim() || (String(t.timestamp || "").trim() ? String(t.timestamp) : "");
+
+    // ✅ IMPORTANT: if lockName missing but lockId exists -> resolve via dspNames map
+    const resolvedName = lockName || (lockId ? bestNameFromId(lockId) : "") || (lockId ? lockId : "");
+    return { name: resolvedName || "", at: lockAt || "", id: lockId || "" };
+  }
+
+  function getEditMeta(t: TaskDetail) {
+    const editName = String((t as any)?.lastEditedByName || "").trim();
+    const editId = String((t as any)?.lastEditedById || "").trim();
+    const editAt = String((t as any)?.lastEditedAt || "").trim();
+    const reason = String((t as any)?.lastEditReason || "").trim();
+
+    const resolvedName = editName || (editId ? bestNameFromId(editId) : "") || (editId ? editId : "");
+    return { name: resolvedName || "", at: editAt || "", reason, id: editId || "" };
+  }
+
+  async function loadMe() {
+    try {
+      const res = await fetch(`/api/auth/me`, { method: "GET" });
+      const json = (await readJsonOrThrow(res)) as AuthMe;
+      if (!res.ok || !json?.ok) return;
+
+      const a = deriveActorFromMe(json);
+      if (a.actorId) setActorId(a.actorId);
+      if (a.actorName) setActorName(a.actorName);
+
+      if (!a.actorName) {
+        if (a.actorId) await loadDspNamesByIds([a.actorId]);
+        const nm2 = a.actorId ? bestNameFromId(a.actorId) : "";
+        if (nm2) setActorName(nm2);
+        else {
+          const headerName = tryReadSignedInNameFromHeader();
+          if (headerName) setActorName(headerName);
+        }
+      }
+    } catch {}
+  }
 
   async function loadDutiesForPoc(pocId: string) {
     const pid = String(pocId || "").trim();
@@ -252,12 +458,7 @@ export default function DailyLogDetailPage() {
     setDutiesLoaded(false);
     try {
       const res = await fetch(`/api/poc/duties?${qs({ pocId: pid })}`, { method: "GET" });
-      const json = (await readJsonOrThrow(res)) as {
-        ok: boolean;
-        items: DutyItem[];
-        error?: string;
-        detail?: string;
-      };
+      const json = (await readJsonOrThrow(res)) as { ok: boolean; items: DutyItem[]; error?: string; detail?: string };
       if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
       const map: Record<string, DutyItem> = {};
@@ -269,10 +470,16 @@ export default function DailyLogDetailPage() {
       setDutyById(map);
       setDutiesLoaded(true);
     } catch {
-      // If duties cannot be loaded, do NOT filter (avoid hiding everything)
       setDutyById({});
       setDutiesLoaded(true);
     }
+  }
+
+  function computeDspLocked(nextItem: DailyLogDetail) {
+    const hasAnyTimestamp = (nextItem.tasks || []).some((t) => !!String(t?.timestamp || "").trim());
+    if (String(nextItem.dspLockedAt || "").trim()) return true;
+    if (hasAnyTimestamp) return true;
+    return false;
   }
 
   async function load() {
@@ -281,50 +488,155 @@ export default function DailyLogDetailPage() {
     setErr(null);
     try {
       const res = await fetch(`/api/poc/daily-logs/${encodeURIComponent(id)}`, { method: "GET" });
-      const json = (await readJsonOrThrow(res)) as {
-        ok: boolean;
-        item?: DailyLogDetail;
-        error?: string;
-        detail?: string;
-      };
+      const json = (await readJsonOrThrow(res)) as { ok: boolean; item?: DailyLogDetail; error?: string; detail?: string };
       if (!res.ok || !json.ok || !json.item) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
       setItem(json.item);
+      setDspLocked(computeDspLocked(json.item));
 
-      // ✅ Load duties for this POC so we can filter by Days Of Week
       await loadDutiesForPoc(json.item.pocId);
+
+      const ids: string[] = [];
+      (json.item.tasks || []).forEach((t) => {
+        if (t.lockedById) ids.push(String(t.lockedById));
+        if (t.lastEditedById) ids.push(String(t.lastEditedById));
+      });
+      if (json.item.dspId) ids.push(String(json.item.dspId));
+      if (actorId) ids.push(String(actorId));
+      await loadDspNamesByIds(ids);
+
+      clearTaskEditSession();
     } catch (e: any) {
       setErr(String(e?.message || e));
       setItem(null);
       setDutyById({});
       setDutiesLoaded(false);
+      setDspLocked(false);
+      clearTaskEditSession();
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
+    loadMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      if (!String(actorName || "").trim()) {
+        const headerName = tryReadSignedInNameFromHeader();
+        if (headerName) setActorName(headerName);
+      }
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [actorName]);
+
   function updateTask(taskId: string, patch: Partial<TaskDetail>) {
+    setItem((prev) => {
+      if (!prev) return prev;
+      return { ...prev, tasks: (prev.tasks || []).map((t) => (t.id === taskId ? { ...t, ...patch } : t)) };
+    });
+  }
+
+  function appendTaskHistory(taskId: string, h: TaskEditHistory) {
     setItem((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
-        tasks: (prev.tasks || []).map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
+        tasks: (prev.tasks || []).map((t) => {
+          if (t.id !== taskId) return t;
+          const cur = normalizeHistory((t as any).editHistory);
+          return { ...t, editHistory: [...cur, h] };
+        }),
       };
     });
   }
 
-  // ✅ Visible tasks: duties that belong to POC and match Days Of Week for this log date.
-  // NOTE: now 100% matches DB jsonb keys sun/mon/tue/wed/thu/fri/sat.
+  async function handleNow(tid: string) {
+    if (!item) return;
+    const cur = (item.tasks || []).find((x) => x.id === tid);
+    if (!cur) return;
+    if (taskIsLocked(cur)) return;
+
+    const iso = nowIso();
+    const resolvedName = bestActorDisplayNameStrict();
+
+    // ✅ ensure lock has both id + name for display
+    updateTask(tid, {
+      timestamp: iso,
+      lockedAt: iso,
+      lockedById: actorId || null,
+      lockedByName: resolvedName,
+    });
+
+    appendTaskHistory(tid, {
+      at: iso,
+      byId: actorId || null,
+      byName: resolvedName,
+      reason: null,
+      action: "LOCK",
+    });
+
+    setDspLocked(true);
+
+    setItem((prev) => {
+      if (!prev) return prev;
+      const curDsp = String(prev.dspId || "").trim();
+      if (curDsp) return prev;
+      if (!actorId) return prev;
+      return { ...prev, dspId: actorId };
+    });
+  }
+
+  function openEditTask(t: TaskDetail) {
+    const taskId = String(t.id || "").trim();
+    if (!taskId) return;
+
+    setTaskEditId(taskId);
+    setTaskEditLabel(`#${t.taskNo ?? ""} ${t.duty}`.trim());
+    setTaskEditReason("");
+    setTaskEditOpen(true);
+  }
+
+  async function enableEditTask(taskId: string, reason: string) {
+    const iso = nowIso();
+    const resolvedName = bestActorDisplayNameStrict();
+
+    markTaskEditable(taskId, reason);
+
+    appendTaskHistory(taskId, {
+      at: iso,
+      byId: actorId || null,
+      byName: resolvedName,
+      reason,
+      action: "EDIT_ENABLE",
+    });
+  }
+
+  async function onTaskEditContinue() {
+    const r = String(taskEditReason || "").trim();
+    const tid = String(taskEditId || "").trim();
+    if (!tid || !r) return;
+
+    await enableEditTask(tid, r);
+
+    setTaskEditOpen(false);
+    setTaskEditId("");
+    setTaskEditLabel("");
+    setTaskEditReason("");
+  }
+
   const visibleTasks = useMemo(() => {
     const tasks = item?.tasks || [];
     if (!item) return tasks;
 
-    // If duties not loaded yet, don't hide anything
     if (!dutiesLoaded) return tasks;
 
     const hasDutyMap = dutyById && Object.keys(dutyById).length > 0;
@@ -333,13 +645,11 @@ export default function DailyLogDetailPage() {
     const logYmd = toYmdAny(item.date);
     if (!logYmd) return tasks;
 
-    // 1) Keep only tasks whose duty exists in this POC
     const belongsToPoc = tasks.filter((t) => {
       const did = getTaskDutyId(t, dutyById);
       return !!did && !!dutyById[did];
     });
 
-    // 2) Filter by day-of-week (STRICT)
     const byDay = belongsToPoc.filter((t) => {
       const did = getTaskDutyId(t, dutyById);
       const duty = dutyById[did];
@@ -350,21 +660,130 @@ export default function DailyLogDetailPage() {
     return byDay;
   }, [item, dutiesLoaded, dutyById]);
 
-  async function save(nextStatus?: Status) {
+  function isOtherEditorNeedsReason(curItem: DailyLogDetail) {
+    const dsp = String(curItem?.dspId || "").trim();
+    if (!dspLocked) return false;
+    if (!actorId) return false;
+    if (!dsp) return false;
+    return actorId !== dsp;
+  }
+
+  function isTaskEditable(t: TaskDetail) {
+    if (!taskIsLocked(t)) return true;
+    return isTaskTemporarilyEditable(String(t.id || ""));
+  }
+
+  function mergeServerItemKeepingLocalMeta(serverItem: DailyLogDetail, localBefore?: DailyLogDetail | null): DailyLogDetail {
+    if (!localBefore) return serverItem;
+
+    const localById = new Map<string, TaskDetail>();
+    (localBefore.tasks || []).forEach((t) => localById.set(String(t.id), t));
+
+    const mergedTasks = (serverItem.tasks || []).map((sv) => {
+      const lv = localById.get(String(sv.id));
+      if (!lv) return sv;
+
+      const out: TaskDetail = { ...sv };
+
+      out.lockedAt = String(out.lockedAt || "").trim() ? out.lockedAt : (lv as any).lockedAt ?? null;
+      out.lockedById = String(out.lockedById || "").trim() ? out.lockedById : (lv as any).lockedById ?? null;
+      out.lockedByName = String(out.lockedByName || "").trim() ? out.lockedByName : (lv as any).lockedByName ?? null;
+
+      out.lastEditedAt = String(out.lastEditedAt || "").trim() ? out.lastEditedAt : (lv as any).lastEditedAt ?? null;
+      out.lastEditedById = String(out.lastEditedById || "").trim() ? out.lastEditedById : (lv as any).lastEditedById ?? null;
+      out.lastEditedByName = String(out.lastEditedByName || "").trim() ? out.lastEditedByName : (lv as any).lastEditedByName ?? null;
+      out.lastEditReason = String(out.lastEditReason || "").trim() ? out.lastEditReason : (lv as any).lastEditReason ?? null;
+
+      const svHist = normalizeHistory((out as any).editHistory);
+      const lvHist = normalizeHistory((lv as any).editHistory);
+      const combined = [...lvHist, ...svHist];
+      const seen = new Set<string>();
+      const uniq = combined.filter((h) => {
+        const k = `${h.action}|${h.at}|${h.byId || ""}|${h.byName || ""}|${h.reason || ""}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      out.editHistory = uniq.length ? uniq : null;
+
+      return out;
+    });
+
+    return { ...serverItem, tasks: mergedTasks };
+  }
+
+  async function doSave(nextStatus?: Status, auditReason?: string, opts?: { stay?: boolean }) {
     if (!item) return;
 
     setSaving(true);
     setErr(null);
+
+    const localBefore = item;
+
     try {
-      const payload = {
+      const editedMetaByTask = editReasonByTaskRef.current || {};
+      const actorDisplay = bestActorDisplayNameStrict();
+
+      const payload: any = {
         status: nextStatus || item.status,
-        tasks: (visibleTasks || []).map((t) => ({
-          // ✅ API expects pocDutyId (duty id). Use best-effort:
-          pocDutyId: String((t as any)?.pocDutyId || (t as any)?.id || "").trim(),
-          status: t.status,
-          note: t.note ?? null,
-          timestamp: t.timestamp ?? null,
-        })),
+        dspId: item.dspId ?? null,
+
+        auditReason: auditReason ?? null,
+        auditActorId: actorId || null,
+        auditActorName: actorDisplay,
+
+        tasks: (visibleTasks || []).map((t) => {
+          const taskId = String(t.id || "").trim();
+          const reason = String(editedMetaByTask[taskId] || "").trim();
+          const history = normalizeHistory((t as any).editHistory);
+
+          const saveStampIso = nowIso();
+
+          const editedMeta =
+            reason && taskIsLocked(t)
+              ? {
+                  lastEditedAt: saveStampIso,
+                  lastEditedById: actorId || null,
+                  lastEditedByName: actorDisplay,
+                  lastEditReason: reason,
+                }
+              : {
+                  lastEditedAt: (t as any).lastEditedAt ?? null,
+                  lastEditedById: (t as any).lastEditedById ?? null,
+                  lastEditedByName: (t as any).lastEditedByName ?? null,
+                  lastEditReason: (t as any).lastEditReason ?? null,
+                };
+
+          const nextHist =
+            reason && taskIsLocked(t)
+              ? [
+                  ...history,
+                  {
+                    at: saveStampIso,
+                    byId: actorId || null,
+                    byName: actorDisplay,
+                    reason,
+                    action: "EDIT_SAVE" as const,
+                  },
+                ]
+              : history;
+
+          const lockAt = (t as any).lockedAt ?? (t.timestamp ? t.timestamp : null);
+
+          return {
+            pocDutyId: String((t as any)?.pocDutyId || (t as any)?.id || "").trim(),
+            status: t.status,
+            note: t.note ?? null,
+            timestamp: t.timestamp ?? null,
+
+            lockedAt: lockAt,
+            lockedById: (t as any).lockedById ?? null,
+            lockedByName: (t as any).lockedByName ?? null,
+
+            ...editedMeta,
+            editHistory: nextHist.length ? nextHist : null,
+          };
+        }),
       };
 
       const res = await fetch(`/api/poc/daily-logs/${encodeURIComponent(item.id)}`, {
@@ -373,17 +792,28 @@ export default function DailyLogDetailPage() {
         body: JSON.stringify(payload),
       });
 
-      const json = (await readJsonOrThrow(res)) as {
-        ok: boolean;
-        item?: DailyLogDetail;
-        error?: string;
-        detail?: string;
-      };
+      const json = (await readJsonOrThrow(res)) as { ok: boolean; item?: DailyLogDetail; error?: string; detail?: string };
       if (!res.ok || !json.ok || !json.item) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
 
-      setItem(json.item);
+      const merged = mergeServerItemKeepingLocalMeta(json.item, localBefore);
 
-      router.back();
+      setItem(merged);
+      setDspLocked(computeDspLocked(merged));
+
+      const ids: string[] = [];
+      (merged.tasks || []).forEach((t) => {
+        if (t.lockedById) ids.push(String(t.lockedById));
+        if (t.lastEditedById) ids.push(String(t.lastEditedById));
+      });
+      if (merged.dspId) ids.push(String(merged.dspId));
+      if (actorId) ids.push(String(actorId));
+      await loadDspNamesByIds(ids);
+
+      clearTaskEditSession();
+
+      if (!opts?.stay) {
+        router.back();
+      }
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
@@ -391,7 +821,33 @@ export default function DailyLogDetailPage() {
     }
   }
 
-  // ✅ Dark theme wrapper
+  async function save(nextStatus?: Status) {
+    if (!item) return;
+
+    if (isOtherEditorNeedsReason(item)) {
+      setPendingNextStatus(nextStatus);
+      setReasonText("");
+      setReasonOpen(true);
+      return;
+    }
+
+    await doSave(nextStatus);
+  }
+
+  async function saveTaskOnly(taskId: string) {
+    if (!item) return;
+    await doSave(item.status, undefined, { stay: true });
+    clearTaskEditable(taskId);
+  }
+
+  function onBack() {
+    if (returnTo) {
+      router.push(returnTo);
+      return;
+    }
+    router.back();
+  }
+
   const pageWrap = "min-h-[calc(100vh-64px)] bg-[#071427] text-white";
   const card = "rounded-lg border border-white/10 bg-[#071427]";
   const cardInner = "p-4";
@@ -405,11 +861,9 @@ export default function DailyLogDetailPage() {
       <div className={`${pageWrap} p-4`}>
         <div className={`${card} ${cardInner}`}>
           <div className="text-lg font-semibold text-white">Daily Log Detail</div>
-          <div className={`mt-2 text-sm ${softText}`}>
-            {loading ? "Loading..." : err ? `Error: ${err}` : "Not found."}
-          </div>
+          <div className={`mt-2 text-sm ${softText}`}>{loading ? "Loading..." : err ? `Error: ${err}` : "Not found."}</div>
           <div className="mt-3">
-            <button className={btn} onClick={() => router.back()}>
+            <button className={btn} onClick={onBack}>
               Back
             </button>
           </div>
@@ -423,6 +877,11 @@ export default function DailyLogDetailPage() {
   const printTitle = `Daily Log — ${displayHeaderDate}`;
   const pocDisplay = item.pocNumber?.trim() ? item.pocNumber : item.pocId;
 
+  const showAuditBox =
+    String(item.auditReason || "").trim() ||
+    String(item.auditUpdatedAt || "").trim() ||
+    String(item.auditActorName || "").trim();
+
   return (
     <div className={`${pageWrap} p-4`}>
       <style>{`
@@ -434,13 +893,104 @@ export default function DailyLogDetailPage() {
         }
       `}</style>
 
+      {/* Task Edit Reason modal */}
+      {taskEditOpen ? (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-white/10 bg-[#0B1220] p-4 shadow-xl">
+            <div className="text-lg font-semibold text-white">Edit Locked Task</div>
+            <div className="mt-2 text-sm text-white/70">
+              This task is locked (after <b>Now</b>). To edit Status/Note, please enter a reason.
+            </div>
+            <div className="mt-2 text-xs text-white/60">
+              Task: <span className="font-mono">{taskEditLabel || taskEditId}</span>
+            </div>
+
+            <div className="mt-3">
+              <textarea
+                className="w-full min-h-[110px] rounded-lg border border-white/10 bg-white/10 p-3 text-white outline-none"
+                value={taskEditReason}
+                onChange={(e) => setTaskEditReason(e.target.value)}
+                placeholder="Enter edit reason (required)..."
+              />
+            </div>
+
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                className={btn}
+                onClick={() => {
+                  setTaskEditOpen(false);
+                  setTaskEditId("");
+                  setTaskEditLabel("");
+                  setTaskEditReason("");
+                }}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button className={btnPrimary} onClick={onTaskEditContinue} disabled={saving || !String(taskEditReason || "").trim()}>
+                Enable Edit
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Daily-level Reason modal */}
+      {reasonOpen ? (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-white/10 bg-[#0B1220] p-4 shadow-xl">
+            <div className="text-lg font-semibold text-white">Reason Required</div>
+            <div className="mt-2 text-sm text-white/70">
+              This Daily Log has a locked DSP. You are updating as a different user, so please enter a reason.
+            </div>
+
+            <div className="mt-3">
+              <textarea
+                className="w-full min-h-[110px] rounded-lg border border-white/10 bg-white/10 p-3 text-white outline-none"
+                value={reasonText}
+                onChange={(e) => setReasonText(e.target.value)}
+                placeholder="Enter reason (required)..."
+              />
+            </div>
+
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                className={btn}
+                onClick={() => {
+                  setReasonOpen(false);
+                  setPendingNextStatus(undefined);
+                  setReasonText("");
+                }}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                className={btnPrimary}
+                onClick={async () => {
+                  const r = String(reasonText || "").trim();
+                  if (!r) return;
+                  setReasonOpen(false);
+                  const ns = pendingNextStatus;
+                  setPendingNextStatus(undefined);
+                  await doSave(ns, r);
+                }}
+                disabled={saving || !String(reasonText || "").trim()}
+              >
+                Continue Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="no-print flex items-center justify-between mb-3">
         <div>
           <div className="text-xl font-semibold text-white">{printTitle}</div>
           <div className={`text-sm ${softText} ${mono}`}>Log ID: {item.id}</div>
         </div>
         <div className="flex items-center gap-2">
-          <button className={btn} onClick={() => router.back()} disabled={saving}>
+          <button className={btn} onClick={onBack} disabled={saving}>
             Back
           </button>
           <button className={btn} onClick={() => window.print()} disabled={saving}>
@@ -456,7 +1006,7 @@ export default function DailyLogDetailPage() {
       ) : null}
 
       <div className={`print-card ${card} ${cardInner}`}>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="rounded-md border border-white/10 bg-white/5 p-3">
             <div className={`text-xs text-[#f5c84c]`}>Date</div>
             <div className={`mt-1 ${mono} text-base text-white`}>{displayDate}</div>
@@ -468,29 +1018,43 @@ export default function DailyLogDetailPage() {
           </div>
 
           <div className="rounded-md border border-white/10 bg-white/5 p-3">
-            <div className={`text-xs text-[#f5c84c]`}>DSP</div>
-            <div className={`mt-1 ${mono} text-base text-white`}>{item.dspId || "—"}</div>
-          </div>
-
-          <div className="rounded-md border border-white/10 bg-white/5 p-3">
             <div className={`text-xs text-[#f5c84c]`}>Status</div>
             <div className="mt-1 font-semibold text-base text-white">{item.status}</div>
-            {item.submittedAt ? (
-              <div className={`text-[11px] ${softText} mt-1`}>Submitted: {fmtLocalPA(item.submittedAt)}</div>
-            ) : null}
+            {item.submittedAt ? <div className={`text-[11px] ${softText} mt-1`}>Submitted: {fmtLocalPA(item.submittedAt)}</div> : null}
           </div>
         </div>
+
+        {showAuditBox ? (
+          <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3">
+            <div className="text-xs font-semibold text-[#f5c84c]">Audit</div>
+            <div className="mt-1 text-sm text-white/80">
+              {item.auditReason ? (
+                <div>
+                  <span className="text-white/60">Reason:</span> {item.auditReason}
+                </div>
+              ) : null}
+              {item.auditActorName ? (
+                <div className="mt-1">
+                  <span className="text-white/60">Updated By:</span> {item.auditActorName}
+                </div>
+              ) : null}
+              {item.auditUpdatedAt ? (
+                <div className="mt-1">
+                  <span className="text-white/60">Updated At:</span> {fmtLocalPA(item.auditUpdatedAt)}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex items-center justify-between">
           <div className="text-sm font-semibold text-white">
             Tasks{" "}
             <span className="text-xs text-white/50">
-              ({visibleTasks.length}/{(item.tasks || []).length})
+              ({(visibleTasks || []).length}/{(item.tasks || []).length})
             </span>
           </div>
-          <div className={`no-print text-xs ${softText}`}>
-            Timezone: {TZ_PA}. If Timestamp is empty, server stamps now().
-          </div>
+          <div className={`no-print text-xs ${softText}`}>Timezone: {TZ_PA}. If Timestamp is empty, server stamps now().</div>
         </div>
 
         <div className="mt-2 overflow-auto">
@@ -500,86 +1064,187 @@ export default function DailyLogDetailPage() {
                 <th className="px-3 py-2 border border-white/10 w-[90px] text-[#f5c84c] font-bold">Task #</th>
                 <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Duty</th>
                 <th className="px-3 py-2 border border-white/10 w-[220px] text-[#f5c84c] font-bold">Status</th>
-                <th className="px-3 py-2 border border-white/10 w-[240px] text-[#f5c84c] font-bold">
-                  Timestamp (PA)
-                </th>
+                <th className="px-3 py-2 border border-white/10 w-[240px] text-[#f5c84c] font-bold">Timestamp (PA)</th>
+                <th className="px-3 py-2 border border-white/10 w-[300px] text-[#f5c84c] font-bold">DSP</th>
                 <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Note</th>
-                <th className="no-print px-3 py-2 border border-white/10 w-[90px] text-[#f5c84c] font-bold">Quick</th>
+                <th className="no-print px-3 py-2 border border-white/10 w-[220px] text-[#f5c84c] font-bold">Quick</th>
               </tr>
             </thead>
 
             <tbody className="text-white">
-              {(visibleTasks || []).map((t) => (
-                <tr key={t.id} className="hover:bg-white/5">
-                  <td className={`px-3 py-2 border border-white/10 ${mono}`}>{t.taskNo ?? ""}</td>
-                  <td className="px-3 py-2 border border-white/10">{t.duty}</td>
+              {(visibleTasks || []).map((t) => {
+                const locked = taskIsLocked(t);
+                const canEdit = isTaskEditable(t);
+                const hist = normalizeHistory((t as any).editHistory);
+                const editEnabled = isTaskTemporarilyEditable(String(t.id || ""));
 
-                  <td className="px-3 py-2 border border-white/10">
-                    <select
-                      className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print"
-                      value={t.status ?? ""}
-                      onChange={(e) => updateTask(t.id, { status: (e.target.value as TaskStatus) || null })}
-                      disabled={saving}
-                    >
-                      <option value="" className="bg-[#071427]">
-                        (Select)
-                      </option>
-                      <option value="INDEPENDENT" className="bg-[#071427]">
-                        Independent
-                      </option>
-                      <option value="VERBAL_PROMPT" className="bg-[#071427]">
-                        Verbal Prompt
-                      </option>
-                      <option value="PHYSICAL_ASSIST" className="bg-[#071427]">
-                        Physical Assist
-                      </option>
-                      <option value="REFUSED" className="bg-[#071427]">
-                        Refused
-                      </option>
-                    </select>
+                const lock = getLockMeta(t);
+                const edit = getEditMeta(t);
 
-                    <div className="hidden print:block">{t.status || ""}</div>
-                  </td>
+                // ✅ LOCK LINE MUST SHOW DSP NAME (fallback: id)
+                const lockWho = String(lock.name || "").trim() || String(lock.id || "").trim();
+                const lockLine = locked
+                  ? `Locked${lockWho ? ` by ${lockWho}` : ""}${lock.at ? ` @ ${fmtLocalPA(lock.at)}` : ""}`
+                  : "";
 
-                  <td className="px-3 py-2 border border-white/10">
-                    <div className="no-print">
+                const editLine = edit.name
+                  ? `Edited by ${edit.name}${edit.at ? ` @ ${fmtLocalPA(edit.at)}` : ""}${edit.reason ? ` • ${edit.reason}` : ""}`
+                  : "";
+
+                const showMiniHistory = editEnabled || hasAnyEditAction(hist);
+                const mini = showMiniHistory ? hist.slice().reverse().slice(0, 6) : [];
+
+                return (
+                  <tr key={t.id} className="hover:bg-white/5 align-top">
+                    <td className={`px-3 py-2 border border-white/10 ${mono}`}>{t.taskNo ?? ""}</td>
+
+                    {/* Duty only */}
+                    <td className="px-3 py-2 border border-white/10">
+                      <div className="flex flex-col">
+                        <div>{t.duty}</div>
+                      </div>
+                    </td>
+
+                    <td className="px-3 py-2 border border-white/10">
+                      <select
+                        className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print disabled:opacity-60"
+                        value={t.status ?? ""}
+                        onChange={(e) => updateTask(t.id, { status: (e.target.value as TaskStatus) || null })}
+                        disabled={saving || !canEdit}
+                        title={locked && !canEdit ? "Locked. Click Edit (reason required) to modify." : ""}
+                      >
+                        <option value="" className="bg-[#071427]">
+                          (Select)
+                        </option>
+                        <option value="INDEPENDENT" className="bg-[#071427]">
+                          Independent
+                        </option>
+                        <option value="VERBAL_PROMPT" className="bg-[#071427]">
+                          Verbal Prompt
+                        </option>
+                        <option value="PHYSICAL_ASSIST" className="bg-[#071427]">
+                          Physical Assist
+                        </option>
+                        <option value="REFUSED" className="bg-[#071427]">
+                          Refused
+                        </option>
+                      </select>
+
+                      <div className="hidden print:block">{t.status || ""}</div>
+                    </td>
+
+                    <td className="px-3 py-2 border border-white/10">
+                      <div className="no-print">
+                        <input
+                          className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white"
+                          value={t.timestamp ? fmtLocalPA(t.timestamp) : "(auto)"}
+                          readOnly
+                        />
+                      </div>
+                      <div className="hidden print:block">{t.timestamp ? fmtLocalPA(t.timestamp) : ""}</div>
+                    </td>
+
+                    {/* DSP column all yellow */}
+                    <td className="px-3 py-2 border border-white/10">
+                      <div className="text-[12px] text-[#f5c84c]">
+                        {lockLine ? (
+                          <div className="truncate" title={lockLine}>
+                            {lockLine}
+                          </div>
+                        ) : (
+                          <div className="opacity-70">—</div>
+                        )}
+
+                        {editLine ? (
+                          <div className="mt-1 opacity-90 truncate" title={editLine}>
+                            {editLine}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {showMiniHistory ? (
+                        <div className="mt-2 rounded-md border border-white/10 bg-white/5 p-2">
+                          <div className="text-[11px] font-semibold text-[#f5c84c] mb-1">Edit History</div>
+                          <div className="space-y-1">
+                            {mini.map((h, idx) => {
+                              const who = String(h.byName || h.byId || "Signed-in User");
+                              const when = fmtLocalPA(h.at);
+                              return (
+                                <div key={idx} className="text-[11px] text-[#f5c84c] flex flex-wrap gap-x-2 gap-y-0.5">
+                                  <span className="font-mono opacity-90">{when}</span>
+                                  <span className="opacity-100">{actionLabel(h.action)}</span>
+                                  <span className="opacity-80">by</span>
+                                  <span className="opacity-100">{who}</span>
+                                  {h.reason ? (
+                                    <>
+                                      <span className="opacity-70">•</span>
+                                      <span className="opacity-85">reason:</span>
+                                      <span className="opacity-100">{h.reason}</span>
+                                    </>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {editEnabled ? (
+                        <div className="mt-2 text-[11px] text-[#f5c84c] truncate">
+                          Edit enabled: {String(editReasonByTaskRef.current[String(t.id || "")] || "")}
+                        </div>
+                      ) : null}
+                    </td>
+
+                    <td className="px-3 py-2 border border-white/10">
                       <input
-                        className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white"
-                        value={t.timestamp ? fmtLocalPA(t.timestamp) : "(auto)"}
-                        readOnly
+                        className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print disabled:opacity-60"
+                        value={t.note || ""}
+                        onChange={(e) => updateTask(t.id, { note: e.target.value })}
+                        placeholder={locked && !canEdit ? "Locked" : "Optional note..."}
+                        disabled={saving || !canEdit}
+                        title={locked && !canEdit ? "Locked. Click Edit (reason required) to modify." : ""}
                       />
-                    </div>
+                      <div className="hidden print:block">{t.note || ""}</div>
+                    </td>
 
-                    <div className="hidden print:block">{t.timestamp ? fmtLocalPA(t.timestamp) : ""}</div>
-                  </td>
+                    <td className="no-print px-3 py-2 border border-white/10">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
+                          onClick={() => handleNow(t.id)}
+                          disabled={saving || locked}
+                          title={locked ? "Already locked" : "Stamp timestamp + lock this task"}
+                        >
+                          Now
+                        </button>
 
-                  <td className="px-3 py-2 border border-white/10">
-                    <input
-                      className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print"
-                      value={t.note || ""}
-                      onChange={(e) => updateTask(t.id, { note: e.target.value })}
-                      placeholder="Optional note..."
-                      disabled={saving}
-                    />
-                    <div className="hidden print:block">{t.note || ""}</div>
-                  </td>
+                        <button
+                          className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
+                          onClick={() => openEditTask(t)}
+                          disabled={saving || !locked}
+                          title={locked ? "Edit locked task (reason required)" : "Available after Now"}
+                        >
+                          Edit
+                        </button>
 
-                  <td className="no-print px-3 py-2 border border-white/10">
-                    <button
-                      className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs"
-                      onClick={() => updateTask(t.id, { timestamp: nowIso() })}
-                      disabled={saving}
-                      title="Fill timestamp now"
-                    >
-                      Now
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                        <button
+                          className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
+                          onClick={() => saveTaskOnly(String(t.id || ""))}
+                          disabled={saving || !editEnabled}
+                          title={editEnabled ? "Save changes for this task" : "Enable Edit first"}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {(visibleTasks || []).length === 0 ? (
                 <tr>
-                  <td className={`px-3 py-6 text-center border border-white/10 ${softText}`} colSpan={6}>
+                  <td className={`px-3 py-6 text-center border border-white/10 ${softText}`} colSpan={7}>
                     No tasks for this POC (based on Days Of Week).
                   </td>
                 </tr>
