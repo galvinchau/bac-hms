@@ -285,7 +285,6 @@ function DailyLogsListInner() {
 
   const [duties, setDuties] = useState<DutyItem[]>([]);
 
-  // ✅ Current user (for autofill when creating new day)
   const [actorId, setActorId] = useState("");
   const [actorName, setActorName] = useState("");
 
@@ -327,9 +326,7 @@ function DailyLogsListInner() {
       const { actorId, actorName } = deriveActorFromMe(json);
       if (actorId) setActorId(actorId);
       if (actorName) setActorName(actorName);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   async function loadDutiesOnce() {
@@ -388,8 +385,6 @@ function DailyLogsListInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusParam, prePocId, preIndividualId, pocStart, endDate]);
 
-  // ✅ CRITICAL FIX:
-  // Normalize API date -> YYYY-MM-DD so submitted days match generatedDates keys.
   const byDate = useMemo(() => {
     const m = new Map<string, ApiItem>();
     (data?.items || []).forEach((x) => {
@@ -484,10 +479,7 @@ function DailyLogsListInner() {
             Please open Daily Logs from the POC module button so the page receives the required parameters.
           </div>
           <div className="mt-4">
-            <button
-              className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10"
-              onClick={onClose}
-            >
+            <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
               Close
             </button>
           </div>
@@ -504,10 +496,7 @@ function DailyLogsListInner() {
           <div className="mt-2 text-sm text-red-300">Missing pocStart in query.</div>
           <div className="mt-2 text-sm text-white/70">POC Start Date is required to generate daily log dates.</div>
           <div className="mt-4 flex items-center gap-2">
-            <button
-              className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10"
-              onClick={onClose}
-            >
+            <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
               Close
             </button>
           </div>
@@ -518,186 +507,185 @@ function DailyLogsListInner() {
 
   const showWho = actorName ? `Signed in: ${actorName}` : "";
 
+  // ✅ FULL-BLEED breakout: escape any parent max-width container
+  const fullBleedStyle: React.CSSProperties = {
+    width: "100vw",
+    marginLeft: "calc(50% - 50vw)",
+    marginRight: "calc(50% - 50vw)",
+  };
+
   return (
-    <div className="min-h-[calc(100vh-64px)] w-full px-4 py-6 bg-[#070B14] text-white">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">Daily Logs{titleSuffix}</h1>
-          <p className="mt-1 text-sm text-white/70">
-            Range: <span className="font-mono">{fmtDatePA(pocStart)}</span> →{" "}
-            <span className="font-mono">{fmtDatePA(endDate)}</span>
-            <span className="ml-2 text-xs text-white/40">(Timezone: {TZ_PA})</span>
-          </p>
-          {showWho ? <p className="mt-1 text-xs text-white/50">{showWho}</p> : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
-            Close
-          </button>
-          <button
-            className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-50"
-            onClick={() => {
-              loadRange();
-            }}
-            disabled={loading}
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-2xl border border-white/10 bg-[#0B1220] p-4">
-        <div className="flex flex-wrap items-center gap-6">
-          <label className="flex items-center gap-2 text-sm text-[#FFD66B] font-semibold">
-            <input type="checkbox" checked={statusDraft} onChange={(e) => setStatusDraft(e.target.checked)} />
-            Draft
-          </label>
-
-          <label className="flex items-center gap-2 text-sm text-[#FFD66B] font-semibold">
-            <input type="checkbox" checked={statusSubmitted} onChange={(e) => setStatusSubmitted(e.target.checked)} />
-            Submitted
-          </label>
-
-          <div className="text-sm text-white/70">
-            Total days: <b>{generatedDates.length}</b> • Existing logs: <b>{data?.total ?? 0}</b>
+    <div className="min-h-[calc(100vh-64px)] bg-[#070B14] text-white" style={fullBleedStyle}>
+      <div className="w-full px-4 md:px-6 py-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-3xl font-extrabold tracking-tight">Daily Logs{titleSuffix}</h1>
+            <p className="mt-1 text-sm text-white/70">
+              Range: <span className="font-mono">{fmtDatePA(pocStart)}</span> →{" "}
+              <span className="font-mono">{fmtDatePA(endDate)}</span>
+              <span className="ml-2 text-xs text-white/40">(Timezone: {TZ_PA})</span>
+            </p>
+            {showWho ? <p className="mt-1 text-xs text-white/50">{showWho}</p> : null}
           </div>
-
-          <div className="text-xs text-white/50">
-            Status meaning: <span className="text-white/70">EMPTY</span> (no log) •{" "}
-            <span className="text-yellow-200">DRAFT</span> (created) •{" "}
-            <span className="text-emerald-200">UPDATED</span> (draft updated) •{" "}
-            <span className="text-green-200">DONE</span> (submitted)
+          <div className="flex items-center gap-2 shrink-0">
+            <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
+              Close
+            </button>
+            <button
+              className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-50"
+              onClick={() => loadRange()}
+              disabled={loading}
+            >
+              Refresh
+            </button>
           </div>
         </div>
 
-        {err ? (
-          <div className="mt-3 text-sm text-red-300">
-            Error: <span className="font-mono">{err}</span>
-          </div>
-        ) : null}
-      </div>
+        <div className="mt-4 rounded-2xl border border-white/10 bg-[#0B1220] p-4">
+          <div className="flex flex-wrap items-center gap-6">
+            <label className="flex items-center gap-2 text-sm text-[#FFD66B] font-semibold">
+              <input type="checkbox" checked={statusDraft} onChange={(e) => setStatusDraft(e.target.checked)} />
+              Draft
+            </label>
 
-      <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-[#0B1220]">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="text-sm text-white/70">{loading ? "Loading..." : "Click any date to open Detail."}</div>
+            <label className="flex items-center gap-2 text-sm text-[#FFD66B] font-semibold">
+              <input type="checkbox" checked={statusSubmitted} onChange={(e) => setStatusSubmitted(e.target.checked)} />
+              Submitted
+            </label>
+
+            <div className="text-sm text-white/70">
+              Total days: <b>{generatedDates.length}</b> • Existing logs: <b>{data?.total ?? 0}</b>
+            </div>
+
+            <div className="text-xs text-white/50">
+              Status meaning: <span className="text-white/70">EMPTY</span> (no log) •{" "}
+              <span className="text-yellow-200">DRAFT</span> (created) •{" "}
+              <span className="text-emerald-200">UPDATED</span> (draft updated) •{" "}
+              <span className="text-green-200">DONE</span> (submitted)
+            </div>
+          </div>
+
+          {err ? (
+            <div className="mt-3 text-sm text-red-300">
+              Error: <span className="font-mono">{err}</span>
+            </div>
+          ) : null}
         </div>
 
-        <div className="overflow-auto">
-          {/* ✅ table-auto for natural column sizing */}
-          <table className="w-full table-auto text-[13px]">
-            <thead className="bg-[#0A1020]">
-              <tr className="text-left">
-                <th className="px-3 py-2 border-b border-white/10 w-[140px] text-[#FFD66B] font-bold">Date</th>
-                <th className="px-3 py-2 border-b border-white/10 w-[160px] text-[#FFD66B] font-bold">Status</th>
+        <div className="mt-4 rounded-2xl border border-white/10 overflow-hidden bg-[#0B1220]">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+            <div className="text-sm text-white/70">{loading ? "Loading..." : "Click any date to open Detail."}</div>
+          </div>
 
-                {/* ✅ No fixed width: let it auto-size */}
-                <th className="px-3 py-2 border-b border-white/10 text-[#FFD66B] font-bold">Duty</th>
-                <th className="px-3 py-2 border-b border-white/10 text-[#FFD66B] font-bold">Instruction</th>
+          <div className="overflow-auto">
+            <table className="w-full table-auto text-[13px] min-w-[1100px]">
+              <thead className="bg-[#0A1020]">
+                <tr className="text-left">
+                  <th className="px-3 py-2 border-b border-white/10 w-[140px] text-[#FFD66B] font-bold whitespace-nowrap">Date</th>
+                  <th className="px-3 py-2 border-b border-white/10 w-[160px] text-[#FFD66B] font-bold whitespace-nowrap">Status</th>
+                  <th className="px-3 py-2 border-b border-white/10 min-w-[320px] text-[#FFD66B] font-bold">Duty</th>
+                  <th className="px-3 py-2 border-b border-white/10 min-w-[360px] text-[#FFD66B] font-bold">Instruction</th>
+                  <th className="px-3 py-2 border-b border-white/10 min-w-[280px] text-[#FFD66B] font-bold">Notes</th>
+                </tr>
+              </thead>
 
-                {/* ✅ Notes moved right next to Instruction */}
-                <th className="px-3 py-2 border-b border-white/10 text-[#FFD66B] font-bold">Notes</th>
-              </tr>
-            </thead>
+              <tbody>
+                {generatedDates.map((d) => {
+                  const item = byDate.get(d);
+                  const empty = !item;
 
-            <tbody>
-              {generatedDates.map((d) => {
-                const item = byDate.get(d);
-                const empty = !item;
+                  const status: Status | null = item?.status ? item.status : null;
 
-                const status: Status | null = item?.status ? item.status : null;
+                  const list = dutiesForDay(d);
 
-                const list = dutiesForDay(d);
+                  const dutyPreview = list.length
+                    ? truncate(
+                        list
+                          .slice(0, 2)
+                          .map((x) => x.duty)
+                          .filter(Boolean)
+                          .join(" • "),
+                        220
+                      )
+                    : "—";
 
-                const dutyPreview = list.length
-                  ? truncate(list.slice(0, 2).map((x) => x.duty).filter(Boolean).join(" • "), 160)
-                  : "—";
+                  const instrPreview = list.length
+                    ? truncate(
+                        list
+                          .slice(0, 2)
+                          .map((x) => String(x.instruction || "").trim())
+                          .filter(Boolean)
+                          .join(" • ") || "—",
+                        240
+                      )
+                    : "—";
 
-                const instrPreview = list.length
-                  ? truncate(
-                      list
-                        .slice(0, 2)
-                        .map((x) => String(x.instruction || "").trim())
-                        .filter(Boolean)
-                        .join(" • ") || "—",
-                      160
-                    )
-                  : "—";
+                  const notesText = item ? "Open to view/edit" : "Not created yet (auto-create on open)";
 
-                const notesText = item ? "Open to view/edit" : "Not created yet (auto-create on open)";
+                  const looksUpdated =
+                    !!item &&
+                    (item.status === "SUBMITTED" ||
+                      !!String(item.submittedAt || "").trim() ||
+                      !!String(item.dspId || "").trim() ||
+                      isDifferentIso(item.updatedAt, item.createdAt));
 
-                // ✅ Better status labeling (DONE / UPDATED / DRAFT / EMPTY)
-                const looksUpdated =
-                  !!item &&
-                  (item.status === "SUBMITTED" ||
-                    !!String(item.submittedAt || "").trim() ||
-                    !!String(item.dspId || "").trim() ||
-                    isDifferentIso(item.updatedAt, item.createdAt));
+                  const statusLabel = empty ? "EMPTY" : status === "SUBMITTED" ? "✅ DONE" : looksUpdated ? "UPDATED" : "DRAFT";
 
-                // ✅ Requirement: when submitted -> DONE with green check before word DONE
-                const statusLabel = empty
-                  ? "EMPTY"
-                  : status === "SUBMITTED"
-                  ? "✅ DONE"
-                  : looksUpdated
-                  ? "UPDATED"
-                  : "DRAFT";
+                  const statusClass =
+                    empty
+                      ? "bg-white/5 border-white/10 text-white/60"
+                      : status === "SUBMITTED"
+                      ? "bg-green-500/10 border-green-500/30 text-green-200"
+                      : looksUpdated
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
+                      : "bg-yellow-500/10 border-yellow-500/30 text-yellow-200";
 
-                const statusClass =
-                  empty
-                    ? "bg-white/5 border-white/10 text-white/60"
-                    : status === "SUBMITTED"
-                    ? "bg-green-500/10 border-green-500/30 text-green-200"
-                    : looksUpdated
-                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
-                    : "bg-yellow-500/10 border-yellow-500/30 text-yellow-200";
+                  return (
+                    <tr
+                      key={d}
+                      className={"border-b border-white/5 hover:bg-white/5 cursor-pointer " + (empty ? "opacity-95" : "")}
+                      onClick={() => openDay(d)}
+                      title="Open detail"
+                    >
+                      <td className="px-3 py-1.5 align-middle whitespace-nowrap">
+                        <div className="font-bold leading-tight">{fmtDatePA(d)}</div>
+                      </td>
 
-                return (
-                  <tr
-                    key={d}
-                    className={"border-b border-white/5 hover:bg-white/5 cursor-pointer " + (empty ? "opacity-95" : "")}
-                    onClick={() => openDay(d)}
-                    title="Open detail"
-                  >
-                    <td className="px-3 py-1.5 align-middle whitespace-nowrap">
-                      <div className="font-bold leading-tight">{fmtDatePA(d)}</div>
-                    </td>
+                      <td className="px-3 py-1.5 align-middle whitespace-nowrap">
+                        <span className={"inline-block px-2 py-1 rounded-full text-[11px] border " + statusClass}>{statusLabel}</span>
+                      </td>
 
-                    <td className="px-3 py-1.5 align-middle whitespace-nowrap">
-                      <span className={"inline-block px-2 py-1 rounded-full text-[11px] border " + statusClass}>
-                        {statusLabel}
-                      </span>
-                    </td>
+                      <td className="px-3 py-1.5 align-middle">
+                        <div className="text-white/90 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={dutyPreview}>
+                          {dutyPreview}
+                        </div>
+                      </td>
 
-                    <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/90 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={dutyPreview}>
-                        {dutyPreview}
-                      </div>
-                    </td>
+                      <td className="px-3 py-1.5 align-middle">
+                        <div className="text-white/80 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={instrPreview}>
+                          {instrPreview}
+                        </div>
+                      </td>
 
-                    <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/80 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={instrPreview}>
-                        {instrPreview}
-                      </div>
-                    </td>
+                      <td className="px-3 py-1.5 align-middle">
+                        <div className="text-white/70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={notesText}>
+                          {notesText}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
 
-                    <td className="px-3 py-1.5 align-middle">
-                      <div className="text-white/70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={notesText}>
-                        {notesText}
-                      </div>
+                {generatedDates.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-white/60" colSpan={5}>
+                      No dates generated. Check POC Start/Stop.
                     </td>
                   </tr>
-                );
-              })}
-
-              {generatedDates.length === 0 ? (
-                <tr>
-                  <td className="px-4 py-8 text-center text-white/60" colSpan={5}>
-                    No dates generated. Check POC Start/Stop.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
