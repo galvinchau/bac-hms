@@ -883,13 +883,35 @@ export default function DailyLogDetailPage() {
     String(item.auditActorName || "").trim();
 
   return (
-    <div className={`${pageWrap} p-4`}>
+    <div className={`${pageWrap} p-2 md:p-4`}>
       <style>{`
+        .full-bleed{
+          width: 100vw;
+          position: relative;
+          left: 50%;
+          right: 50%;
+          margin-left: -50vw;
+          margin-right: -50vw;
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+
         @media print {
           .no-print { display: none !important; }
           body { background: white !important; color: black !important; }
           .print-card { box-shadow: none !important; border: 1px solid #000 !important; background: white !important; }
           .print-table th, .print-table td { border: 1px solid #000 !important; color: black !important; }
+
+          .full-bleed{
+            width: auto !important;
+            position: static !important;
+            left: auto !important;
+            right: auto !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+          }
         }
       `}</style>
 
@@ -1005,264 +1027,261 @@ export default function DailyLogDetailPage() {
         </div>
       ) : null}
 
-      <div className={`print-card ${card} ${cardInner}`}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="rounded-md border border-white/10 bg-white/5 p-3">
-            <div className={`text-xs text-[#f5c84c]`}>Date</div>
-            <div className={`mt-1 ${mono} text-base text-white`}>{displayDate}</div>
-          </div>
+      <div className="full-bleed">
+        <div className={`print-card ${card} ${cardInner} w-full max-w-none`}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <div className={`text-xs text-[#f5c84c]`}>Date</div>
+              <div className={`mt-1 ${mono} text-base text-white`}>{displayDate}</div>
+            </div>
 
-          <div className="rounded-md border border-white/10 bg-white/5 p-3">
-            <div className={`text-xs text-[#f5c84c]`}>POC Number</div>
-            <div className={`mt-1 ${mono} text-base text-white`}>{pocDisplay}</div>
-          </div>
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <div className={`text-xs text-[#f5c84c]`}>POC Number</div>
+              <div className={`mt-1 ${mono} text-base text-white`}>{pocDisplay}</div>
+            </div>
 
-          <div className="rounded-md border border-white/10 bg-white/5 p-3">
-            <div className={`text-xs text-[#f5c84c]`}>Status</div>
-            <div className="mt-1 font-semibold text-base text-white">{item.status}</div>
-            {item.submittedAt ? <div className={`text-[11px] ${softText} mt-1`}>Submitted: {fmtLocalPA(item.submittedAt)}</div> : null}
-          </div>
-        </div>
-
-        {showAuditBox ? (
-          <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3">
-            <div className="text-xs font-semibold text-[#f5c84c]">Audit</div>
-            <div className="mt-1 text-sm text-white/80">
-              {item.auditReason ? (
-                <div>
-                  <span className="text-white/60">Reason:</span> {item.auditReason}
-                </div>
-              ) : null}
-              {item.auditActorName ? (
-                <div className="mt-1">
-                  <span className="text-white/60">Updated By:</span> {item.auditActorName}
-                </div>
-              ) : null}
-              {item.auditUpdatedAt ? (
-                <div className="mt-1">
-                  <span className="text-white/60">Updated At:</span> {fmtLocalPA(item.auditUpdatedAt)}
-                </div>
-              ) : null}
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <div className={`text-xs text-[#f5c84c]`}>Status</div>
+              <div className="mt-1 font-semibold text-base text-white">{item.status}</div>
+              {item.submittedAt ? <div className={`text-[11px] ${softText} mt-1`}>Submitted: {fmtLocalPA(item.submittedAt)}</div> : null}
             </div>
           </div>
-        ) : null}
 
-        <div className="mt-4 flex items-center justify-between">
-          <div className="text-sm font-semibold text-white">
-            Tasks{" "}
-            <span className="text-xs text-white/50">
-              ({(visibleTasks || []).length}/{(item.tasks || []).length})
-            </span>
+          {showAuditBox ? (
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3">
+              <div className="text-xs font-semibold text-[#f5c84c]">Audit</div>
+              <div className="mt-1 text-sm text-white/80">
+                {item.auditReason ? (
+                  <div>
+                    <span className="text-white/60">Reason:</span> {item.auditReason}
+                  </div>
+                ) : null}
+                {item.auditActorName ? (
+                  <div className="mt-1">
+                    <span className="text-white/60">Updated By:</span> {item.auditActorName}
+                  </div>
+                ) : null}
+                {item.auditUpdatedAt ? (
+                  <div className="mt-1">
+                    <span className="text-white/60">Updated At:</span> {fmtLocalPA(item.auditUpdatedAt)}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm font-semibold text-white">
+              Tasks{" "}
+              <span className="text-xs text-white/50">
+                ({(visibleTasks || []).length}/{(item.tasks || []).length})
+              </span>
+            </div>
+            <div className={`no-print text-xs ${softText}`}>Timezone: {TZ_PA}. If Timestamp is empty, server stamps now().</div>
           </div>
-          <div className={`no-print text-xs ${softText}`}>Timezone: {TZ_PA}. If Timestamp is empty, server stamps now().</div>
-        </div>
 
-        <div className="mt-2 overflow-auto">
-          <table className="print-table w-full text-sm border border-white/10">
-            <thead className="bg-white/5">
-              <tr className="text-left">
-                <th className="px-3 py-2 border border-white/10 w-[90px] text-[#f5c84c] font-bold">Task #</th>
-                <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Duty</th>
-                <th className="px-3 py-2 border border-white/10 w-[220px] text-[#f5c84c] font-bold">Status</th>
-                <th className="px-3 py-2 border border-white/10 w-[240px] text-[#f5c84c] font-bold">Timestamp (PA)</th>
-                <th className="px-3 py-2 border border-white/10 w-[300px] text-[#f5c84c] font-bold">DSP</th>
-                <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Note</th>
-                <th className="no-print px-3 py-2 border border-white/10 w-[220px] text-[#f5c84c] font-bold">Quick</th>
-              </tr>
-            </thead>
+          <div className="mt-2 overflow-auto">
+            <table className="print-table w-full table-auto text-sm border border-white/10">
+              <thead className="bg-white/5">
+                <tr className="text-left">
+                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Task #</th>
+                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Duty</th>
+                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Status</th>
+                  <th className="px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Timestamp (PA)</th>
+                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">DSP</th>
+                  <th className="px-3 py-2 border border-white/10 text-[#f5c84c] font-bold">Note</th>
+                  <th className="no-print px-3 py-2 border border-white/10 whitespace-nowrap text-[#f5c84c] font-bold">Quick</th>
+                </tr>
+              </thead>
 
-            <tbody className="text-white">
-              {(visibleTasks || []).map((t) => {
-                const locked = taskIsLocked(t);
-                const canEdit = isTaskEditable(t);
-                const hist = normalizeHistory((t as any).editHistory);
-                const editEnabled = isTaskTemporarilyEditable(String(t.id || ""));
+              <tbody className="text-white">
+                {(visibleTasks || []).map((t) => {
+                  const locked = taskIsLocked(t);
+                  const canEdit = isTaskEditable(t);
+                  const hist = normalizeHistory((t as any).editHistory);
+                  const editEnabled = isTaskTemporarilyEditable(String(t.id || ""));
 
-                const lock = getLockMeta(t);
-                const edit = getEditMeta(t);
+                  const lock = getLockMeta(t);
+                  const edit = getEditMeta(t);
 
-                // ✅ LOCK LINE MUST SHOW DSP NAME (fallback: id)
-                const lockWho = String(lock.name || "").trim() || String(lock.id || "").trim();
-                const lockLine = locked
-                  ? `Locked${lockWho ? ` by ${lockWho}` : ""}${lock.at ? ` @ ${fmtLocalPA(lock.at)}` : ""}`
-                  : "";
+                  const lockWho = String(lock.name || "").trim() || String(lock.id || "").trim();
+                  const lockLine = locked ? `Locked${lockWho ? ` by ${lockWho}` : ""}${lock.at ? ` @ ${fmtLocalPA(lock.at)}` : ""}` : "";
 
-                const editLine = edit.name
-                  ? `Edited by ${edit.name}${edit.at ? ` @ ${fmtLocalPA(edit.at)}` : ""}${edit.reason ? ` • ${edit.reason}` : ""}`
-                  : "";
+                  const editLine = edit.name
+                    ? `Edited by ${edit.name}${edit.at ? ` @ ${fmtLocalPA(edit.at)}` : ""}${edit.reason ? ` • ${edit.reason}` : ""}`
+                    : "";
 
-                const showMiniHistory = editEnabled || hasAnyEditAction(hist);
-                const mini = showMiniHistory ? hist.slice().reverse().slice(0, 6) : [];
+                  const showMiniHistory = editEnabled || hasAnyEditAction(hist);
+                  const mini = showMiniHistory ? hist.slice().reverse().slice(0, 6) : [];
 
-                return (
-                  <tr key={t.id} className="hover:bg-white/5 align-top">
-                    <td className={`px-3 py-2 border border-white/10 ${mono}`}>{t.taskNo ?? ""}</td>
+                  return (
+                    <tr key={t.id} className="hover:bg-white/5 align-top">
+                      <td className={`px-3 py-2 border border-white/10 ${mono} whitespace-nowrap`}>{t.taskNo ?? ""}</td>
 
-                    {/* Duty only */}
-                    <td className="px-3 py-2 border border-white/10">
-                      <div className="flex flex-col">
-                        <div>{t.duty}</div>
-                      </div>
-                    </td>
+                      <td className="px-3 py-2 border border-white/10">
+                        <div className="flex flex-col">
+                          <div className="break-words">{t.duty}</div>
+                        </div>
+                      </td>
 
-                    <td className="px-3 py-2 border border-white/10">
-                      <select
-                        className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print disabled:opacity-60"
-                        value={t.status ?? ""}
-                        onChange={(e) => updateTask(t.id, { status: (e.target.value as TaskStatus) || null })}
-                        disabled={saving || !canEdit}
-                        title={locked && !canEdit ? "Locked. Click Edit (reason required) to modify." : ""}
-                      >
-                        <option value="" className="bg-[#071427]">
-                          (Select)
-                        </option>
-                        <option value="INDEPENDENT" className="bg-[#071427]">
-                          Independent
-                        </option>
-                        <option value="VERBAL_PROMPT" className="bg-[#071427]">
-                          Verbal Prompt
-                        </option>
-                        <option value="PHYSICAL_ASSIST" className="bg-[#071427]">
-                          Physical Assist
-                        </option>
-                        <option value="REFUSED" className="bg-[#071427]">
-                          Refused
-                        </option>
-                      </select>
+                      <td className="px-3 py-2 border border-white/10">
+                        <select
+                          className="min-w-[140px] w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print disabled:opacity-60"
+                          value={t.status ?? ""}
+                          onChange={(e) => updateTask(t.id, { status: (e.target.value as TaskStatus) || null })}
+                          disabled={saving || !canEdit}
+                          title={locked && !canEdit ? "Locked. Click Edit (reason required) to modify." : ""}
+                        >
+                          <option value="" className="bg-[#071427]">
+                            (Select)
+                          </option>
+                          <option value="INDEPENDENT" className="bg-[#071427]">
+                            Independent
+                          </option>
+                          <option value="VERBAL_PROMPT" className="bg-[#071427]">
+                            Verbal Prompt
+                          </option>
+                          <option value="PHYSICAL_ASSIST" className="bg-[#071427]">
+                            Physical Assist
+                          </option>
+                          <option value="REFUSED" className="bg-[#071427]">
+                            Refused
+                          </option>
+                        </select>
 
-                      <div className="hidden print:block">{t.status || ""}</div>
-                    </td>
+                        <div className="hidden print:block">{t.status || ""}</div>
+                      </td>
 
-                    <td className="px-3 py-2 border border-white/10">
-                      <div className="no-print">
-                        <input
-                          className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white"
-                          value={t.timestamp ? fmtLocalPA(t.timestamp) : "(auto)"}
-                          readOnly
-                        />
-                      </div>
-                      <div className="hidden print:block">{t.timestamp ? fmtLocalPA(t.timestamp) : ""}</div>
-                    </td>
+                      <td className="px-3 py-2 border border-white/10">
+                        <div className="no-print">
+                          <input
+                            className="min-w-[180px] w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white whitespace-nowrap"
+                            value={t.timestamp ? fmtLocalPA(t.timestamp) : "(auto)"}
+                            readOnly
+                          />
+                        </div>
+                        <div className="hidden print:block">{t.timestamp ? fmtLocalPA(t.timestamp) : ""}</div>
+                      </td>
 
-                    {/* DSP column all yellow */}
-                    <td className="px-3 py-2 border border-white/10">
-                      <div className="text-[12px] text-[#f5c84c]">
-                        {lockLine ? (
-                          <div className="truncate" title={lockLine}>
-                            {lockLine}
-                          </div>
-                        ) : (
-                          <div className="opacity-70">—</div>
-                        )}
+                      <td className="px-3 py-2 border border-white/10">
+                        <div className="text-[12px] text-[#f5c84c]">
+                          {lockLine ? (
+                            <div className="truncate" title={lockLine}>
+                              {lockLine}
+                            </div>
+                          ) : (
+                            <div className="opacity-70">—</div>
+                          )}
 
-                        {editLine ? (
-                          <div className="mt-1 opacity-90 truncate" title={editLine}>
-                            {editLine}
+                          {editLine ? (
+                            <div className="mt-1 opacity-90 truncate" title={editLine}>
+                              {editLine}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {showMiniHistory ? (
+                          <div className="mt-2 rounded-md border border-white/10 bg-white/5 p-2">
+                            <div className="text-[11px] font-semibold text-[#f5c84c] mb-1">Edit History</div>
+                            <div className="space-y-1">
+                              {mini.map((h, idx) => {
+                                const who = String(h.byName || h.byId || "Signed-in User");
+                                const when = fmtLocalPA(h.at);
+                                return (
+                                  <div key={idx} className="text-[11px] text-[#f5c84c] flex flex-wrap gap-x-2 gap-y-0.5">
+                                    <span className="font-mono opacity-90">{when}</span>
+                                    <span className="opacity-100">{actionLabel(h.action)}</span>
+                                    <span className="opacity-80">by</span>
+                                    <span className="opacity-100">{who}</span>
+                                    {h.reason ? (
+                                      <>
+                                        <span className="opacity-70">•</span>
+                                        <span className="opacity-85">reason:</span>
+                                        <span className="opacity-100">{h.reason}</span>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         ) : null}
-                      </div>
 
-                      {showMiniHistory ? (
-                        <div className="mt-2 rounded-md border border-white/10 bg-white/5 p-2">
-                          <div className="text-[11px] font-semibold text-[#f5c84c] mb-1">Edit History</div>
-                          <div className="space-y-1">
-                            {mini.map((h, idx) => {
-                              const who = String(h.byName || h.byId || "Signed-in User");
-                              const when = fmtLocalPA(h.at);
-                              return (
-                                <div key={idx} className="text-[11px] text-[#f5c84c] flex flex-wrap gap-x-2 gap-y-0.5">
-                                  <span className="font-mono opacity-90">{when}</span>
-                                  <span className="opacity-100">{actionLabel(h.action)}</span>
-                                  <span className="opacity-80">by</span>
-                                  <span className="opacity-100">{who}</span>
-                                  {h.reason ? (
-                                    <>
-                                      <span className="opacity-70">•</span>
-                                      <span className="opacity-85">reason:</span>
-                                      <span className="opacity-100">{h.reason}</span>
-                                    </>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
+                        {editEnabled ? (
+                          <div className="mt-2 text-[11px] text-[#f5c84c] truncate">
+                            Edit enabled: {String(editReasonByTaskRef.current[String(t.id || "")] || "")}
                           </div>
+                        ) : null}
+                      </td>
+
+                      <td className="px-3 py-2 border border-white/10">
+                        <input
+                          className="min-w-[160px] w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print disabled:opacity-60"
+                          value={t.note || ""}
+                          onChange={(e) => updateTask(t.id, { note: e.target.value })}
+                          placeholder={locked && !canEdit ? "Locked" : "Optional note..."}
+                          disabled={saving || !canEdit}
+                          title={locked && !canEdit ? "Locked. Click Edit (reason required) to modify." : ""}
+                        />
+                        <div className="hidden print:block">{t.note || ""}</div>
+                      </td>
+
+                      <td className="no-print px-3 py-2 border border-white/10">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                          <button
+                            className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
+                            onClick={() => handleNow(t.id)}
+                            disabled={saving || locked}
+                            title={locked ? "Already locked" : "Stamp timestamp + lock this task"}
+                          >
+                            Now
+                          </button>
+
+                          <button
+                            className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
+                            onClick={() => openEditTask(t)}
+                            disabled={saving || !locked}
+                            title={locked ? "Edit locked task (reason required)" : "Available after Now"}
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
+                            onClick={() => saveTaskOnly(String(t.id || ""))}
+                            disabled={saving || !editEnabled}
+                            title={editEnabled ? "Save changes for this task" : "Enable Edit first"}
+                          >
+                            Save
+                          </button>
                         </div>
-                      ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
 
-                      {editEnabled ? (
-                        <div className="mt-2 text-[11px] text-[#f5c84c] truncate">
-                          Edit enabled: {String(editReasonByTaskRef.current[String(t.id || "")] || "")}
-                        </div>
-                      ) : null}
-                    </td>
-
-                    <td className="px-3 py-2 border border-white/10">
-                      <input
-                        className="w-full border border-white/10 rounded-md px-2 py-2 bg-white/10 text-white no-print disabled:opacity-60"
-                        value={t.note || ""}
-                        onChange={(e) => updateTask(t.id, { note: e.target.value })}
-                        placeholder={locked && !canEdit ? "Locked" : "Optional note..."}
-                        disabled={saving || !canEdit}
-                        title={locked && !canEdit ? "Locked. Click Edit (reason required) to modify." : ""}
-                      />
-                      <div className="hidden print:block">{t.note || ""}</div>
-                    </td>
-
-                    <td className="no-print px-3 py-2 border border-white/10">
-                      <div className="flex items-center gap-2">
-                        <button
-                          className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
-                          onClick={() => handleNow(t.id)}
-                          disabled={saving || locked}
-                          title={locked ? "Already locked" : "Stamp timestamp + lock this task"}
-                        >
-                          Now
-                        </button>
-
-                        <button
-                          className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
-                          onClick={() => openEditTask(t)}
-                          disabled={saving || !locked}
-                          title={locked ? "Edit locked task (reason required)" : "Available after Now"}
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          className="px-3 py-2 rounded-md border border-white/20 hover:bg-white/10 text-xs disabled:opacity-50"
-                          onClick={() => saveTaskOnly(String(t.id || ""))}
-                          disabled={saving || !editEnabled}
-                          title={editEnabled ? "Save changes for this task" : "Enable Edit first"}
-                        >
-                          Save
-                        </button>
-                      </div>
+                {(visibleTasks || []).length === 0 ? (
+                  <tr>
+                    <td className={`px-3 py-6 text-center border border-white/10 ${softText}`} colSpan={7}>
+                      No tasks for this POC (based on Days Of Week).
                     </td>
                   </tr>
-                );
-              })}
+                ) : null}
+              </tbody>
+            </table>
+          </div>
 
-              {(visibleTasks || []).length === 0 ? (
-                <tr>
-                  <td className={`px-3 py-6 text-center border border-white/10 ${softText}`} colSpan={7}>
-                    No tasks for this POC (based on Days Of Week).
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="no-print mt-4 flex items-center justify-end gap-2">
-          <button className={btn} onClick={() => load()} disabled={saving}>
-            Reload
-          </button>
-          <button className={btn} onClick={() => save("DRAFT")} disabled={saving}>
-            Save Draft
-          </button>
-          <button className={btnPrimary} onClick={() => save("SUBMITTED")} disabled={saving}>
-            Submit
-          </button>
+          <div className="no-print mt-4 flex items-center justify-end gap-2">
+            <button className={btn} onClick={() => load()} disabled={saving}>
+              Reload
+            </button>
+            <button className={btn} onClick={() => save("DRAFT")} disabled={saving}>
+              Save Draft
+            </button>
+            <button className={btnPrimary} onClick={() => save("SUBMITTED")} disabled={saving}>
+              Submit
+            </button>
+          </div>
         </div>
       </div>
     </div>
