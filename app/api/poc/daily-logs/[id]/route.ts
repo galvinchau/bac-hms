@@ -5,32 +5,54 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 
 /**
- * DB tables (confirmed by screenshots):
+ * DB tables (confirmed by your screenshots):
  * - public.poc_daily_log(id, pocid, individualid, dspid, date, status, submittedat, createdat, updatedat, scheduleshiftid)
- * - public.poc_daily_task_log(id, dailylogid, pocdutyid, completionstatus, completedat, note, createdat, updatedat)
- * - public.poc_duty(id, pocid, category, taskno, duty, minutes, asneeded, timesweekmin, timesweekmax, daysofweek(jsonb), instruction, sortorder, createdat, updatedat)
- * - public."POC_Duty"(id, "pocId", category, "taskNo", duty, minutes, "asNeeded", "timesWeekMin", "timesWeekMax", "daysOfWeek"(jsonb), instruction, "sortOrder")
+ * - public.poc_daily_task_log(
+ *      id, dailylogid, pocdutyid,
+ *      completionstatus, completedat, note,
+ *      lockedat, lockedbyid, lockedbyname,
+ *      lasteditedat, lasteditedbyid, lasteditedbyname, lastededitreason,
+ *      edithistory,
+ *      createdat, updatedat
+ *   )
  *
- * Completion enum:
+ * Enums:
  * - public.poc_duty_completion_status: INDEPENDENT, VERBAL_PROMPT, PHYSICAL_ASSIST, REFUSED
  */
 
 type Status = "DRAFT" | "SUBMITTED";
 
-type CompletionStatus =
-  | "INDEPENDENT"
-  | "VERBAL_PROMPT"
-  | "PHYSICAL_ASSIST"
-  | "REFUSED";
+type CompletionStatus = "INDEPENDENT" | "VERBAL_PROMPT" | "PHYSICAL_ASSIST" | "REFUSED";
+
+type TaskEditHistory = {
+  at: string; // ISO
+  byId?: string | null;
+  byName?: string | null;
+  reason?: string | null;
+  action: "LOCK" | "EDIT_ENABLE" | "EDIT_SAVE";
+};
 
 type TaskDetail = {
   id: string; // pocDutyId
+  pocDutyId?: string; // keep compatibility with UI
   taskNo?: number | null;
   duty: string;
   category?: string | null;
+
   status: CompletionStatus | null;
   note?: string | null;
   timestamp?: string | null; // ISO (completedAt)
+
+  lockedAt?: string | null;
+  lockedById?: string | null;
+  lockedByName?: string | null;
+
+  lastEditedAt?: string | null;
+  lastEditedById?: string | null;
+  lastEditedByName?: string | null;
+  lastEditReason?: string | null;
+
+  editHistory?: TaskEditHistory[] | null;
 };
 
 type DailyLogDetail = {
@@ -38,12 +60,21 @@ type DailyLogDetail = {
   pocId: string;
   pocNumber?: string | null;
   individualId: string;
+
   dspId: string | null;
+  dspLockedAt?: string | null;
+
   date: string; // YYYY-MM-DD
   status: Status;
   submittedAt: string | null;
   createdAt: string;
   updatedAt: string;
+
+  // optional audit fields (UI may send; keep harmless)
+  auditReason?: string | null;
+  auditUpdatedAt?: string | null;
+  auditActorName?: string | null;
+
   tasks: TaskDetail[];
 };
 
@@ -64,21 +95,11 @@ function toIso(v: any): string | null {
 function normalizeCompletion(v: any): CompletionStatus | null {
   if (!v) return null;
   const s = String(v).trim().toUpperCase();
-  if (
-    s === "INDEPENDENT" ||
-    s === "VERBAL_PROMPT" ||
-    s === "PHYSICAL_ASSIST" ||
-    s === "REFUSED"
-  )
-    return s;
+  if (s === "INDEPENDENT" || s === "VERBAL_PROMPT" || s === "PHYSICAL_ASSIST" || s === "REFUSED") return s;
   return null;
 }
 
-/**
- * ✅ NEW helper:
- * Returns true if daysOfWeek exists AND actually contains constraints.
- * If daysOfWeek is null/undefined/empty array/empty object/empty string => false.
- */
+/** Returns true if daysOfWeek exists AND actually contains constraints. */
 function hasDayConstraint(daysOfWeek: any): boolean {
   if (!daysOfWeek) return false;
 
@@ -101,18 +122,7 @@ function hasDayConstraint(daysOfWeek: any): boolean {
   return true;
 }
 
-function getDowKeyFromYmd(ymd: string): {
-  idx: number; // 0..6 (Sun..Sat)
-  short: "S" | "M" | "T" | "W" | "F";
-  long:
-    | "sun"
-    | "mon"
-    | "tue"
-    | "wed"
-    | "thu"
-    | "fri"
-    | "sat";
-} | null {
+function getDowKeyFromYmd(ymd: string): { idx: number; short: "S" | "M" | "T" | "W" | "F"; long: "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat" } | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
 
   // mid-day UTC avoids DST edge
@@ -190,6 +200,32 @@ function dutyAppliesToDay(daysOfWeek: any, ymd: string): boolean {
   return true;
 }
 
+function safeJsonParse(v: any) {
+  if (!v) return null;
+  if (typeof v === "object") return v;
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s) return null;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHistory(arr: any): TaskEditHistory[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((x) => ({
+      at: String(x?.at || x?.timestamp || x?.time || ""),
+      byId: x?.byId ?? x?.actorId ?? null,
+      byName: x?.byName ?? x?.actorName ?? null,
+      reason: x?.reason ?? null,
+      action: (x?.action as any) || "EDIT_SAVE",
+    }))
+    .filter((x) => !!x.at);
+}
+
 async function readDailyLog(id: string) {
   const rows = (await prisma.$queryRawUnsafe(
     `
@@ -217,18 +253,12 @@ async function readPocNumber(pocId: string): Promise<string | null> {
   if (!pocId) return null;
 
   try {
-    const r1 = (await prisma.$queryRawUnsafe(
-      `SELECT p.pocnumber AS "pocNumber" FROM public.poc p WHERE p.id = $1 LIMIT 1`,
-      pocId
-    )) as any[];
+    const r1 = (await prisma.$queryRawUnsafe(`SELECT p.pocnumber AS "pocNumber" FROM public.poc p WHERE p.id = $1 LIMIT 1`, pocId)) as any[];
     if (r1?.[0]?.pocNumber) return String(r1[0].pocNumber);
   } catch {}
 
   try {
-    const r2 = (await prisma.$queryRawUnsafe(
-      `SELECT p."pocNumber" AS "pocNumber" FROM public."POC" p WHERE p.id = $1 LIMIT 1`,
-      pocId
-    )) as any[];
+    const r2 = (await prisma.$queryRawUnsafe(`SELECT p."pocNumber" AS "pocNumber" FROM public."POC" p WHERE p.id = $1 LIMIT 1`, pocId)) as any[];
     if (r2?.[0]?.pocNumber) return String(r2[0].pocNumber);
   } catch {}
 
@@ -300,7 +330,22 @@ async function readTaskLogs(dailyLogId: string): Promise<Map<string, any>> {
       t.pocdutyid AS "pocDutyId",
       t.completionstatus AS "completionStatus",
       t.completedat AS "completedAt",
-      t.note
+      t.note,
+
+      -- NEW meta columns
+      t.lockedat AS "lockedAt",
+      t.lockedbyid AS "lockedById",
+      t.lockedbyname AS "lockedByName",
+
+      t.lasteditedat AS "lastEditedAt",
+      t.lasteditedbyid AS "lastEditedById",
+      t.lasteditedbyname AS "lastEditedByName",
+      t.lasteditreason AS "lastEditReason",
+
+      t.edithistory AS "editHistory",
+
+      t.updatedat AS "updatedAt",
+      t.createdat AS "createdAt"
     FROM public.poc_daily_task_log t
     WHERE t.dailylogid = $1
   `,
@@ -316,14 +361,10 @@ async function readTaskLogs(dailyLogId: string): Promise<Map<string, any>> {
   return m;
 }
 
-function buildTasksForDay(
-  ymd: string,
-  duties: any[],
-  logsByDutyId: Map<string, any>
-): TaskDetail[] {
+function buildTasksForDay(ymd: string, duties: any[], logsByDutyId: Map<string, any>, dailyLogDspId: string | null): TaskDetail[] {
   const list = Array.isArray(duties) ? duties : [];
 
-  // ✅ UPDATED FILTER:
+  // Filter:
   // - If duty has day constraint -> show when applies to day
   // - If duty has NO day constraint -> show ONLY if it already has a task log for this dailyLog
   const filtered = list.filter((d) => {
@@ -333,41 +374,64 @@ function buildTasksForDay(
     const dutyId = String(d?.id || "").trim();
     const constrained = hasDayConstraint(d?.daysofweek);
 
-    if (constrained) return true; // normal case: show by DOW rules
-
-    // no constraint -> show only if log exists (avoid showing "extra" tasks)
+    if (constrained) return true;
     if (!dutyId) return false;
     return logsByDutyId.has(dutyId);
   });
 
   return filtered.map((d: any, idx: number) => {
     const dutyId = String(d?.id || `${idx}`);
-    const taskNo =
-      d?.taskno === null || d?.taskno === undefined ? null : Number(d.taskno);
+    const taskNo = d?.taskno === null || d?.taskno === undefined ? null : Number(d.taskno);
     const duty = String(d?.duty ?? `Task ${idx + 1}`);
     const category = d?.category ? String(d.category) : null;
 
     const log = logsByDutyId.get(dutyId);
+
     const status = normalizeCompletion(log?.completionStatus) ?? null;
     const note = log?.note ?? null;
-    const timestamp = toIso(log?.completedAt);
+
+    const completedAtIso = toIso(log?.completedAt);
+    const ts = completedAtIso;
+
+    // Locked meta: prefer DB columns; fallback to completedAt + dailyLog dspId (for older rows)
+    const lockedAt = toIso(log?.lockedAt) || ts;
+    const lockedById = String(log?.lockedById || "").trim() || (lockedAt ? (dailyLogDspId ? String(dailyLogDspId) : "") : "");
+    const lockedByName = String(log?.lockedByName || "").trim() || null;
+
+    const lastEditedAt = toIso(log?.lastEditedAt);
+    const lastEditedById = log?.lastEditedById ? String(log.lastEditedById) : null;
+    const lastEditedByName = log?.lastEditedByName ? String(log.lastEditedByName) : null;
+    const lastEditReason = log?.lastEditReason ? String(log.lastEditReason) : null;
+
+    const hist = normalizeHistory(safeJsonParse(log?.editHistory) || log?.editHistory);
 
     return {
       id: dutyId,
+      pocDutyId: dutyId,
+
       taskNo,
       duty,
       category,
+
       status,
       note,
-      timestamp,
+      timestamp: ts,
+
+      lockedAt: lockedAt ?? null,
+      lockedById: lockedById ? String(lockedById) : null,
+      lockedByName: lockedByName,
+
+      lastEditedAt: lastEditedAt ?? null,
+      lastEditedById: lastEditedById,
+      lastEditedByName: lastEditedByName,
+      lastEditReason: lastEditReason,
+
+      editHistory: hist.length ? hist : null,
     };
   });
 }
 
-export async function GET(
-  req: Request,
-  ctx: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
     if (!id) return jsonErr(400, "Missing id");
@@ -379,19 +443,22 @@ export async function GET(
     const duties = await readAllDuties(String(log.pocId || ""));
     const taskLogs = await readTaskLogs(String(log.id));
 
-    const tasks = buildTasksForDay(String(log.date), duties, taskLogs);
+    const dspId = log.dspId ? String(log.dspId) : null;
+    const tasks = buildTasksForDay(String(log.date), duties, taskLogs, dspId);
 
     const item: DailyLogDetail = {
       id: String(log.id),
       pocId: String(log.pocId),
       pocNumber: pocNumber ?? null,
       individualId: String(log.individualId),
-      dspId: log.dspId ? String(log.dspId) : null,
+
+      dspId,
       date: String(log.date),
       status: String(log.status) as Status,
       submittedAt: toIso(log.submittedAt),
       createdAt: toIso(log.createdAt) || new Date().toISOString(),
       updatedAt: toIso(log.updatedAt) || new Date().toISOString(),
+
       tasks,
     };
 
@@ -402,25 +469,44 @@ export async function GET(
 }
 
 /**
- * ✅ IMPORTANT:
- * UI (file #3) sends tasks[] with `pocDutyId`
- * We support both `pocDutyId` and legacy `id` to be safe.
+ * UI sends:
+ * - status, dspId (daily log)
+ * - tasks[] includes:
+ *   pocDutyId, status, note, timestamp,
+ *   lockedAt, lockedById, lockedByName,
+ *   lastEditedAt, lastEditedById, lastEditedByName, lastEditReason,
+ *   editHistory
  */
 type PatchBody = {
   status?: Status;
+  dspId?: string | null;
+
+  auditReason?: string | null;
+  auditActorId?: string | null;
+  auditActorName?: string | null;
+
   tasks?: Array<{
-    pocDutyId?: string; // ✅ preferred
-    id?: string; // ✅ backward compatibility
+    pocDutyId?: string;
+    id?: string;
+
     status: CompletionStatus | string | null;
     note?: string | null;
-    timestamp?: string | null; // ISO
+    timestamp?: string | null;
+
+    lockedAt?: string | null;
+    lockedById?: string | null;
+    lockedByName?: string | null;
+
+    lastEditedAt?: string | null;
+    lastEditedById?: string | null;
+    lastEditedByName?: string | null;
+    lastEditReason?: string | null;
+
+    editHistory?: any;
   }>;
 };
 
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
     if (!id) return jsonErr(400, "Missing id");
@@ -432,19 +518,22 @@ export async function PATCH(
     if (!cur) return jsonErr(404, "Not found");
 
     const nextStatus: Status = (body.status || cur.status) as Status;
+    const incomingDspId = String(body.dspId ?? "").trim() || null;
 
-    // Update header
+    // Update header + persist dspId
     await prisma.$queryRawUnsafe(
       `
       UPDATE public.poc_daily_log
       SET
+        dspid = COALESCE($3, dspid),
         status = $2::public.poc_daily_log_status,
         submittedat = CASE WHEN $2 = 'SUBMITTED' THEN COALESCE(submittedat, now()) ELSE NULL END,
         updatedat = now()
       WHERE id = $1
     `,
       id,
-      nextStatus
+      nextStatus,
+      incomingDspId
     );
 
     const incoming = Array.isArray(body.tasks) ? body.tasks : [];
@@ -459,24 +548,66 @@ export async function PATCH(
       const tsIso = t?.timestamp ? String(t.timestamp).trim() : "";
       const hasTs = !!tsIso;
 
-      // If status is null/invalid: only update note/time if row exists, do NOT insert new row.
+      const lockedAtIso = t?.lockedAt ? String(t.lockedAt).trim() : "";
+      const lockedById = String(t?.lockedById || "").trim() || null;
+      const lockedByName = String(t?.lockedByName || "").trim() || null;
+
+      const lastEditedAtIso = t?.lastEditedAt ? String(t.lastEditedAt).trim() : "";
+      const lastEditedById = String(t?.lastEditedById || "").trim() || null;
+      const lastEditedByName = String(t?.lastEditedByName || "").trim() || null;
+      const lastEditReason = String(t?.lastEditReason || "").trim() || null;
+
+      const historyArr = normalizeHistory(t?.editHistory);
+      const historyJson = historyArr.length ? JSON.stringify(historyArr) : null;
+
+      // If status is null/invalid: only update meta if row exists, do NOT insert new row.
       if (!statusEnum) {
         await prisma.$queryRawUnsafe(
           `
           UPDATE public.poc_daily_task_log
           SET
             note = COALESCE($3, note),
+
             completedat = CASE
               WHEN $4::text IS NULL OR $4::text = '' THEN completedat
               ELSE $4::timestamptz
             END,
+
+            lockedat = CASE
+              WHEN $5::text IS NULL OR $5::text = '' THEN lockedat
+              ELSE $5::timestamptz
+            END,
+            lockedbyid = COALESCE($6, lockedbyid),
+            lockedbyname = COALESCE($7, lockedbyname),
+
+            lasteditedat = CASE
+              WHEN $8::text IS NULL OR $8::text = '' THEN lasteditedat
+              ELSE $8::timestamptz
+            END,
+            lasteditedbyid = COALESCE($9, lasteditedbyid),
+            lasteditedbyname = COALESCE($10, lasteditedbyname),
+            lasteditreason = COALESCE($11, lasteditreason),
+
+            edithistory = CASE
+              WHEN $12::text IS NULL OR $12::text = '' THEN edithistory
+              ELSE $12::jsonb
+            END,
+
             updatedat = now()
           WHERE dailylogid = $1 AND pocdutyid = $2
         `,
           id,
           dutyIdRaw,
           note,
-          hasTs ? tsIso : ""
+          hasTs ? tsIso : "",
+          lockedAtIso || "",
+          lockedById,
+          lockedByName,
+          lastEditedAtIso || "",
+          lastEditedById,
+          lastEditedByName,
+          lastEditReason,
+          historyJson || ""
         );
         continue;
       }
@@ -488,10 +619,32 @@ export async function PATCH(
         SET
           completionstatus = $3::public.poc_duty_completion_status,
           note = $4,
+
           completedat = CASE
             WHEN $5::text IS NULL OR $5::text = '' THEN COALESCE(completedat, now())
             ELSE $5::timestamptz
           END,
+
+          lockedat = CASE
+            WHEN $6::text IS NULL OR $6::text = '' THEN COALESCE(lockedat, now())
+            ELSE $6::timestamptz
+          END,
+          lockedbyid = COALESCE($7, lockedbyid),
+          lockedbyname = COALESCE($8, lockedbyname),
+
+          lasteditedat = CASE
+            WHEN $9::text IS NULL OR $9::text = '' THEN lasteditedat
+            ELSE $9::timestamptz
+          END,
+          lasteditedbyid = COALESCE($10, lasteditedbyid),
+          lasteditedbyname = COALESCE($11, lasteditedbyname),
+          lasteditreason = COALESCE($12, lasteditreason),
+
+          edithistory = CASE
+            WHEN $13::text IS NULL OR $13::text = '' THEN edithistory
+            ELSE $13::jsonb
+          END,
+
           updatedat = now()
         WHERE dailylogid = $1 AND pocdutyid = $2
         RETURNING id
@@ -500,7 +653,15 @@ export async function PATCH(
         dutyIdRaw,
         statusEnum,
         note,
-        hasTs ? tsIso : ""
+        hasTs ? tsIso : "",
+        lockedAtIso || "",
+        lockedById,
+        lockedByName,
+        lastEditedAtIso || "",
+        lastEditedById,
+        lastEditedByName,
+        lastEditReason,
+        historyJson || ""
       )) as any[];
 
       if (updated?.[0]?.id) continue;
@@ -509,17 +670,38 @@ export async function PATCH(
       await prisma.$queryRawUnsafe(
         `
         INSERT INTO public.poc_daily_task_log
-          (id, dailylogid, pocdutyid, completionstatus, completedat, note, createdat, updatedat)
+          (id, dailylogid, pocdutyid, completionstatus, completedat, note,
+           lockedat, lockedbyid, lockedbyname,
+           lasteditedat, lasteditedbyid, lasteditedbyname, lasteditreason,
+           edithistory,
+           createdat, updatedat)
         VALUES
           (gen_random_uuid(), $1, $2, $3::public.poc_duty_completion_status,
            CASE WHEN $4::text IS NULL OR $4::text = '' THEN now() ELSE $4::timestamptz END,
-           $5, now(), now())
+           $5,
+           CASE WHEN $6::text IS NULL OR $6::text = '' THEN now() ELSE $6::timestamptz END,
+           $7,
+           $8,
+           CASE WHEN $9::text IS NULL OR $9::text = '' THEN NULL ELSE $9::timestamptz END,
+           $10,
+           $11,
+           $12,
+           CASE WHEN $13::text IS NULL OR $13::text = '' THEN NULL ELSE $13::jsonb END,
+           now(), now())
       `,
         id,
         dutyIdRaw,
         statusEnum,
         hasTs ? tsIso : "",
-        note
+        note,
+        lockedAtIso || "",
+        lockedById,
+        lockedByName,
+        lastEditedAtIso || "",
+        lastEditedById,
+        lastEditedByName,
+        lastEditReason,
+        historyJson || ""
       );
     }
 
@@ -531,14 +713,15 @@ export async function PATCH(
     const duties = await readAllDuties(String(refreshed.pocId || ""));
     const taskLogs = await readTaskLogs(String(refreshed.id));
 
-    const tasks = buildTasksForDay(String(refreshed.date), duties, taskLogs);
+    const dspId = refreshed.dspId ? String(refreshed.dspId) : null;
+    const tasks = buildTasksForDay(String(refreshed.date), duties, taskLogs, dspId);
 
     const item: DailyLogDetail = {
       id: String(refreshed.id),
       pocId: String(refreshed.pocId),
       pocNumber: pocNumber ?? null,
       individualId: String(refreshed.individualId),
-      dspId: refreshed.dspId ? String(refreshed.dspId) : null,
+      dspId,
       date: String(refreshed.date),
       status: String(refreshed.status) as Status,
       submittedAt: toIso(refreshed.submittedAt),

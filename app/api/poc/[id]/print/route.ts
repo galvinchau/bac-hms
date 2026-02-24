@@ -174,6 +174,80 @@ function toISODateNoShift(x: any): string {
   return "";
 }
 
+function safeDateMs(x: any) {
+  if (!x) return 0;
+  const t = new Date(String(x)).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function safeJsonStringify(x: any): string {
+  try {
+    return JSON.stringify(x, null, 0);
+  } catch {
+    return String(x ?? "");
+  }
+}
+
+/**
+ * Extract / format edit history into printable lines.
+ * Accepts:
+ * - array of objects/strings
+ * - object
+ * - string
+ */
+function formatEditHistoryLines(editHistory: any): string[] {
+  if (!editHistory) return [];
+
+  // if already a string
+  if (typeof editHistory === "string") {
+    const s = editHistory.trim();
+    if (!s) return [];
+    return [s];
+  }
+
+  // if array
+  if (Array.isArray(editHistory)) {
+    const lines: string[] = [];
+    for (const it of editHistory) {
+      if (!it) continue;
+      if (typeof it === "string") {
+        const s = it.trim();
+        if (s) lines.push(s);
+        continue;
+      }
+      // best effort known fields
+      const at = pickFirstNonEmpty(it?.at, it?.time, it?.timestamp, it?.createdAt, it?.updatedAt);
+      const who = pickFirstNonEmpty(it?.byName, it?.by, it?.userName, it?.name, it?.byId);
+      const action = pickFirstNonEmpty(it?.action, it?.event, it?.type);
+      const reason = pickFirstNonEmpty(it?.reason, it?.note, it?.comment);
+
+      const parts = [
+        at ? fmtPA_Time(at) : "",
+        action ? String(action).toUpperCase() : "",
+        who ? `by ${who}` : "",
+        reason ? `- reason: ${reason}` : "",
+      ].filter(Boolean);
+
+      if (parts.length) lines.push(parts.join(" "));
+      else lines.push(safeJsonStringify(it));
+    }
+    return lines;
+  }
+
+  // object
+  if (typeof editHistory === "object") {
+    // if it looks like { items:[...] }
+    if (Array.isArray((editHistory as any).items)) {
+      return formatEditHistoryLines((editHistory as any).items);
+    }
+    // otherwise stringify once
+    const s = safeJsonStringify(editHistory);
+    return s && s !== "{}" ? [s] : [];
+  }
+
+  return [String(editHistory)];
+}
+
 /* =========================================================
    API Fetchers
 ========================================================= */
@@ -398,16 +472,22 @@ export async function GET(req: Request, ctx: any) {
       if (dspId) dspIdByLogId.set(logId, dspId);
     }
 
-    // Lookup DSP names
-    const dspIdsAll = Array.from(new Set(Array.from(dspIdByLogId.values())));
-    const dspNameMap = await apiGetDspNames(origin, dspIdsAll);
-
+    // =====================================================
     // Build task map: key = dailyLogId::pocDutyId -> task row
+    // Also collect all potential DSP ids for name lookup
+    // =====================================================
+    const dspIdsForLookup = new Set<string>();
+    for (const v of dspIdByLogId.values()) dspIdsForLookup.add(String(v));
+
     const taskLogMap = new Map<string, any>();
     for (const logId of dailyLogIds) {
       const raw = detailsById.get(logId) ?? {};
       // /api/poc/daily-logs/[id] returns { ok:true, item:{...} }
       const detail = raw?.item ?? raw;
+
+      // collect day DSP if present
+      const dayDspId = String(detail?.dspId ?? detail?.dspid ?? "").trim();
+      if (dayDspId) dspIdsForLookup.add(dayDspId);
 
       const tasks =
         (Array.isArray(detail?.tasks) ? detail.tasks : null) ??
@@ -417,7 +497,6 @@ export async function GET(req: Request, ctx: any) {
         [];
 
       for (const t of tasks) {
-        // daily-log detail uses `id` as the dutyId
         const pocDutyId = pickFirstNonEmpty(
           t?.pocDutyId,
           t?.dutyId,
@@ -427,13 +506,22 @@ export async function GET(req: Request, ctx: any) {
         );
         if (!pocDutyId) continue;
 
+        // collect task DSP ids if present
+        const lockId = String(t?.lockedById ?? "").trim();
+        const editId = String(t?.lastEditedById ?? "").trim();
+        const dspId = String(t?.dspId ?? t?.dspid ?? "").trim();
+        if (lockId) dspIdsForLookup.add(lockId);
+        if (editId) dspIdsForLookup.add(editId);
+        if (dspId) dspIdsForLookup.add(dspId);
+
         const key = `${logId}::${pocDutyId}`;
 
         const ts = pickFirstNonEmpty(
           t?.timestamp,
           t?.completedAt,
           t?.updatedAt,
-          t?.createdAt
+          t?.createdAt,
+          t?.lockedAt
         );
 
         const existing = taskLogMap.get(key);
@@ -444,14 +532,18 @@ export async function GET(req: Request, ctx: any) {
             existing?.timestamp,
             existing?.completedAt,
             existing?.updatedAt,
-            existing?.createdAt
+            existing?.createdAt,
+            existing?.lockedAt
           );
-          const a = existingTs ? new Date(existingTs).getTime() : 0;
-          const b = ts ? new Date(ts).getTime() : 0;
+          const a = safeDateMs(existingTs);
+          const b = safeDateMs(ts);
           if (b >= a) taskLogMap.set(key, t);
         }
       }
     }
+
+    // Lookup DSP names once
+    const dspNameMap = await apiGetDspNames(origin, Array.from(dspIdsForLookup));
 
     const totalDays = days.length;
 
@@ -464,8 +556,15 @@ export async function GET(req: Request, ctx: any) {
   <meta charset="utf-8" />
   <title>POC Daily Logs Report</title>
   <style>
-@page { size: Letter; margin: 14px; }
+@page { size: Letter portrait; margin: 0.5in; }
+
+/* Ensure print uses full width and doesn't clip */
+html, body { width: 100%; }
 body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; }
+
+/* Chrome print safety */
+* { box-sizing: border-box; }
+table { max-width: 100%; }
 
 .headerTop {
   display:flex; align-items:flex-start; justify-content:space-between;
@@ -500,7 +599,9 @@ body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff;
   border: 2px solid #000;
   border-radius: 8px;
   margin-top: 10px;
-  page-break-inside: avoid;
+  /* allow multiple days per page, but avoid splitting rows */
+  break-inside: auto;
+  page-break-inside: auto;
 }
 .dayHeader {
   display:flex; align-items:center; justify-content:space-between;
@@ -528,39 +629,33 @@ body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff;
 
 .tableWrap { padding: 8px 8px 10px; }
 
-/* ✅ Auto-fit feel: make DSP wider, push Note to the right */
+/* ✅ Portrait-friendly columns */
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;
   table-layout: fixed;
 }
-th, td { border: 1px solid #000; padding: 5px 6px; vertical-align: top; }
+th, td { border: 1px solid #000; padding: 4px 6px; vertical-align: top; }
 th { background: #e6e6e6; font-weight: 800; text-align: left; }
 
-.col-task { width: 56px; text-align:center; }
-/* duty a bit narrower */
-.col-duty { width: 280px; }
-.col-status { width: 120px; }
-.col-ts { width: 150px; }
-
-/* ✅ DSP wider so it doesn't get hidden by Note */
-.col-dsp { width: 220px; }
-
-/* ✅ Note becomes flexible (takes remaining space) */
+.col-task { width: 52px; text-align:center; }
+.col-duty { width: 210px; }        /* ✅ narrower Duty */
+.col-status { width: 105px; }
+.col-ts { width: 135px; }
+.col-dsp { width: 175px; }         /* keep room for history */
 .col-note { width: auto; }
 
-td.col-duty { white-space: normal; word-break: break-word; }
-td.col-note { white-space: normal; word-break: break-word; }
+td.col-duty { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+td.col-note { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
 
-/* prevent DSP text from overlapping; if too long, show ellipsis */
-td.col-status, td.col-ts, td.col-dsp {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* ✅ DSP should WRAP (so history doesn't "disappear") */
+td.col-dsp { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
 
-.pageBreak { page-break-after: always; }
+/* Avoid cutting a row across pages */
+tr { break-inside: avoid; page-break-inside: avoid; }
+thead { display: table-header-group; }
+tfoot { display: table-footer-group; }
   </style>
 </head>
 <body>
@@ -598,16 +693,13 @@ td.col-status, td.col-ts, td.col-dsp {
   </div>
 
   ${days
-    .map((day, idx) => {
+    .map((day) => {
       const log = dailyLogByDate.get(day.dateISO) ?? null;
-      const dailyLogId = log
-        ? String(log?.id ?? log?.dailyLogId ?? "").trim()
-        : "";
+      const dailyLogId = log ? String(log?.id ?? log?.dailyLogId ?? "").trim() : "";
 
       const s = String(log?.status ?? "").toUpperCase();
       const badge = log ? (s === "SUBMITTED" ? "DONE" : "UPDATED") : "EMPTY";
-      const badgeClass =
-        badge === "DONE" ? "done" : badge === "UPDATED" ? "updated" : "empty";
+      const badgeClass = badge === "DONE" ? "done" : badge === "UPDATED" ? "updated" : "empty";
 
       const dutiesForDay = duties
         .filter((d) => d.daysSet?.has(day.dow))
@@ -615,65 +707,107 @@ td.col-status, td.col-ts, td.col-dsp {
 
       const noteLine = !log ? "No daily log created" : "";
 
-      // DSP name for the day (if stored)
-      const dspIdForDay = dailyLogId ? (dspIdByLogId.get(dailyLogId) || "") : "";
-      const dspNameForDay = dspIdForDay
-        ? (dspNameMap[dspIdForDay] || dspIdForDay)
-        : "";
+      // DSP name for the day (stored on daily log)
+      const dspIdForDay = dailyLogId ? String(dspIdByLogId.get(dailyLogId) || "").trim() : "";
+      const dspNameForDay = dspIdForDay ? String(dspNameMap[dspIdForDay] || dspIdForDay).trim() : "";
 
       const rowsHtml = dutiesForDay.length
         ? dutiesForDay
             .map((d) => {
               let st = "";
               let ts = "";
-              let dsp = dspNameForDay;
+              let dspCellLines: string[] = [];
               let note = "";
+
+              // default: show day DSP name (if any)
+              if (dspNameForDay) dspCellLines.push(dspNameForDay);
 
               if (dailyLogId && d.id) {
                 const t = taskLogMap.get(`${dailyLogId}::${d.id}`) ?? null;
+
                 if (t) {
-                  st = statusLabel(
-                    t?.status ?? t?.completionStatus ?? t?.taskStatus
-                  );
+                  st = statusLabel(t?.status ?? t?.completionStatus ?? t?.taskStatus);
 
                   const rawTs = pickFirstNonEmpty(
                     t?.timestamp,
                     t?.completedAt,
                     t?.updatedAt,
-                    t?.createdAt
+                    t?.createdAt,
+                    t?.lockedAt
                   );
                   ts = rawTs ? fmtPA_Time(rawTs) : "";
 
-                  note = pickFirstNonEmpty(
-                    t?.note,
-                    t?.notes,
-                    t?.comment,
-                    t?.memo
+                  note = pickFirstNonEmpty(t?.note, t?.notes, t?.comment, t?.memo);
+
+                  // === DSP block (with history) ===
+                  const lockAtRaw = pickFirstNonEmpty(t?.lockedAt, t?.timestamp, t?.completedAt);
+                  const lockAt = lockAtRaw ? fmtPA_Time(lockAtRaw) : "";
+
+                  const lockName = String(t?.lockedByName ?? "").trim();
+                  const lockId = String(t?.lockedById ?? "").trim();
+                  const lockNameFromId = lockId ? String(dspNameMap[lockId] || lockId).trim() : "";
+                  const lockedBy = pickFirstNonEmpty(lockName, lockNameFromId, dspNameForDay);
+
+                  // last edited
+                  const editedAtRaw = pickFirstNonEmpty(t?.lastEditedAt, t?.lasteditedat);
+                  const editedAt = editedAtRaw ? fmtPA_Time(editedAtRaw) : "";
+
+                  const editedByName = String(t?.lastEditedByName ?? t?.lasteditedbyname ?? "").trim();
+                  const editedById = String(t?.lastEditedById ?? t?.lasteditedbyid ?? "").trim();
+                  const editedBy = pickFirstNonEmpty(
+                    editedByName,
+                    editedById ? String(dspNameMap[editedById] || editedById).trim() : "",
+                    ""
                   );
 
-                  // If task row has dspName/dsp override, use it
-                  const dspOverride = pickFirstNonEmpty(
-                    t?.dsp,
-                    t?.dspName,
-                    t?.editedBy,
-                    t?.updatedBy
-                  );
-                  if (dspOverride) dsp = dspOverride;
+                  const editReason = pickFirstNonEmpty(t?.lastEditReason, t?.lasteditreason);
 
-                  // ✅ If still no DSP stored, show "Locked @ <timestamp>" like UI
-                  // IMPORTANT: no backslash here (fixes unicode escape build error)
-                  if (!dsp && st) {
-                    dsp = ts ? `Locked @ ${ts}` : "Locked";
+                  // history
+                  const editHistory = t?.editHistory ?? t?.edithistory;
+                  const historyLines = formatEditHistoryLines(editHistory);
+
+                  // reset dsp lines and rebuild in a stable order
+                  dspCellLines = [];
+
+                  // 1) Locked line (only if has a timestamp/status)
+                  if (st) {
+                    if (lockedBy) {
+                      dspCellLines.push(lockAt ? `Locked by ${lockedBy} @ ${lockAt}` : `Locked by ${lockedBy}`);
+                    } else {
+                      dspCellLines.push(lockAt ? `Locked @ ${lockAt}` : "Locked");
+                    }
+                  } else if (dspNameForDay) {
+                    // if not locked, still show day DSP (for consistency)
+                    dspCellLines.push(dspNameForDay);
+                  }
+
+                  // 2) Edited line
+                  if (editedAt || editedBy || editReason) {
+                    const parts = [
+                      editedBy ? `Edited by ${editedBy}` : "Edited",
+                      editedAt ? `@ ${editedAt}` : "",
+                      editReason ? `- reason: ${editReason}` : "",
+                    ].filter(Boolean);
+                    dspCellLines.push(parts.join(" "));
+                  }
+
+                  // 3) Edit History block
+                  if (historyLines.length) {
+                    dspCellLines.push("Edit History");
+                    for (const ln of historyLines) dspCellLines.push(ln);
                   }
                 }
               }
+
+              // If still blank
+              const dspCell = dspCellLines.filter(Boolean).join("<br/>");
 
               return `<tr>
   <td class="col-task">${escapeHtml(d.taskNo)}</td>
   <td class="col-duty">${escapeHtml(d.duty)}</td>
   <td class="col-status">${escapeHtml(st)}</td>
   <td class="col-ts">${escapeHtml(ts)}</td>
-  <td class="col-dsp">${escapeHtml(dsp)}</td>
+  <td class="col-dsp">${dspCell ? dspCell : ""}</td>
   <td class="col-note">${escapeHtml(note)}</td>
 </tr>`;
             })
@@ -704,8 +838,7 @@ td.col-status, td.col-ts, td.col-dsp {
       </tbody>
     </table>
   </div>
-</div>
-${idx < days.length - 1 ? `<div class="pageBreak"></div>` : ""}`;
+</div>`;
     })
     .join("\n")}
 
