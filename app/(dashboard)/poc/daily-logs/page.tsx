@@ -47,6 +47,17 @@ type AuthMe = {
   user?: any;
 };
 
+type ResolvePocResponse = {
+  ok: boolean;
+  pocId?: string;
+  individualId?: string;
+  pocStart?: string | null; // YYYY-MM-DD
+  pocStop?: string | null; // YYYY-MM-DD
+  pocNumber?: string | null;
+  error?: string;
+  detail?: string;
+};
+
 function qs(obj: Record<string, string | number | null | undefined>) {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(obj)) {
@@ -259,6 +270,7 @@ function DailyLogsListInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // incoming query
   const prePocId = searchParams.get("pocId") || "";
   const prePocNumber = searchParams.get("pocNumber") || "";
   const preIndividualId = searchParams.get("individualId") || "";
@@ -266,14 +278,34 @@ function DailyLogsListInner() {
   const pocStartRaw = searchParams.get("pocStart") || "";
   const pocStopRaw = searchParams.get("pocStop") || "";
 
-  const pocStart = normalizeToYmd(pocStartRaw);
-  const pocStop = normalizeToYmd(pocStopRaw);
-
-  const today = todayYmdPA();
-  const endDate = pocStop || today;
+  const prePocStart = normalizeToYmd(pocStartRaw);
+  const prePocStop = normalizeToYmd(pocStopRaw);
 
   const returnToRaw = searchParams.get("returnTo") || "";
   const returnTo = normalizeReturnTo(returnToRaw);
+
+  // ✅ resolved fallback when only pocNumber is provided
+  const [resolved, setResolved] = useState<{
+    pocId: string;
+    individualId: string;
+    pocStart: string;
+    pocStop: string;
+    pocNumber: string;
+  } | null>(null);
+
+  const [resolving, setResolving] = useState(false);
+  const [resolveErr, setResolveErr] = useState<string | null>(null);
+
+  // Effective values (prefer query, fallback to resolved)
+  const effPocId = prePocId || resolved?.pocId || "";
+  const effIndividualId = preIndividualId || resolved?.individualId || "";
+  const effPocNumber = prePocNumber || resolved?.pocNumber || "";
+
+  const effPocStart = prePocStart || resolved?.pocStart || "";
+  const effPocStop = prePocStop || resolved?.pocStop || "";
+
+  const today = todayYmdPA();
+  const endDate = effPocStop || today;
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -282,7 +314,6 @@ function DailyLogsListInner() {
   const [statusSubmitted, setStatusSubmitted] = useState(true);
 
   const [data, setData] = useState<ApiResponse | null>(null);
-
   const [duties, setDuties] = useState<DutyItem[]>([]);
 
   const [actorId, setActorId] = useState("");
@@ -296,26 +327,87 @@ function DailyLogsListInner() {
   }, [statusDraft, statusSubmitted]);
 
   const titleSuffix = useMemo(() => {
-    if (prePocNumber) return ` — POC ${prePocNumber}`;
-    if (prePocId) return ` — POC`;
+    if (effPocNumber) return ` — POC ${effPocNumber}`;
+    if (effPocId) return ` — POC`;
     return "";
-  }, [prePocId, prePocNumber]);
+  }, [effPocId, effPocNumber]);
+
+  // ✅ Resolve when missing ids but has pocNumber
+  useEffect(() => {
+    async function resolveIfNeeded() {
+      setResolveErr(null);
+
+      // already have both -> no need resolve
+      if (prePocId && preIndividualId) return;
+
+      // need resolve only if we have pocNumber
+      const pn = String(prePocNumber || "").trim();
+      if (!pn) return;
+
+      // avoid re-resolve
+      if (resolved && resolved.pocNumber === pn) return;
+      if (resolving) return;
+
+      try {
+        setResolving(true);
+
+        const res = await fetch(`/api/poc/resolve?${qs({ pocNumber: pn })}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const json = (await readJsonOrThrow(res)) as ResolvePocResponse;
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.detail || json?.error || `Resolve failed (${res.status})`);
+        }
+
+        const pocId = String(json.pocId || "").trim();
+        const individualId = String(json.individualId || "").trim();
+        const pocStart = normalizeToYmd(String(json.pocStart || ""));
+        const pocStop = normalizeToYmd(String(json.pocStop || ""));
+        const pocNumber = String(json.pocNumber || pn).trim();
+
+        if (!pocId || !individualId) {
+          throw new Error("Resolve result missing pocId/individualId.");
+        }
+        if (!pocStart) {
+          throw new Error("Resolve result missing pocStart.");
+        }
+
+        setResolved({
+          pocId,
+          individualId,
+          pocStart,
+          pocStop,
+          pocNumber,
+        });
+      } catch (e: any) {
+        setResolveErr(String(e?.message || e));
+        setResolved(null);
+      } finally {
+        setResolving(false);
+      }
+    }
+
+    resolveIfNeeded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prePocId, preIndividualId, prePocNumber]);
 
   const generatedDates = useMemo(() => {
-    if (!pocStart) return [];
-    if (!isYmd(pocStart)) return [];
+    if (!effPocStart) return [];
+    if (!isYmd(effPocStart)) return [];
     if (!isYmd(endDate)) return [];
-    if (endDate < pocStart) return [];
+    if (endDate < effPocStart) return [];
 
     const out: string[] = [];
-    let cur = pocStart;
+    let cur = effPocStart;
     while (cur <= endDate) {
       out.push(cur);
       cur = addDays(cur, 1);
       if (out.length > 3660) break;
     }
     return out;
-  }, [pocStart, endDate]);
+  }, [effPocStart, endDate]);
 
   async function loadMe() {
     try {
@@ -330,10 +422,15 @@ function DailyLogsListInner() {
   }
 
   async function loadDutiesOnce() {
-    if (!prePocId) return;
+    if (!effPocId) return;
     try {
-      const res = await fetch(`/api/poc/duties?${qs({ pocId: prePocId })}`, { method: "GET" });
-      const json = (await readJsonOrThrow(res)) as { ok: boolean; items: DutyItem[]; error?: string; detail?: string };
+      const res = await fetch(`/api/poc/duties?${qs({ pocId: effPocId })}`, { method: "GET" });
+      const json = (await readJsonOrThrow(res)) as {
+        ok: boolean;
+        items: DutyItem[];
+        error?: string;
+        detail?: string;
+      };
       if (!res.ok || !json.ok) throw new Error(json.detail || json.error || `HTTP ${res.status}`);
       setDuties(Array.isArray(json.items) ? json.items : []);
     } catch {
@@ -342,15 +439,15 @@ function DailyLogsListInner() {
   }
 
   async function loadRange() {
-    if (!prePocId || !preIndividualId || !pocStart) return;
+    if (!effPocId || !effIndividualId || !effPocStart) return;
 
     setLoading(true);
     setErr(null);
     try {
       const query = qs({
-        pocId: prePocId,
-        individualId: preIndividualId,
-        dateFrom: pocStart,
+        pocId: effPocId,
+        individualId: effIndividualId,
+        dateFrom: effPocStart,
         dateTo: endDate,
         status: statusParam || null,
         page: 1,
@@ -378,12 +475,12 @@ function DailyLogsListInner() {
   useEffect(() => {
     loadDutiesOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prePocId]);
+  }, [effPocId]);
 
   useEffect(() => {
     loadRange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusParam, prePocId, preIndividualId, pocStart, endDate]);
+  }, [statusParam, effPocId, effIndividualId, effPocStart, endDate]);
 
   const byDate = useMemo(() => {
     const m = new Map<string, ApiItem>();
@@ -396,9 +493,11 @@ function DailyLogsListInner() {
 
   function buildDetailUrl(args: { id: string; date: string; dspId?: string | null }) {
     const q = qs({
-      pocId: prePocId || null,
-      individualId: preIndividualId || null,
-      pocNumber: prePocNumber || null,
+      pocId: effPocId || null,
+      individualId: effIndividualId || null,
+      pocNumber: effPocNumber || null,
+      pocStart: effPocStart || null,
+      pocStop: effPocStop || null,
       date: args.date || null,
       dspId: args.dspId ?? null,
       returnTo: returnTo || null,
@@ -407,7 +506,7 @@ function DailyLogsListInner() {
   }
 
   async function openDay(ymd: string) {
-    if (!prePocId || !preIndividualId) return;
+    if (!effPocId || !effIndividualId) return;
     if (!isYmd(ymd)) return;
 
     const exist = byDate.get(ymd);
@@ -425,8 +524,8 @@ function DailyLogsListInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pocId: prePocId,
-          individualId: preIndividualId,
+          pocId: effPocId,
+          individualId: effIndividualId,
           date: ymd,
           dspId: createDspId,
         }),
@@ -469,17 +568,50 @@ function DailyLogsListInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duties]);
 
-  if (!prePocId || !preIndividualId) {
+  // ✅ Handle missing params: allow pocNumber-only, show resolving UI
+  const missingIds = !effPocId || !effIndividualId;
+  const missingStart = !effPocStart;
+
+  if (missingIds) {
+    const canResolve = !!prePocNumber;
+
     return (
       <div className="min-h-[calc(100vh-64px)] p-4">
         <div className="rounded-xl border border-white/10 bg-[#0B1220] text-white p-5 shadow">
           <div className="text-lg font-semibold text-[#FFD66B]">Daily Logs</div>
-          <div className="mt-2 text-sm text-red-300">Missing pocId / individualId from query.</div>
-          <div className="mt-2 text-sm text-white/70">
-            Please open Daily Logs from the POC module button so the page receives the required parameters.
-          </div>
+
+          {canResolve ? (
+            <>
+              <div className="mt-2 text-sm text-white/70">
+                Resolving POC from <span className="font-mono">pocNumber={prePocNumber}</span>…
+              </div>
+
+              {resolving ? (
+                <div className="mt-2 text-sm text-white/60">Please wait…</div>
+              ) : resolveErr ? (
+                <div className="mt-2 text-sm text-red-300">
+                  Resolve error: <span className="font-mono">{resolveErr}</span>
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-white/60">
+                  (If you still see this, please refresh.)
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="mt-2 text-sm text-red-300">Missing pocId / individualId from query.</div>
+              <div className="mt-2 text-sm text-white/70">
+                Please open Daily Logs from the POC module button so the page receives the required parameters.
+              </div>
+            </>
+          )}
+
           <div className="mt-4">
-            <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
+            <button
+              className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10"
+              onClick={onClose}
+            >
               Close
             </button>
           </div>
@@ -488,15 +620,18 @@ function DailyLogsListInner() {
     );
   }
 
-  if (!pocStart) {
+  if (missingStart) {
     return (
       <div className="min-h-[calc(100vh-64px)] p-4">
         <div className="rounded-xl border border-white/10 bg-[#0B1220] text-white p-5 shadow">
           <div className="text-lg font-semibold text-[#FFD66B]">Daily Logs{titleSuffix}</div>
-          <div className="mt-2 text-sm text-red-300">Missing pocStart in query.</div>
+          <div className="mt-2 text-sm text-red-300">Missing pocStart in query (and resolve).</div>
           <div className="mt-2 text-sm text-white/70">POC Start Date is required to generate daily log dates.</div>
           <div className="mt-4 flex items-center gap-2">
-            <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
+            <button
+              className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10"
+              onClick={onClose}
+            >
               Close
             </button>
           </div>
@@ -521,14 +656,17 @@ function DailyLogsListInner() {
           <div className="min-w-0">
             <h1 className="text-3xl font-extrabold tracking-tight">Daily Logs{titleSuffix}</h1>
             <p className="mt-1 text-sm text-white/70">
-              Range: <span className="font-mono">{fmtDatePA(pocStart)}</span> →{" "}
+              Range: <span className="font-mono">{fmtDatePA(effPocStart)}</span> →{" "}
               <span className="font-mono">{fmtDatePA(endDate)}</span>
               <span className="ml-2 text-xs text-white/40">(Timezone: {TZ_PA})</span>
             </p>
             {showWho ? <p className="mt-1 text-xs text-white/50">{showWho}</p> : null}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10" onClick={onClose}>
+            <button
+              className="px-4 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10"
+              onClick={onClose}
+            >
               Close
             </button>
             <button
@@ -549,7 +687,11 @@ function DailyLogsListInner() {
             </label>
 
             <label className="flex items-center gap-2 text-sm text-[#FFD66B] font-semibold">
-              <input type="checkbox" checked={statusSubmitted} onChange={(e) => setStatusSubmitted(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={statusSubmitted}
+                onChange={(e) => setStatusSubmitted(e.target.checked)}
+              />
               Submitted
             </label>
 
@@ -564,6 +706,18 @@ function DailyLogsListInner() {
               <span className="text-green-200">DONE</span> (submitted)
             </div>
           </div>
+
+          {resolving ? (
+            <div className="mt-3 text-xs text-white/50">
+              Resolving POC from <span className="font-mono">pocNumber={prePocNumber}</span>…
+            </div>
+          ) : null}
+
+          {resolveErr ? (
+            <div className="mt-3 text-sm text-red-300">
+              Resolve error: <span className="font-mono">{resolveErr}</span>
+            </div>
+          ) : null}
 
           {err ? (
             <div className="mt-3 text-sm text-red-300">
@@ -581,11 +735,21 @@ function DailyLogsListInner() {
             <table className="w-full table-auto text-[13px] min-w-[1100px]">
               <thead className="bg-[#0A1020]">
                 <tr className="text-left">
-                  <th className="px-3 py-2 border-b border-white/10 w-[140px] text-[#FFD66B] font-bold whitespace-nowrap">Date</th>
-                  <th className="px-3 py-2 border-b border-white/10 w-[160px] text-[#FFD66B] font-bold whitespace-nowrap">Status</th>
-                  <th className="px-3 py-2 border-b border-white/10 min-w-[320px] text-[#FFD66B] font-bold">Duty</th>
-                  <th className="px-3 py-2 border-b border-white/10 min-w-[360px] text-[#FFD66B] font-bold">Instruction</th>
-                  <th className="px-3 py-2 border-b border-white/10 min-w-[280px] text-[#FFD66B] font-bold">Notes</th>
+                  <th className="px-3 py-2 border-b border-white/10 w-[140px] text-[#FFD66B] font-bold whitespace-nowrap">
+                    Date
+                  </th>
+                  <th className="px-3 py-2 border-b border-white/10 w-[160px] text-[#FFD66B] font-bold whitespace-nowrap">
+                    Status
+                  </th>
+                  <th className="px-3 py-2 border-b border-white/10 min-w-[320px] text-[#FFD66B] font-bold">
+                    Duty
+                  </th>
+                  <th className="px-3 py-2 border-b border-white/10 min-w-[360px] text-[#FFD66B] font-bold">
+                    Instruction
+                  </th>
+                  <th className="px-3 py-2 border-b border-white/10 min-w-[280px] text-[#FFD66B] font-bold">
+                    Notes
+                  </th>
                 </tr>
               </thead>
 
@@ -629,16 +793,21 @@ function DailyLogsListInner() {
                       !!String(item.dspId || "").trim() ||
                       isDifferentIso(item.updatedAt, item.createdAt));
 
-                  const statusLabel = empty ? "EMPTY" : status === "SUBMITTED" ? "✅ DONE" : looksUpdated ? "UPDATED" : "DRAFT";
+                  const statusLabel = empty
+                    ? "EMPTY"
+                    : status === "SUBMITTED"
+                      ? "✅ DONE"
+                      : looksUpdated
+                        ? "UPDATED"
+                        : "DRAFT";
 
-                  const statusClass =
-                    empty
-                      ? "bg-white/5 border-white/10 text-white/60"
-                      : status === "SUBMITTED"
+                  const statusClass = empty
+                    ? "bg-white/5 border-white/10 text-white/60"
+                    : status === "SUBMITTED"
                       ? "bg-green-500/10 border-green-500/30 text-green-200"
                       : looksUpdated
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
-                      : "bg-yellow-500/10 border-yellow-500/30 text-yellow-200";
+                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
+                        : "bg-yellow-500/10 border-yellow-500/30 text-yellow-200";
 
                   return (
                     <tr
@@ -652,23 +821,34 @@ function DailyLogsListInner() {
                       </td>
 
                       <td className="px-3 py-1.5 align-middle whitespace-nowrap">
-                        <span className={"inline-block px-2 py-1 rounded-full text-[11px] border " + statusClass}>{statusLabel}</span>
+                        <span className={"inline-block px-2 py-1 rounded-full text-[11px] border " + statusClass}>
+                          {statusLabel}
+                        </span>
                       </td>
 
                       <td className="px-3 py-1.5 align-middle">
-                        <div className="text-white/90 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={dutyPreview}>
+                        <div
+                          className="text-white/90 leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                          title={dutyPreview}
+                        >
                           {dutyPreview}
                         </div>
                       </td>
 
                       <td className="px-3 py-1.5 align-middle">
-                        <div className="text-white/80 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={instrPreview}>
+                        <div
+                          className="text-white/80 leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                          title={instrPreview}
+                        >
                           {instrPreview}
                         </div>
                       </td>
 
                       <td className="px-3 py-1.5 align-middle">
-                        <div className="text-white/70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={notesText}>
+                        <div
+                          className="text-white/70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
+                          title={notesText}
+                        >
                           {notesText}
                         </div>
                       </td>

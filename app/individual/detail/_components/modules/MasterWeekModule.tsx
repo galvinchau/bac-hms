@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 // ===== Types (copied from Schedule page) =====
 
@@ -77,6 +78,23 @@ type WeekApiResponse = {
 };
 
 type MasterApiResponse = MasterScheduleTemplate[];
+
+// ===== POC badge types =====
+type POCShiftSummaryItem = {
+  scheduleShiftId?: string | null;
+  shiftId?: string | null; // tolerate
+  pocNumbers?: string[] | null;
+  hasPoc?: boolean | null;
+  hasActivePoc?: boolean | null;
+};
+
+type POCShiftSummariesResponse =
+  | POCShiftSummaryItem[]
+  | {
+      items?: POCShiftSummaryItem[];
+      data?: POCShiftSummaryItem[];
+      summaries?: POCShiftSummaryItem[];
+    };
 
 const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -183,7 +201,13 @@ function getDayIndexInWeek(weekStartIso: string, dateIso: string): number {
 
 // ===== Component =====
 
-export default function MasterWeekModule({ individualId }: { individualId: string }) {
+export default function MasterWeekModule({
+  individualId,
+}: {
+  individualId: string;
+}) {
+  const router = useRouter();
+
   const [services, setServices] = useState<Service[]>([]);
   const [dsps, setDsps] = useState<Employee[]>([]);
 
@@ -191,9 +215,9 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
     startOfWeekSunday(new Date())
   );
 
-  const [masterTemplates, setMasterTemplates] = useState<MasterScheduleTemplate[]>(
-    []
-  );
+  const [masterTemplates, setMasterTemplates] = useState<
+    MasterScheduleTemplate[]
+  >([]);
   const [selectedTemplate, setSelectedTemplate] =
     useState<MasterScheduleTemplate | null>(null);
 
@@ -209,6 +233,70 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
   const [generatingWeek, setGeneratingWeek] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // ===== POC badge per shift (read-only) =====
+  const [pocByShiftId, setPocByShiftId] = useState<Record<string, string[]>>(
+    {}
+  );
+  const [loadingPocBadges, setLoadingPocBadges] = useState(false);
+
+  // ===== POC picker popover =====
+  const [pocPickerOpen, setPocPickerOpen] = useState(false);
+  const [pocPickerShiftId, setPocPickerShiftId] = useState<string>("");
+  const [pocPickerNums, setPocPickerNums] = useState<string[]>([]);
+  const [pocPickerAnchor, setPocPickerAnchor] = useState<{ x: number; y: number } | null>(null);
+
+  function getReturnToUrl(): string {
+    if (typeof window === "undefined") return "";
+    return `${window.location.pathname}${window.location.search || ""}`;
+  }
+
+  function goToPocDailyLogs(pocNumber: string) {
+    const n = String(pocNumber || "").trim();
+    if (!n) return;
+    const returnTo = getReturnToUrl();
+    const qs = new URLSearchParams();
+    qs.set("pocNumber", n);
+    if (returnTo) qs.set("returnTo", returnTo);
+    router.push(`/poc/daily-logs?${qs.toString()}`);
+  }
+
+  function onClickPocChip(e: React.MouseEvent, shiftId: string, nums: string[]) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const list = Array.isArray(nums) ? nums.filter(Boolean) : [];
+    if (list.length <= 1) {
+      if (list[0]) goToPocDailyLogs(list[0]);
+      return;
+    }
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPocPickerShiftId(shiftId);
+    setPocPickerNums(list);
+    setPocPickerAnchor({ x: rect.left, y: rect.bottom + 6 });
+    setPocPickerOpen(true);
+  }
+
+  function closePocPicker() {
+    setPocPickerOpen(false);
+    setPocPickerShiftId("");
+    setPocPickerNums([]);
+    setPocPickerAnchor(null);
+  }
+
+  useEffect(() => {
+    function onDocClick(ev: MouseEvent) {
+      if (!pocPickerOpen) return;
+      // close on outside click
+      closePocPicker();
+    }
+    if (pocPickerOpen) {
+      document.addEventListener("click", onDocClick);
+    }
+    return () => document.removeEventListener("click", onDocClick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pocPickerOpen]);
 
   // inline add event (master)
   const [editingDay, setEditingDay] = useState<number | null>(null);
@@ -304,7 +392,9 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
   useEffect(() => {
     async function fetchDsps() {
       try {
-        const res = await fetch("/api/employees?simple=true", { cache: "no-store" });
+        const res = await fetch("/api/employees?simple=true", {
+          cache: "no-store",
+        });
         if (!res.ok) return;
         const data = await res.json();
         const list: Employee[] = Array.isArray(data)
@@ -391,6 +481,72 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
     fetchWeek();
   }, [individualId, weekStart]);
 
+  // ===== Load POC summaries for current week (for badges) =====
+  useEffect(() => {
+    async function fetchPocBadges() {
+      if (!individualId || !currentWeek?.weekStart) {
+        setPocByShiftId({});
+        return;
+      }
+
+      try {
+        setLoadingPocBadges(true);
+
+        const qs = new URLSearchParams({
+          individualId,
+          weekStart: new Date(currentWeek.weekStart).toISOString(),
+        });
+
+        const res = await fetch(`/api/poc/shift-summaries?${qs.toString()}`, {
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          setPocByShiftId({});
+          return;
+        }
+
+        const json = (await res.json()) as POCShiftSummariesResponse;
+
+        const arr: POCShiftSummaryItem[] = Array.isArray(json)
+          ? json
+          : Array.isArray((json as any)?.items)
+            ? ((json as any).items as POCShiftSummaryItem[])
+            : Array.isArray((json as any)?.data)
+              ? ((json as any).data as POCShiftSummaryItem[])
+              : Array.isArray((json as any)?.summaries)
+                ? ((json as any).summaries as POCShiftSummaryItem[])
+                : [];
+
+        const map: Record<string, string[]> = {};
+        for (const it of arr) {
+          const id = (it.scheduleShiftId ?? it.shiftId ?? "") as string;
+          if (!id) continue;
+
+          const nums = Array.isArray(it.pocNumbers)
+            ? it.pocNumbers.filter(Boolean)
+            : [];
+
+          const has =
+            (typeof it.hasActivePoc === "boolean" ? it.hasActivePoc : null) ??
+            (typeof it.hasPoc === "boolean" ? it.hasPoc : null);
+
+          if (nums.length > 0) map[id] = nums;
+          else if (has === true) map[id] = [];
+        }
+
+        setPocByShiftId(map);
+      } catch (e) {
+        console.error("Failed to load POC shift summaries", e);
+        setPocByShiftId({});
+      } finally {
+        setLoadingPocBadges(false);
+      }
+    }
+
+    fetchPocBadges();
+  }, [individualId, currentWeek?.weekStart]);
+
   // ===== Generate helpers =====
   async function generateWeekAt(startDate: Date): Promise<ScheduleWeek | null> {
     if (!individualId) return null;
@@ -417,7 +573,10 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
 
   function handleGenerateWeek() {
     if (!individualId || generatingWeek) return;
-    const defaultEnd = addDays(currentWeek ? new Date(currentWeek.weekStart) : weekStart, 6);
+    const defaultEnd = addDays(
+      currentWeek ? new Date(currentWeek.weekStart) : weekStart,
+      6
+    );
     setGenerateToDate(defaultEnd.toISOString().slice(0, 10));
     setShowGenerateModal(true);
     setError(null);
@@ -779,9 +938,13 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
 
   // ===== Summary / conflicts =====
   const summaryByService = useMemo(() => {
-    if (!currentWeek) return [] as { service: Service; scheduledUnits: number; visitedUnits: number }[];
+    if (!currentWeek)
+      return [] as { service: Service; scheduledUnits: number; visitedUnits: number }[];
 
-    const map = new Map<string, { service: Service; scheduledUnits: number; visitedUnits: number }>();
+    const map = new Map<
+      string,
+      { service: Service; scheduledUnits: number; visitedUnits: number }
+    >();
 
     for (const s of currentWeek.shifts) {
       const key = s.service.id;
@@ -799,9 +962,18 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
   }, [currentWeek]);
 
   const summaryByDsp = useMemo(() => {
-    if (!currentWeek) return [] as { dspId: string; dspName: string; scheduledUnits: number; visitedUnits: number }[];
+    if (!currentWeek)
+      return [] as {
+        dspId: string;
+        dspName: string;
+        scheduledUnits: number;
+        visitedUnits: number;
+      }[];
 
-    const map = new Map<string, { dspId: string; dspName: string; scheduledUnits: number; visitedUnits: number }>();
+    const map = new Map<
+      string,
+      { dspId: string; dspName: string; scheduledUnits: number; visitedUnits: number }
+    >();
 
     for (const s of currentWeek.shifts) {
       const dsp = s.actualDsp ?? s.plannedDsp;
@@ -824,9 +996,11 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
   }, [currentWeek]);
 
   const conflicts = useMemo(() => {
-    if (!currentWeek) return [] as { dspName: string; date: string; dayIndex: number; shifts: ScheduleShift[] }[];
+    if (!currentWeek)
+      return [] as { dspName: string; date: string; dayIndex: number; shifts: ScheduleShift[] }[];
 
-    const result: { dspName: string; date: string; dayIndex: number; shifts: ScheduleShift[] }[] = [];
+    const result: { dspName: string; date: string; dayIndex: number; shifts: ScheduleShift[] }[] =
+      [];
     const byKey: Record<string, ScheduleShift[]> = {};
 
     for (const s of currentWeek.shifts) {
@@ -849,7 +1023,10 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
       for (let i = 0; i < arr.length - 1; i++) {
         const current = arr[i];
         const next = arr[i + 1];
-        if (new Date(current.plannedEnd).getTime() > new Date(next.plannedStart).getTime()) {
+        if (
+          new Date(current.plannedEnd).getTime() >
+          new Date(next.plannedStart).getTime()
+        ) {
           const [, dayStr] = key.split("-");
           const dsp = (current.actualDsp ?? current.plannedDsp)!;
           const baseWeek = new Date(currentWeek.weekStart);
@@ -879,7 +1056,9 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
 
     const firstVisit = shift.visits[0];
     setEditShiftCheckIn(firstVisit ? formatTime(firstVisit.checkInAt) : "");
-    setEditShiftCheckOut(firstVisit && firstVisit.checkOutAt ? formatTime(firstVisit.checkOutAt) : "");
+    setEditShiftCheckOut(
+      firstVisit && firstVisit.checkOutAt ? formatTime(firstVisit.checkOutAt) : ""
+    );
   }
 
   function closeEditShift() {
@@ -972,7 +1151,10 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
 
       setCurrentWeek((prev) =>
         prev
-          ? { ...prev, shifts: prev.shifts.map((s) => (s.id === updated.id ? updated : s)) }
+          ? {
+              ...prev,
+              shifts: prev.shifts.map((s) => (s.id === updated.id ? updated : s)),
+            }
           : prev
       );
 
@@ -1267,12 +1449,41 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
               ? "text-bac-primary"
               : "text-bac-muted";
 
+    // ===== POC badge for this shift =====
+    const pocNums = shift?.id ? pocByShiftId[shift.id] : undefined;
+    const hasPoc = Array.isArray(pocNums);
+    const pocLabel =
+      hasPoc && pocNums && pocNums.length > 0
+        ? `POC (${pocNums.length})`
+        : hasPoc
+          ? "POC"
+          : null;
+
+    const pocTitle =
+      pocNums && pocNums.length > 0
+        ? `POC: ${pocNums.join(", ")} (click to open)`
+        : "This shift is linked to an active POC";
+
     return (
       <div className="h-full rounded-2xl border border-bac-border bg-bac-panel/30 px-3 py-2 text-xs text-bac-text flex flex-col">
-        <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center justify-between mb-1 gap-2">
           <div className="font-semibold text-bac-green">{shift.service.serviceCode}</div>
-          <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
-            {shift.status.replace("_", " ")}
+
+          <div className="flex items-center gap-2">
+            {pocLabel && (
+              <button
+                type="button"
+                title={pocTitle}
+                onClick={(e) => onClickPocChip(e, shift.id, pocNums || [])}
+                className="inline-flex items-center rounded-full border border-bac-primary/50 bg-bac-primary/10 px-2 py-[2px] text-[10px] font-semibold text-bac-primary hover:opacity-90 cursor-pointer"
+              >
+                {pocLabel}
+              </button>
+            )}
+
+            <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
+              {shift.status.replace("_", " ")}
+            </div>
           </div>
         </div>
 
@@ -1318,6 +1529,45 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
   // ===== UI =====
   return (
     <div className="w-full max-w-none space-y-4">
+      {/* POC picker popover */}
+      {pocPickerOpen && pocPickerAnchor && (
+        <div
+          className="fixed z-50"
+          style={{ left: pocPickerAnchor.x, top: pocPickerAnchor.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-[220px] rounded-xl border border-bac-border bg-bac-panel shadow-xl overflow-hidden">
+            <div className="px-3 py-2 text-[11px] text-bac-muted border-b border-bac-border">
+              Select POC to open
+            </div>
+            <div className="max-h-[240px] overflow-auto">
+              {pocPickerNums.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-xs text-bac-text hover:bg-bac-panel/60"
+                  onClick={() => {
+                    closePocPicker();
+                    goToPocDailyLogs(n);
+                  }}
+                >
+                  POC {n}
+                </button>
+              ))}
+            </div>
+            <div className="px-3 py-2 border-t border-bac-border flex justify-end">
+              <button
+                type="button"
+                className="text-[11px] text-bac-muted hover:opacity-90"
+                onClick={closePocPicker}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top actions */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-bac-border bg-bac-panel/20 p-4">
         <div>
@@ -1427,9 +1677,7 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                 type="button"
                 onClick={() => setActiveTab("weekly")}
                 className={`px-3 py-1 rounded-full ${
-                  activeTab === "weekly"
-                    ? "bg-white text-black"
-                    : "text-bac-text hover:opacity-90"
+                  activeTab === "weekly" ? "bg-white text-black" : "text-bac-text hover:opacity-90"
                 }`}
               >
                 Weekly detail
@@ -1438,9 +1686,7 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                 type="button"
                 onClick={() => setActiveTab("summary")}
                 className={`px-3 py-1 rounded-full ${
-                  activeTab === "summary"
-                    ? "bg-white text-black"
-                    : "text-bac-text hover:opacity-90"
+                  activeTab === "summary" ? "bg-white text-black" : "text-bac-text hover:opacity-90"
                 }`}
               >
                 Summary & conflicts
@@ -1449,9 +1695,7 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                 type="button"
                 onClick={() => setActiveTab("payroll")}
                 className={`px-3 py-1 rounded-full ${
-                  activeTab === "payroll"
-                    ? "bg-white text-black"
-                    : "text-bac-text hover:opacity-90"
+                  activeTab === "payroll" ? "bg-white text-black" : "text-bac-text hover:opacity-90"
                 }`}
               >
                 Payroll & ISP
@@ -1460,6 +1704,9 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
 
             {loadingWeek && (
               <span className="text-[11px] text-bac-muted">Loading weekly schedule...</span>
+            )}
+            {!loadingWeek && loadingPocBadges && (
+              <span className="text-[11px] text-bac-muted">Loading POC badges...</span>
             )}
           </div>
         </div>
@@ -1484,12 +1731,8 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                         const d = addDays(weekStart, day);
                         return (
                           <div key={day} className="text-center">
-                            <div className="font-semibold text-bac-text">
-                              {dayLabels[day]}
-                            </div>
-                            <div className="text-[11px] text-bac-muted">
-                              {formatDateShort(d)}
-                            </div>
+                            <div className="font-semibold text-bac-text">{dayLabels[day]}</div>
+                            <div className="text-[11px] text-bac-muted">{formatDateShort(d)}</div>
                           </div>
                         );
                       })}
@@ -1533,9 +1776,7 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
         {activeTab === "summary" && currentWeek && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-bac-border bg-bac-panel/20 p-4">
-              <h3 className="text-xs font-semibold text-bac-text mb-3">
-                Units by Service
-              </h3>
+              <h3 className="text-xs font-semibold text-bac-text mb-3">Units by Service</h3>
               {summaryByService.length === 0 ? (
                 <div className="text-xs text-bac-muted">No data for this week.</div>
               ) : (
@@ -1554,22 +1795,14 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                       return (
                         <tr key={row.service.id}>
                           <td className="py-1 pr-2">
-                            <div className="font-medium text-bac-text">
-                              {row.service.serviceCode}
-                            </div>
-                            <div className="text-[10px] text-bac-muted">
-                              {row.service.serviceName}
-                            </div>
+                            <div className="font-medium text-bac-text">{row.service.serviceCode}</div>
+                            <div className="text-[10px] text-bac-muted">{row.service.serviceName}</div>
                           </td>
                           <td className="py-1 pr-2 text-right">{row.scheduledUnits}</td>
                           <td className="py-1 pr-2 text-right">{row.visitedUnits}</td>
                           <td
                             className={`py-1 text-right ${
-                              delta > 0
-                                ? "text-bac-green"
-                                : delta < 0
-                                  ? "text-bac-red"
-                                  : "text-bac-text"
+                              delta > 0 ? "text-bac-green" : delta < 0 ? "text-bac-red" : "text-bac-text"
                             }`}
                           >
                             {delta}
@@ -1583,13 +1816,9 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
             </div>
 
             <div className="rounded-2xl border border-bac-border bg-bac-panel/20 p-4">
-              <h3 className="text-xs font-semibold text-bac-text mb-3">
-                Overlap / conflicts
-              </h3>
+              <h3 className="text-xs font-semibold text-bac-text mb-3">Overlap / conflicts</h3>
               {conflicts.length === 0 ? (
-                <div className="text-xs text-bac-green">
-                  No conflicts detected for this week.
-                </div>
+                <div className="text-xs text-bac-green">No conflicts detected for this week.</div>
               ) : (
                 <div className="space-y-2 text-[11px]">
                   {conflicts.map((c, idx) => (
@@ -1617,9 +1846,7 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
         {activeTab === "payroll" && currentWeek && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-bac-border bg-bac-panel/20 p-4">
-              <h3 className="text-xs font-semibold text-bac-text mb-3">
-                Payroll – Units by DSP
-              </h3>
+              <h3 className="text-xs font-semibold text-bac-text mb-3">Payroll – Units by DSP</h3>
               {summaryByDsp.length === 0 ? (
                 <div className="text-xs text-bac-muted">No DSP assigned for this week.</div>
               ) : (
@@ -1646,11 +1873,7 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                           <td className="py-1 pr-2 text-right">{actualHours.toFixed(2)}</td>
                           <td
                             className={`py-1 text-right ${
-                              delta > 0
-                                ? "text-bac-green"
-                                : delta < 0
-                                  ? "text-bac-red"
-                                  : "text-bac-text"
+                              delta > 0 ? "text-bac-green" : delta < 0 ? "text-bac-red" : "text-bac-text"
                             }`}
                           >
                             {delta.toFixed(2)}
@@ -1682,12 +1905,8 @@ export default function MasterWeekModule({ individualId }: { individualId: strin
                     {summaryByService.map((row) => (
                       <tr key={row.service.id}>
                         <td className="py-1 pr-2">
-                          <div className="font-medium text-bac-text">
-                            {row.service.serviceCode}
-                          </div>
-                          <div className="text-[10px] text-bac-muted">
-                            {row.service.serviceName}
-                          </div>
+                          <div className="font-medium text-bac-text">{row.service.serviceCode}</div>
+                          <div className="text-[10px] text-bac-muted">{row.service.serviceName}</div>
                         </td>
                         <td className="py-1 pr-2 text-right">{row.visitedUnits}</td>
                         <td className="py-1 text-right text-bac-muted">—</td>
