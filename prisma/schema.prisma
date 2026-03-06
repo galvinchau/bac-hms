@@ -132,6 +132,9 @@ model Individual {
   ispBspForm IspBspForm?
 
   pocs Poc[]
+
+  // ✅ ADD: Opposite relation for PocDailyLog.individual
+  pocDailyLogs PocDailyLog[]
 }
 
 /**
@@ -207,6 +210,9 @@ model Employee {
 
   // Supervisors cho Admin Users
   userSupervisors UserSupervisor[]
+
+  // ✅ ADD: Opposite relation for PocDailyLog.dsp
+  pocDailyLogs PocDailyLog[]
 }
 
 /**
@@ -442,6 +448,9 @@ model ScheduleShift {
 
   visits Visit[]
 
+  // ✅ ADD: Opposite relation for PocDailyLog.scheduleShift
+  pocDailyLogs PocDailyLog[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -645,6 +654,7 @@ enum MedicationOrderStatus {
 
 // Trạng thái từng lần uống/tiêm trong MAR
 enum MedicationAdminStatus {
+  SCHEDULED
   GIVEN
   REFUSED
   MISSED
@@ -808,6 +818,9 @@ model Poc {
   individual Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
   duties     PocDuty[]
 
+  // ✅ ADD: Opposite relation for PocDailyLog.poc
+  dailyLogs PocDailyLog[]
+
   @@map("poc")
 }
 
@@ -829,6 +842,82 @@ model PocDuty {
 
   poc Poc @relation(fields: [pocId], references: [id], onDelete: Cascade)
 
+  // ✅ ADD: Opposite relation for PocDailyTaskLog.pocDuty
+  taskLogs PocDailyTaskLog[]
+
   @@index([pocId])
   @@map("poc_duty")
+}
+
+// =====================================================
+//  POC DAILY TRACKING (Phase 1)
+// =====================================================
+
+enum POCDailyLogStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum POCDutyCompletionStatus {
+  INDEPENDENT
+  VERBAL_PROMPT
+  PHYSICAL_ASSIST
+  REFUSED
+}
+
+model PocDailyLog {
+  id String @id @default(dbgenerated("gen_random_uuid()::text")) @db.Text
+
+  pocId        String @map("pocid") @db.Text
+  individualId String @map("individualid") @db.Text
+
+  // DSP = Employee.id (consistent with Visit.dspId and ScheduleShift planned/actual DSP)
+  dspId String @map("dspid")
+
+  // Store as DATE (no timezone bugs). We'll treat it as YYYY-MM-DD.
+  date DateTime @db.Date
+
+  status      POCDailyLogStatus @default(DRAFT)
+  submittedAt DateTime?         @map("submittedat") @db.Timestamptz(6)
+
+  // Optional (helps Phase 3 notifications & audit vs shift)
+  scheduleShiftId String? @map("scheduleshiftid")
+
+  createdAt DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updatedat") @db.Timestamptz(6)
+
+  poc        Poc        @relation(fields: [pocId], references: [id], onDelete: Cascade)
+  individual Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
+  dsp        Employee   @relation(fields: [dspId], references: [id], onDelete: Cascade)
+
+  scheduleShift ScheduleShift? @relation(fields: [scheduleShiftId], references: [id], onDelete: SetNull)
+
+  tasks PocDailyTaskLog[]
+
+  @@unique([pocId, dspId, date])
+  @@index([individualId, date])
+  @@index([dspId, date])
+  @@index([pocId, date])
+  @@map("poc_daily_log")
+}
+
+model PocDailyTaskLog {
+  id String @id @default(dbgenerated("gen_random_uuid()::text")) @db.Text
+
+  dailyLogId String @map("dailylogid") @db.Text
+  pocDutyId  String @map("pocdutyid") @db.Text
+
+  completionStatus POCDutyCompletionStatus @map("completionstatus")
+  completedAt      DateTime?               @map("completedat") @db.Timestamptz(6)
+  note             String?                 @db.Text
+
+  createdAt DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updatedat") @db.Timestamptz(6)
+
+  dailyLog PocDailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  pocDuty  PocDuty     @relation(fields: [pocDutyId], references: [id], onDelete: Cascade)
+
+  @@unique([dailyLogId, pocDutyId])
+  @@index([pocDutyId])
+  @@map("poc_daily_task_log")
 }

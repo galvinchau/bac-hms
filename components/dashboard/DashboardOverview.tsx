@@ -1,7 +1,7 @@
-// components/dashboard/DashboardOverview.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -25,6 +25,21 @@ type Summary = {
   currentWeekLabel: string;
 };
 
+type HealthIncidentItem = {
+  id: string;
+  status?: string | null;
+  date?: string | null;
+  createdAt?: string | null;
+  submittedAt?: string | null;
+  staffName?: string | null;
+  individualName?: string | null;
+  incidentType?: string | null;
+};
+
+type HealthIncidentListResponse = {
+  items?: HealthIncidentItem[];
+};
+
 const emptySummary: Summary = {
   totalIndividuals: 0,
   totalEmployees: 0,
@@ -38,10 +53,31 @@ const emptySummary: Summary = {
   currentWeekLabel: "Current week",
 };
 
+function safeStr(v: any) {
+  if (v === null || v === undefined) return "";
+  return String(v);
+}
+
+function fmtDateTime(value?: string | null) {
+  const s = safeStr(value).trim();
+  if (!s) return "—";
+
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+
+  return d.toLocaleString();
+}
+
 export default function DashboardOverview() {
+  const router = useRouter();
+
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [incidentItems, setIncidentItems] = useState<HealthIncidentItem[]>([]);
+  const [incidentLoading, setIncidentLoading] = useState(true);
+  const [incidentPopupDismissed, setIncidentPopupDismissed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,6 +114,73 @@ export default function DashboardOverview() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadIncidentAlerts() {
+      try {
+        setIncidentLoading(true);
+
+        const res = await fetch("/api/reports/health-incident?status=SUBMITTED", {
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(txt || "Failed to load incident alerts.");
+        }
+
+        const data = (await res.json()) as HealthIncidentListResponse;
+        const items = Array.isArray(data?.items) ? data.items : [];
+
+        if (!cancelled) {
+          setIncidentItems(items);
+          setIncidentPopupDismissed(false);
+        }
+      } catch (err) {
+        console.error("DashboardOverview incident alert load error", err);
+        if (!cancelled) {
+          setIncidentItems([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIncidentLoading(false);
+        }
+      }
+    }
+
+    loadIncidentAlerts();
+
+    const timer = window.setInterval(() => {
+      loadIncidentAlerts();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const latestIncident = useMemo(() => {
+    if (!incidentItems.length) return null;
+
+    return [...incidentItems].sort((a, b) => {
+      const ta = new Date(
+        safeStr(a.submittedAt) || safeStr(a.createdAt) || safeStr(a.date) || 0
+      ).getTime();
+      const tb = new Date(
+        safeStr(b.submittedAt) || safeStr(b.createdAt) || safeStr(b.date) || 0
+      ).getTime();
+      return tb - ta;
+    })[0];
+  }, [incidentItems]);
+
+  const showIncidentPopup =
+    !incidentLoading &&
+    !incidentPopupDismissed &&
+    Array.isArray(incidentItems) &&
+    incidentItems.length > 0;
+
   const weeklyUnitsData = [
     { name: "Planned", value: summary.unitsPlannedWeek },
     { name: "Actual", value: summary.unitsActualWeek },
@@ -93,6 +196,75 @@ export default function DashboardOverview() {
 
   return (
     <div className="space-y-4">
+      {/* Emergency Incident Popup */}
+      {showIncidentPopup && (
+        <div className="rounded-2xl border border-red-300/40 bg-red-700 px-5 py-4 text-white shadow-2xl shadow-red-950/40">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-red-100 animate-pulse">
+                  Emergency Alert
+                </span>
+                <span className="text-sm font-semibold text-red-100">
+                  New Health / Incident Report Submitted
+                </span>
+              </div>
+
+              <div className="mt-2 text-2xl font-bold">
+                {incidentItems.length} new incident report
+                {incidentItems.length > 1 ? "s" : ""} require attention.
+              </div>
+
+              {latestIncident && (
+                <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-red-50 md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <span className="font-semibold">Individual:</span>{" "}
+                    {safeStr(latestIncident.individualName) || "—"}
+                  </div>
+                  <div>
+                    <span className="font-semibold">DSP:</span>{" "}
+                    {safeStr(latestIncident.staffName) || "—"}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Incident Type:</span>{" "}
+                    {safeStr(latestIncident.incidentType) || "—"}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Submitted:</span>{" "}
+                    {fmtDateTime(
+                      latestIncident.submittedAt ||
+                        latestIncident.createdAt ||
+                        latestIncident.date
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-3 text-sm text-red-100">
+                Please review the report promptly and follow the required company
+                procedures.
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center gap-3">
+              <button
+                onClick={() => router.push("/reports/health-incident")}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-white/30 bg-white px-4 text-sm font-semibold text-red-700 shadow hover:bg-red-50"
+              >
+                View Reports
+              </button>
+
+              <button
+                onClick={() => setIncidentPopupDismissed(true)}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-white/30 bg-red-800/40 px-4 text-sm font-semibold text-white hover:bg-red-800/70"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-semibold mb-1">Dashboard</h1>

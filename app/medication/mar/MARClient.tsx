@@ -2,16 +2,23 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 /* ================================
-   Common Types (kept from legacy)
+   Common Types
 ================================ */
 
 type MedicationStatus = "ACTIVE" | "ON_HOLD" | "DISCONTINUED";
 type MedicationType = "SCHEDULED" | "PRN";
 
-// allow null/undefined for auto-generated rows (no outcome yet)
-type AdminStatus = "GIVEN" | "REFUSED" | "MISSED" | "HELD" | "LATE" | "ERROR";
+type AdminStatus =
+  | "SCHEDULED"
+  | "GIVEN"
+  | "REFUSED"
+  | "MISSED"
+  | "HELD"
+  | "LATE"
+  | "ERROR";
 
 interface MedicationOrder {
   id: string;
@@ -42,7 +49,7 @@ interface MedicationAdmin {
   doseValue: number;
   doseUnit: string;
   route: string;
-  scheduledDateTime: string;
+  scheduledDateTime: string; // ISO
   actualDateTime?: string;
   status?: AdminStatus | null;
   reason?: string;
@@ -58,7 +65,7 @@ interface IndividualOption {
 }
 
 /* ================================
-   Mock fallback (same spirit as legacy)
+   Mock fallback
 ================================ */
 
 const mockOrders: MedicationOrder[] = [
@@ -80,40 +87,6 @@ const mockOrders: MedicationOrder[] = [
     indications: "Type 2 Diabetes",
     allergiesFlag: false,
   },
-  {
-    id: "order-2",
-    individualId: "IND-001",
-    individualName: "John Smith",
-    medicationName: "Atorvastatin",
-    doseValue: 20,
-    doseUnit: "mg",
-    route: "PO",
-    type: "SCHEDULED",
-    frequencyText: "QHS",
-    timesOfDay: ["21:00"],
-    startDate: "2026-02-15",
-    status: "ACTIVE",
-    prescriber: "Dr. Lee",
-    pharmacy: "Walmart Pharmacy",
-    indications: "Hyperlipidemia",
-    allergiesFlag: false,
-  },
-  {
-    id: "order-3",
-    individualId: "IND-001",
-    individualName: "John Smith",
-    medicationName: "Lorazepam",
-    doseValue: 1,
-    doseUnit: "mg",
-    route: "PO",
-    type: "PRN",
-    frequencyText: "PRN",
-    startDate: "2026-03-10",
-    status: "ACTIVE",
-    prescriber: "Dr. Brown",
-    indications: "Anxiety",
-    allergiesFlag: true,
-  },
 ];
 
 const mockAdmins: MedicationAdmin[] = [
@@ -132,54 +105,13 @@ const mockAdmins: MedicationAdmin[] = [
     vitalsSummary: "BG 145",
     staffName: "DSP A",
   },
-  {
-    id: "admin-2",
-    orderId: "order-1",
-    individualId: "IND-001",
-    individualName: "John Smith",
-    medicationName: "Metformin",
-    doseValue: 500,
-    doseUnit: "mg",
-    route: "PO",
-    scheduledDateTime: "2026-11-01T20:00:00Z",
-    status: "MISSED",
-    reason: "Individual refused medication",
-    staffName: "DSP A",
-  },
-  {
-    id: "admin-3",
-    orderId: "order-3",
-    individualId: "IND-001",
-    individualName: "John Smith",
-    medicationName: "Lorazepam",
-    doseValue: 1,
-    doseUnit: "mg",
-    route: "PO",
-    scheduledDateTime: "2026-11-03T14:00:00Z",
-    actualDateTime: "2026-11-03T14:02:00Z",
-    status: "GIVEN",
-    reason: "PRN anxiety escalated",
-    vitalsSummary: "BP 130/78, HR 82",
-    staffName: "DSP B",
-  },
 ];
 
 /* ================================
-   Helpers (kept from legacy)
+   Helpers
 ================================ */
 
 const TZ = "America/New_York";
-
-const formatDate = (iso: string | undefined) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-};
 
 const marStatusClass = (status?: AdminStatus | null) => {
   switch (status) {
@@ -195,8 +127,31 @@ const marStatusClass = (status?: AdminStatus | null) => {
       return "border border-bac-primary/50 bg-bac-primary/15 text-bac-primary";
     case "ERROR":
       return "border border-red-500/60 bg-red-500/15 text-red-500";
+    case "SCHEDULED":
+      return "border border-bac-border bg-bac-bg/40 text-bac-muted";
     default:
-      return "border border-bac-border text-bac-muted";
+      return "border border-bac-border text-bac-muted hover:bg-bac-bg";
+  }
+};
+
+const statusLabel = (status?: AdminStatus | null) => {
+  switch (status) {
+    case "GIVEN":
+      return "Given";
+    case "REFUSED":
+      return "Refused";
+    case "MISSED":
+      return "Missed";
+    case "HELD":
+      return "Held";
+    case "LATE":
+      return "Late";
+    case "ERROR":
+      return "Error";
+    case "SCHEDULED":
+      return "Scheduled";
+    default:
+      return "";
   }
 };
 
@@ -205,7 +160,62 @@ function monthToStartDate(monthValue: string): string {
   return `${monthValue}-01`;
 }
 
-// Get local (NY) day + time "HH:MM" from an ISO date string
+function parseMonth(month: string): { year: number; monthIndex0: number } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  if (!year || mon < 1 || mon > 12) return null;
+  return { year, monthIndex0: mon - 1 };
+}
+
+function parseTimeOfDay(t: string): { hour: number; minute: number } | null {
+  const m = /^(\d{2}):(\d{2})$/.exec((t || "").trim());
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
+
+function zonedWallClockToUtcDate(
+  year: number,
+  monthIndex0: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string,
+): Date {
+  const utcGuess = new Date(Date.UTC(year, monthIndex0, day, hour, minute, 0));
+
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  const parts = dtf.formatToParts(utcGuess);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value;
+
+  const y = Number(get("year"));
+  const mo = Number(get("month")) - 1;
+  const d = Number(get("day"));
+  const h = Number(get("hour"));
+  const mi = Number(get("minute"));
+  const s = Number(get("second"));
+
+  const tzWallClockAsUTC = Date.UTC(y, mo, d, h, mi, s);
+  const guessUTC = Date.UTC(year, monthIndex0, day, hour, minute, 0);
+
+  const offsetMs = tzWallClockAsUTC - guessUTC;
+  return new Date(utcGuess.getTime() - offsetMs);
+}
+
 function getNYDayAndTime(
   iso: string,
 ): { day: number; timeHHMM: string } | null {
@@ -240,33 +250,218 @@ function getDaysInMonth(monthValue: string) {
   return new Date(year, month, 0).getDate();
 }
 
+function formatNYTime(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: TZ,
+  });
+}
+
+/**
+ * Fix GIVEN display when API returns SCHEDULED/null but record has evidence.
+ */
+function normalizeDisplayStatus(a?: MedicationAdmin | null): AdminStatus | null {
+  if (!a) return null;
+
+  const raw = (a.status ?? null) as AdminStatus | null;
+
+  const hasEvidence =
+    !!a.actualDateTime ||
+    !!(a.vitalsSummary && a.vitalsSummary.trim()) ||
+    !!(a.reason && a.reason.trim()) ||
+    !!(a.notes && a.notes.trim()) ||
+    !!(a.staffName && a.staffName.trim());
+
+  if ((!raw || raw === "SCHEDULED") && hasEvidence) {
+    return "GIVEN";
+  }
+
+  return raw;
+}
+
+const isSavedRecord = (a?: MedicationAdmin | null) => {
+  const st = normalizeDisplayStatus(a);
+  return !!st && st !== "SCHEDULED";
+};
+
+function buildTooltipLines(a?: MedicationAdmin | null) {
+  if (!a) {
+    return {
+      status: "—",
+      actual: "—",
+      dsp: "—",
+      note: "",
+      vitals: "",
+    };
+  }
+  const st = statusLabel(normalizeDisplayStatus(a) ?? null) || "—";
+  const actual = a.actualDateTime ? formatNYTime(a.actualDateTime) : "—";
+  const dsp = a.staffName ? a.staffName : "—";
+  const note = a.reason ? a.reason : a.notes ? a.notes : "";
+  const vitals = a.vitalsSummary ? a.vitalsSummary : "";
+  return { status: st, actual, dsp, note, vitals };
+}
+
+/* ================================
+   Portal Tooltip (NOT clipped by overflow)
+================================ */
+
+type TooltipPayload = {
+  open: boolean;
+  x: number;
+  y: number;
+  preferred: "top" | "bottom";
+  order?: MedicationOrder;
+  day?: number;
+  timeOfDay?: string;
+  admin?: MedicationAdmin | null;
+};
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function PortalTooltip({
+  data,
+  onClose,
+}: {
+  data: TooltipPayload;
+  onClose: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const width = 360;
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  useEffect(() => {
+    if (!data.open) return;
+
+    const compute = () => {
+      const pad = 10;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      // default: place above the anchor (y is top of anchor)
+      let left = data.x - width / 2;
+      left = clamp(left, pad, vw - width - pad);
+
+      // try to place above: y - tooltipHeight approx 220
+      const approxH = 240;
+      let top =
+        data.preferred === "top"
+          ? data.y - approxH
+          : data.y + 12;
+
+      // if above goes offscreen -> place below
+      if (top < pad) top = data.y + 12;
+      // if below goes offscreen -> place above
+      if (top + approxH > vh - pad) top = Math.max(pad, data.y - approxH);
+
+      setPos({ left, top });
+    };
+
+    compute();
+    window.addEventListener("scroll", compute, true);
+    window.addEventListener("resize", compute);
+    return () => {
+      window.removeEventListener("scroll", compute, true);
+      window.removeEventListener("resize", compute);
+    };
+  }, [data.open, data.x, data.y, data.preferred]);
+
+  if (!mounted || !data.open) return null;
+
+  const order = data.order;
+  const day = data.day;
+  const timeOfDay = data.timeOfDay;
+  const a = data.admin ?? null;
+
+  const lines = buildTooltipLines(a);
+
+  const body = (
+    <div
+      className="fixed z-[9999]"
+      style={{ left: pos.left, top: pos.top, width }}
+      onMouseLeave={onClose}
+    >
+      <div className="rounded-xl border border-bac-border bg-bac-bg p-3 text-left text-[11px] text-bac-text shadow-2xl">
+        <div className="font-medium">
+          {order
+            ? `${order.medicationName} ${order.doseValue}${order.doseUnit} (${order.route})`
+            : "Medication"}
+        </div>
+        <div className="mt-1 text-bac-muted">
+          Day {day ?? "—"} • Time {timeOfDay ?? "—"}
+        </div>
+
+        {/* Schedule */}
+        <div className="mt-3 rounded-lg border border-bac-border bg-bac-panel/40 p-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-bac-muted">
+            Schedule
+          </div>
+          <div className="mt-1 text-bac-text">Status: Scheduled</div>
+          <div className="text-bac-muted">
+            Scheduled time: {timeOfDay ?? "—"}
+          </div>
+        </div>
+
+        {/* Saved Record */}
+        <div className="mt-2 rounded-lg border border-bac-border bg-bac-panel/40 p-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-bac-muted">
+            Saved record
+          </div>
+
+          {a && isSavedRecord(a) ? (
+            <>
+              <div className="mt-1 text-bac-text">Status: {lines.status}</div>
+              <div className="text-bac-muted">Actual: {lines.actual}</div>
+              <div className="text-bac-muted">DSP: {lines.dsp}</div>
+              {lines.note ? <div className="text-bac-muted">Note: {lines.note}</div> : null}
+              {lines.vitals ? <div className="text-bac-muted">Vitals: {lines.vitals}</div> : null}
+            </>
+          ) : (
+            <>
+              <div className="mt-1 text-bac-text">Recorded: — (not saved yet)</div>
+              <div className="mt-1 text-bac-muted">Click the slot to enter.</div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(body, document.body);
+}
+
 /* ================================
    MAR Client
 ================================ */
 
 export default function MARClient() {
-  // Global filters
   const [selectedIndividual, setSelectedIndividual] = useState<string>("");
   const [selectedMonth, setSelectedMonth] = useState<string>("2026-01");
 
-  // Individuals (real data)
-  const [individualOptions, setIndividualOptions] = useState<
-    IndividualOption[]
-  >([]);
+  const [individualOptions, setIndividualOptions] = useState<IndividualOption[]>([]);
   const [individualLoading, setIndividualLoading] = useState(false);
   const [individualError, setIndividualError] = useState<string | null>(null);
 
-  // MAR data
   const [orders, setOrders] = useState<MedicationOrder[]>(mockOrders);
   const [admins, setAdmins] = useState<MedicationAdmin[]>(mockAdmins);
   const [marLoading, setMarLoading] = useState(false);
   const [marError, setMarError] = useState<string | null>(null);
   const [marWarning, setMarWarning] = useState<string | null>(null);
 
-  // MAR filter
   const [selectedOrderForMar, setSelectedOrderForMar] = useState<string>("ALL");
 
-  // Modal
   const [marModalState, setMarModalState] = useState<{
     open: boolean;
     admin?: MedicationAdmin;
@@ -274,6 +469,17 @@ export default function MARClient() {
     date?: number;
     timeOfDay?: string;
   }>({ open: false });
+
+  // ✅ Tooltip state (portal)
+  const [tooltip, setTooltip] = useState<TooltipPayload>({
+    open: false,
+    x: 0,
+    y: 0,
+    preferred: "top",
+  });
+
+  const closeTooltip = () =>
+    setTooltip((t) => ({ ...t, open: false }));
 
   // ======================================
   // Load Individuals
@@ -349,7 +555,6 @@ export default function MARClient() {
     return () => controller.abort();
   }, []);
 
-  // auto select first individual
   useEffect(() => {
     if (!individualOptions.length) return;
     const exists = individualOptions.some((i) => i.id === selectedIndividual);
@@ -364,7 +569,7 @@ export default function MARClient() {
     "";
 
   // ======================================
-  // Load MAR (orders + administrations) from API
+  // Load MAR
   // ======================================
   useEffect(() => {
     if (!selectedIndividual) return;
@@ -391,7 +596,6 @@ export default function MARClient() {
           throw new Error(data?.errorDetail || data?.error || res.statusText);
         }
 
-        // If backend returns "warning/no tables"
         if (!data?.individualId) {
           setMarWarning(
             data?.warning ??
@@ -461,8 +665,6 @@ export default function MARClient() {
 
         setOrders(mappedOrders);
         setAdmins(mappedAdmins);
-
-        // keep filter stable
         setSelectedOrderForMar((prev) => (prev ? prev : "ALL"));
       } catch (err: any) {
         if (err?.name === "AbortError") return;
@@ -486,12 +688,9 @@ export default function MARClient() {
     return () => controller.abort();
   }, [selectedIndividual, selectedMonth, selectedIndividualName]);
 
-  /* ---------- MAR computed ---------- */
+  /* ---------- computed ---------- */
 
-  const daysInMonth = useMemo(
-    () => getDaysInMonth(selectedMonth),
-    [selectedMonth],
-  );
+  const daysInMonth = useMemo(() => getDaysInMonth(selectedMonth), [selectedMonth]);
 
   const activeOrdersForInd = useMemo(() => {
     return orders.filter(
@@ -505,17 +704,12 @@ export default function MARClient() {
     return base.filter((o) => o.id === selectedOrderForMar);
   }, [activeOrdersForInd, selectedOrderForMar]);
 
-  const getAdminsForCell = (
-    orderId: string,
-    day: number,
-    timeOfDay?: string,
-  ) => {
+  const getAdminsForCell = (orderId: string, day: number, timeOfDay?: string) => {
     return admins.filter((a) => {
       if (a.orderId !== orderId) return false;
 
       const ny = getNYDayAndTime(a.scheduledDateTime);
       if (!ny) return false;
-
       if (ny.day !== day) return false;
 
       if (timeOfDay) return ny.timeHHMM === timeOfDay;
@@ -523,11 +717,7 @@ export default function MARClient() {
     });
   };
 
-  const openSlot = (
-    order: MedicationOrder,
-    day: number,
-    timeOfDay?: string,
-  ) => {
+  const openSlot = (order: MedicationOrder, day: number, timeOfDay?: string) => {
     const existingAdmins = timeOfDay
       ? getAdminsForCell(order.id, day, timeOfDay)
       : getAdminsForCell(order.id, day);
@@ -543,9 +733,56 @@ export default function MARClient() {
 
   const closeMarModal = () => setMarModalState({ open: false });
 
-  /* ================================
-     Render
-  ================================= */
+  const upsertLocalAdmin = (item: any, order: MedicationOrder) => {
+    const mapped: MedicationAdmin = {
+      id: item.id,
+      orderId: item.orderId,
+      individualId: item.individualId,
+      individualName: order.individualName,
+      medicationName: order.medicationName,
+      doseValue: order.doseValue,
+      doseUnit: order.doseUnit,
+      route: order.route,
+      scheduledDateTime: new Date(item.scheduledDateTime).toISOString(),
+      actualDateTime: item.actualDateTime ? new Date(item.actualDateTime).toISOString() : undefined,
+      status: (item.status as AdminStatus) ?? null,
+      reason: item.reason ?? undefined,
+      vitalsSummary: item.vitalsSummary ?? undefined,
+      staffName: item.staffName ?? undefined,
+      notes: item.notes ?? undefined,
+    };
+
+    setAdmins((prev) => {
+      const idx = prev.findIndex(
+        (x) =>
+          x.orderId === mapped.orderId &&
+          new Date(x.scheduledDateTime).toISOString() ===
+            new Date(mapped.scheduledDateTime).toISOString(),
+      );
+      if (idx >= 0) {
+        const clone = [...prev];
+        clone[idx] = { ...clone[idx], ...mapped };
+        return clone;
+      }
+      return [...prev, mapped];
+    });
+  };
+
+  const showTooltipForButton = (
+    e: React.MouseEvent,
+    payload: Omit<TooltipPayload, "open" | "x" | "y" | "preferred">,
+  ) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top; // anchor top
+    setTooltip({
+      open: true,
+      x,
+      y,
+      preferred: "top",
+      ...payload,
+    });
+  };
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -557,7 +794,7 @@ export default function MARClient() {
         </p>
       </div>
 
-      {/* Global selection bar (Individual + Month) */}
+      {/* Global selection bar */}
       <div className="flex flex-wrap gap-3 rounded-2xl border border-bac-border bg-bac-panel p-4 text-sm shadow-sm">
         <div className="flex flex-col">
           <span className="text-xs font-medium uppercase tracking-wide text-bac-muted">
@@ -589,7 +826,6 @@ export default function MARClient() {
           />
         </div>
 
-        {/* Status lines */}
         <div className="flex flex-1 flex-col justify-end gap-1 text-xs">
           {individualLoading && (
             <span className="text-bac-muted">Loading individuals...</span>
@@ -617,10 +853,7 @@ export default function MARClient() {
           </h2>
           <p className="text-xs text-bac-muted">
             eMAR with per-dose documentation for{" "}
-            {selectedMonth
-              ? monthToStartDate(selectedMonth).slice(0, 7)
-              : "selected"}
-            .
+            {selectedMonth ? monthToStartDate(selectedMonth).slice(0, 7) : "selected"}.
           </p>
         </div>
 
@@ -667,7 +900,7 @@ export default function MARClient() {
               View mode
             </label>
             <div className="mt-1 text-xs text-bac-muted">
-              Monthly grid (we can add daily strip view for mobile later).
+              Monthly grid (hover a slot to see summary).
             </div>
           </div>
         </div>
@@ -707,9 +940,7 @@ export default function MARClient() {
                       </div>
                       <div className="text-[11px] text-bac-muted">
                         {order.route} •{" "}
-                        {order.type === "SCHEDULED"
-                          ? order.frequencyText
-                          : "PRN"}
+                        {order.type === "SCHEDULED" ? order.frequencyText : "PRN"}
                       </div>
                     </td>
 
@@ -723,40 +954,45 @@ export default function MARClient() {
                         const cellAdmins = getAdminsForCell(order.id, day);
 
                         return (
-                          <td
-                            key={day}
-                            className="px-1 py-1 align-top text-center"
-                          >
+                          <td key={day} className="px-1 py-1 align-top text-center">
                             <div className="flex flex-col items-center gap-1">
                               {order.type === "SCHEDULED" ? (
                                 times.length ? (
                                   times.map((t) => {
-                                    const slotAdmins = getAdminsForCell(
-                                      order.id,
-                                      day,
-                                      t,
-                                    );
-                                    const status =
-                                      slotAdmins[0]?.status ?? null;
+                                    const slotAdmins = getAdminsForCell(order.id, day, t);
+                                    const saved = slotAdmins.find((x) => isSavedRecord(x)) ?? null;
+                                    const a = saved ?? slotAdmins[0] ?? null;
+
+                                    const displayStatus = normalizeDisplayStatus(a) ?? "SCHEDULED";
+                                    const label =
+                                      displayStatus === "SCHEDULED"
+                                        ? "Scheduled"
+                                        : statusLabel(displayStatus);
+
                                     return (
                                       <button
                                         key={t}
                                         onClick={() => openSlot(order, day, t)}
-                                        className={`min-w-[40px] rounded-full px-2 py-0.5 text-[10px] ${
-                                          status
-                                            ? marStatusClass(status)
-                                            : "border border-bac-border text-bac-muted hover:bg-bac-bg"
-                                        }`}
+                                        onMouseEnter={(e) =>
+                                          showTooltipForButton(e, {
+                                            order,
+                                            day,
+                                            timeOfDay: t,
+                                            admin: a,
+                                          })
+                                        }
+                                        onMouseLeave={closeTooltip}
+                                        className={`min-w-[72px] rounded-full px-2 py-0.5 text-[10px] ${marStatusClass(
+                                          displayStatus,
+                                        )}`}
                                       >
-                                        {t}
+                                        {label}
                                       </button>
                                     );
                                   })
                                 ) : (
                                   <button
-                                    onClick={() =>
-                                      openSlot(order, day, undefined)
-                                    }
+                                    onClick={() => openSlot(order, day, undefined)}
                                     className="min-w-[40px] rounded-full border border-bac-border px-2 py-0.5 text-[10px] text-bac-muted hover:bg-bac-bg"
                                   >
                                     +
@@ -764,15 +1000,19 @@ export default function MARClient() {
                                 )
                               ) : (
                                 <button
-                                  onClick={() =>
-                                    openSlot(order, day, undefined)
+                                  onClick={() => openSlot(order, day, undefined)}
+                                  onMouseEnter={(e) =>
+                                    showTooltipForButton(e, {
+                                      order,
+                                      day,
+                                      timeOfDay: "PRN",
+                                      admin: cellAdmins[0] ?? null,
+                                    })
                                   }
-                                  className="min-w-[40px] rounded-full border border-bac-border px-2 py-0.5 text-[10px] text-bac-muted hover:bg-bac-bg"
+                                  onMouseLeave={closeTooltip}
+                                  className="min-w-[58px] rounded-full border border-bac-border px-2 py-0.5 text-[10px] text-bac-muted hover:bg-bac-bg"
                                 >
-                                  PRN{" "}
-                                  {cellAdmins.length > 0
-                                    ? `x${cellAdmins.length}`
-                                    : ""}
+                                  PRN {cellAdmins.length > 0 ? `x${cellAdmins.length}` : ""}
                                 </button>
                               )}
                             </div>
@@ -788,17 +1028,27 @@ export default function MARClient() {
         )}
       </div>
 
+      {/* ✅ Portal Tooltip */}
+      <PortalTooltip data={tooltip} onClose={closeTooltip} />
+
       {/* Modal */}
       {marModalState.open && marModalState.order && (
-        <MarEntryModal state={marModalState} onClose={closeMarModal} />
+        <MarEntryModal
+          state={marModalState}
+          selectedMonth={selectedMonth}
+          selectedIndividualId={selectedIndividual}
+          onClose={closeMarModal}
+          onSaved={(savedItem) => {
+            upsertLocalAdmin(savedItem, marModalState.order!);
+          }}
+        />
       )}
     </div>
   );
 }
 
 /* ================================
-   Modal (ported from legacy)
-   Note: Save action is still placeholder (same as legacy)
+   Modal (SAVE = real API)
 ================================ */
 
 const MarEntryModal: React.FC<{
@@ -809,12 +1059,116 @@ const MarEntryModal: React.FC<{
     date?: number;
     timeOfDay?: string;
   };
+  selectedMonth: string;
+  selectedIndividualId: string;
   onClose: () => void;
-}> = ({ state, onClose }) => {
+  onSaved: (savedItem: any) => void;
+}> = ({ state, selectedMonth, selectedIndividualId, onClose, onSaved }) => {
   const order = state.order;
   if (!order) return null;
 
   const { admin, date, timeOfDay } = state;
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [status, setStatus] = useState<AdminStatus>(
+    ((admin?.status ?? "GIVEN") as AdminStatus) || "GIVEN",
+  );
+
+  const [actualTime, setActualTime] = useState<string>(
+    admin?.actualDateTime ? formatNYTime(admin.actualDateTime) : "",
+  );
+
+  const [reason, setReason] = useState<string>(admin?.reason ?? "");
+  const [vitalsSummary, setVitalsSummary] = useState<string>(
+    admin?.vitalsSummary ?? "",
+  );
+
+  const computedScheduledDateTimeIso = useMemo(() => {
+    if (admin?.scheduledDateTime)
+      return new Date(admin.scheduledDateTime).toISOString();
+
+    const pm = parseMonth(selectedMonth);
+    if (!pm || !date || !timeOfDay) return "";
+
+    const tm = parseTimeOfDay(timeOfDay);
+    if (!tm) return "";
+
+    const dt = zonedWallClockToUtcDate(
+      pm.year,
+      pm.monthIndex0,
+      date,
+      tm.hour,
+      tm.minute,
+      TZ,
+    );
+    return dt.toISOString();
+  }, [admin?.scheduledDateTime, selectedMonth, date, timeOfDay]);
+
+  const computedActualDateTimeIso = useMemo(() => {
+    if (!actualTime) return "";
+    const pm = parseMonth(selectedMonth);
+    if (!pm || !date) return "";
+
+    const tm = parseTimeOfDay(actualTime);
+    if (!tm) return "";
+
+    const dt = zonedWallClockToUtcDate(
+      pm.year,
+      pm.monthIndex0,
+      date,
+      tm.hour,
+      tm.minute,
+      TZ,
+    );
+    return dt.toISOString();
+  }, [actualTime, selectedMonth, date]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+
+    try {
+      if (!computedScheduledDateTimeIso) {
+        throw new Error("Missing scheduledDateTime (cannot save).");
+      }
+
+      const payload = {
+        orderId: order.id,
+        individualId: selectedIndividualId,
+        scheduledDateTime: computedScheduledDateTimeIso,
+        status,
+        actualDateTime: computedActualDateTimeIso || null,
+        reason: reason || null,
+        vitalsSummary: vitalsSummary || null,
+      };
+
+      const res = await fetch("/api/medication/mar/administrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || data?.details || res.statusText);
+      }
+
+      if (!data?.item) {
+        throw new Error("Save succeeded but returned empty item.");
+      }
+
+      onSaved(data.item);
+      onClose();
+    } catch (e: any) {
+      console.error("[MARClient] Save admin failed:", e);
+      setError(String(e?.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-40 flex">
@@ -841,6 +1195,12 @@ const MarEntryModal: React.FC<{
           </button>
         </div>
 
+        {error ? (
+          <div className="mt-4 rounded-xl border border-bac-red/40 bg-bac-red/10 px-3 py-2 text-sm text-bac-red">
+            {error}
+          </div>
+        ) : null}
+
         <div className="mt-6 space-y-4 text-sm text-bac-text">
           <div>
             <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
@@ -848,7 +1208,8 @@ const MarEntryModal: React.FC<{
             </label>
             <select
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              defaultValue={(admin?.status ?? "GIVEN") as any}
+              value={status}
+              onChange={(e) => setStatus(e.target.value as AdminStatus)}
             >
               <option value="GIVEN">Given</option>
               <option value="REFUSED">Refused</option>
@@ -866,29 +1227,23 @@ const MarEntryModal: React.FC<{
               </label>
               <input
                 type="time"
-                defaultValue={timeOfDay ?? ""}
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                value={timeOfDay ?? ""}
+                readOnly
+                className="mt-1 w-full cursor-not-allowed rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text opacity-80"
               />
+              <div className="mt-1 text-[11px] text-bac-muted">
+                (Locked: generated slot)
+              </div>
             </div>
+
             <div>
               <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
                 Actual time
               </label>
               <input
                 type="time"
-                defaultValue={
-                  admin?.actualDateTime
-                    ? new Date(admin.actualDateTime).toLocaleTimeString(
-                        undefined,
-                        {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          hour12: false,
-                          timeZone: TZ,
-                        },
-                      )
-                    : ""
-                }
+                value={actualTime}
+                onChange={(e) => setActualTime(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
               />
             </div>
@@ -901,7 +1256,8 @@ const MarEntryModal: React.FC<{
             <textarea
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
               rows={3}
-              defaultValue={admin?.reason ?? ""}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
             />
           </div>
 
@@ -911,7 +1267,8 @@ const MarEntryModal: React.FC<{
             </label>
             <input
               type="text"
-              defaultValue={admin?.vitalsSummary ?? ""}
+              value={vitalsSummary}
+              onChange={(e) => setVitalsSummary(e.target.value)}
               placeholder="e.g. BP 120/70, HR 76, BG 145"
               className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
             />
@@ -921,12 +1278,17 @@ const MarEntryModal: React.FC<{
         <div className="mt-6 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-xl border border-bac-border px-4 py-2 text-xs font-medium text-bac-muted hover:bg-bac-bg"
+            disabled={saving}
+            className="rounded-xl border border-bac-border px-4 py-2 text-xs font-medium text-bac-muted hover:bg-bac-bg disabled:opacity-60"
           >
             Cancel
           </button>
-          <button className="rounded-xl bg-bac-primary px-4 py-2 text-xs font-medium text-white hover:opacity-90">
-            Save record
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded-xl bg-bac-primary px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save record"}
           </button>
         </div>
       </div>

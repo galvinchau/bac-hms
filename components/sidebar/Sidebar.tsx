@@ -1,7 +1,7 @@
 // web/components/sidebar/Sidebar.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ChevronDown } from "lucide-react";
@@ -15,13 +15,13 @@ type MeResponse = {
   user?: {
     id?: string;
     email?: string | null;
-    userType?: string | null; // e.g. "ADMIN" | "HR" | "DSP" | "STAFF" ...
+    userType?: string | null;
   } | null;
   employee?: {
     staffId: string;
     firstName: string;
     lastName: string;
-    position: string; // mapped from Employee.role
+    position: string;
     address: string;
     phone: string;
     email: string;
@@ -39,6 +39,17 @@ type MenuItem = {
   children?: MenuChild[];
 };
 
+type HealthIncidentListItem = {
+  id: string;
+};
+
+type HealthIncidentListResponse = {
+  items?: HealthIncidentListItem[];
+};
+
+const HEALTH_INCIDENT_SEEN_KEY = "bac_hi_seen_report_ids";
+const HEALTH_INCIDENT_SEEN_EVENT = "health-incident-seen-changed";
+
 const MENU: MenuItem[] = [
   { label: "Programs", href: "/programs" },
   {
@@ -53,8 +64,6 @@ const MENU: MenuItem[] = [
     children: [
       { label: "New Individual", href: "/individual/new" },
       { label: "Search Individual", href: "/individual" },
-
-      // ✅ NEW: Individual Detail (page will be created separately)
       { label: "Individual Detail", href: "/individual/detail" },
     ],
   },
@@ -67,41 +76,31 @@ const MENU: MenuItem[] = [
   },
   { label: "Schedule", href: "/schedule" },
   { label: "Visited Maintenance", href: "/visited-maintenance" },
-
-  // ✅ Medication (PA-compliant submenus)
   {
     label: "Medication",
     children: [
       { label: "Orders", href: "/medication/orders" },
       { label: "MAR", href: "/medication/mar" },
       { label: "Treatment Record", href: "/medication/treatment" },
-
-      // ✅ FIX: folders are prn-vitals & inventory-controlled
       { label: "PRN & Vitals", href: "/medication/prn-vitals" },
       {
         label: "Inventory & Controlled",
         href: "/medication/inventory-controlled",
       },
-
       { label: "Incidents & Reports", href: "/medication/incidents" },
     ],
   },
-
-  // ✅ Rename only (keep route to avoid breaking)
   { label: "House Management", href: "/firedrill" },
-
-  // 🔒 Admin-only (menu)
   { label: "Billing", href: "/billing" },
   { label: "Payroll", href: "/payroll" },
-
-  // ✅ Office/Admin/HR can see
   { label: "Time Keeping", href: "/time-keeping" },
-
   { label: "Authorizations", href: "/authorizations" },
-
   {
     label: "Reports",
-    children: [{ label: "Daily Notes", href: "/reports/daily-notes" }],
+    children: [
+      { label: "Daily Notes", href: "/reports/daily-notes" },
+      { label: "Health & Incident", href: "/reports/health-incident" },
+    ],
   },
 ];
 
@@ -111,7 +110,6 @@ const ADMIN: MenuItem[] = [
   { label: "Change Password", href: "/admin/password" },
 ];
 
-// ✅ NEW: Self-service change password for ALL users (logged-in)
 const ACCOUNT: MenuItem[] = [
   { label: "Change Password", href: "/account/change-password" },
 ];
@@ -122,7 +120,6 @@ function norm(s?: string | null) {
 
 function isOfficeRole(roleOrPosition?: string | null) {
   const r = norm(roleOrPosition);
-  // You can tighten this later if needed
   return (
     r === "office staff" ||
     r === "office" ||
@@ -131,12 +128,55 @@ function isOfficeRole(roleOrPosition?: string | null) {
   );
 }
 
+function isSupervisorUserType(userType?: string | null) {
+  const t = String(userType ?? "").trim().toUpperCase();
+  return t === "ADMIN" || t === "HR" || t === "COORDINATOR" || t === "OFFICE";
+}
+
+function readSeenHealthIncidentIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(HEALTH_INCIDENT_SEEN_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((x) => String(x ?? "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function writeSeenHealthIncidentIds(ids: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const unique = Array.from(new Set(ids.map((x) => String(x ?? "").trim()).filter(Boolean)));
+    window.localStorage.setItem(HEALTH_INCIDENT_SEEN_KEY, JSON.stringify(unique));
+  } catch {
+    // ignore
+  }
+}
+
+function markHealthIncidentSeen(id: string) {
+  if (typeof window === "undefined") return;
+  const clean = String(id ?? "").trim();
+  if (!clean) return;
+
+  const current = readSeenHealthIncidentIds();
+  if (current.includes(clean)) return;
+
+  writeSeenHealthIncidentIds([...current, clean]);
+  window.dispatchEvent(new Event(HEALTH_INCIDENT_SEEN_EVENT));
+}
+
 export default function Sidebar({ onLogoClick }: SidebarProps) {
   const pathname = usePathname();
   const [openParent, setOpenParent] = useState<string | null>(null);
 
   const [userType, setUserType] = useState<string | null>(null);
   const [employeePosition, setEmployeePosition] = useState<string | null>(null);
+
+  const [healthIncidentSubmittedIds, setHealthIncidentSubmittedIds] = useState<string[]>([]);
+  const [healthIncidentNewCount, setHealthIncidentNewCount] = useState(0);
 
   useEffect(() => {
     const loadMe = async () => {
@@ -156,21 +196,19 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
 
   const isAdmin = userType === "ADMIN";
   const isHR = userType === "HR";
+  const canSeeHealthIncidentNewBadge = useMemo(
+    () => isSupervisorUserType(userType),
+    [userType]
+  );
 
-  // ✅ This is the key fix:
-  // Time Keeping visible if ADMIN/HR OR Employee role/position is Office Staff
   const canSeeTimeKeeping = useMemo(() => {
     if (isAdmin || isHR) return true;
     return isOfficeRole(employeePosition);
   }, [isAdmin, isHR, employeePosition]);
 
   function canSeeMenuItem(m: MenuItem) {
-    // Hide admin-only menus unless ADMIN
     if (m.href === "/billing" || m.href === "/payroll") return isAdmin;
-
-    // Time Keeping visible to ADMIN/HR/Office Staff (via employee.position)
     if (m.href === "/time-keeping") return canSeeTimeKeeping;
-
     return true;
   }
 
@@ -189,21 +227,116 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     });
 
     const adminHasActive = ADMIN.some((a) =>
-      a.href ? pathname.startsWith(a.href) : false,
+      a.href ? pathname.startsWith(a.href) : false
     );
     if (adminHasActive) foundParent = "Admin";
 
-    // ✅ Account (self change password) active highlight
     const accountHasActive = ACCOUNT.some((a) =>
-      a.href ? pathname.startsWith(a.href) : false,
+      a.href ? pathname.startsWith(a.href) : false
     );
     if (accountHasActive) foundParent = "Account";
 
     if (foundParent) setOpenParent(foundParent);
   }, [pathname, userType, employeePosition, VISIBLE_MENU]);
 
+  useEffect(() => {
+    if (!canSeeHealthIncidentNewBadge) return;
+
+    const match = /^\/reports\/health-incident\/([^/]+)$/.exec(pathname || "");
+    if (!match) return;
+
+    const reportId = decodeURIComponent(match[1] || "").trim();
+    if (!reportId) return;
+
+    markHealthIncidentSeen(reportId);
+  }, [pathname, canSeeHealthIncidentNewBadge]);
+
+  const refreshHealthIncidentBadge = useCallback(async () => {
+    if (!canSeeHealthIncidentNewBadge) {
+      setHealthIncidentSubmittedIds([]);
+      setHealthIncidentNewCount(0);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/reports/health-incident?status=SUBMITTED", {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+
+      const data = (await res.json()) as HealthIncidentListResponse;
+      const ids = (data.items || [])
+        .map((x) => String(x?.id ?? "").trim())
+        .filter(Boolean);
+
+      const seenIds = readSeenHealthIncidentIds();
+      const unseen = ids.filter((id) => !seenIds.includes(id));
+
+      setHealthIncidentSubmittedIds(ids);
+      setHealthIncidentNewCount(unseen.length);
+    } catch (err) {
+      console.error("Failed to load health incident new badge", err);
+    }
+  }, [canSeeHealthIncidentNewBadge]);
+
+  useEffect(() => {
+    refreshHealthIncidentBadge();
+  }, [refreshHealthIncidentBadge]);
+
+  useEffect(() => {
+    if (!canSeeHealthIncidentNewBadge) return;
+
+    const onSeenChanged = () => {
+      refreshHealthIncidentBadge();
+    };
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === HEALTH_INCIDENT_SEEN_KEY) {
+        refreshHealthIncidentBadge();
+      }
+    };
+
+    window.addEventListener(HEALTH_INCIDENT_SEEN_EVENT, onSeenChanged);
+    window.addEventListener("storage", onStorage);
+
+    const timer = window.setInterval(() => {
+      refreshHealthIncidentBadge();
+    }, 20000);
+
+    return () => {
+      window.removeEventListener(HEALTH_INCIDENT_SEEN_EVENT, onSeenChanged);
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(timer);
+    };
+  }, [canSeeHealthIncidentNewBadge, refreshHealthIncidentBadge]);
+
   const toggleParent = (label: string) => {
     setOpenParent((prev) => (prev === label ? null : label));
+  };
+
+  const renderReportsParentBadge = () => {
+    if (!canSeeHealthIncidentNewBadge || healthIncidentNewCount <= 0) return null;
+
+    return (
+      <div className="ml-2 inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white animate-pulse">
+        New
+      </div>
+    );
+  };
+
+  const renderHealthIncidentChildBadge = () => {
+    if (!canSeeHealthIncidentNewBadge || healthIncidentNewCount <= 0) return null;
+
+    return (
+      <div className="ml-auto flex min-w-[112px] flex-col items-end">
+        <span className="inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white animate-pulse">
+          NEW
+        </span>
+        <span className="mt-0.5 text-[10px] not-italic text-red-300">
+          Health &amp; Incident report
+        </span>
+      </div>
+    );
   };
 
   const renderMainItem = (m: MenuItem) => {
@@ -227,6 +360,7 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     }
 
     const isOpen = openParent === m.label;
+    const showReportsBadge = m.label === "Reports";
 
     return (
       <div key={m.label} className="mb-1">
@@ -240,7 +374,10 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
                 : "text-yellow-300 hover:bg-bac-panel/60 hover:text-yellow-200"
             }`}
         >
-          <span className="font-semibold">{m.label}</span>
+          <span className="flex items-center font-semibold">
+            {m.label}
+            {showReportsBadge ? renderReportsParentBadge() : null}
+          </span>
           <ChevronDown
             className={`h-4 w-4 transition-transform ${
               isOpen ? "rotate-180" : "rotate-0"
@@ -252,18 +389,21 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
           <div className="mt-1 space-y-1 pl-4">
             {m.children.map((c) => {
               const isChildActive = pathname.startsWith(c.href);
+              const isHealthIncidentChild = c.href === "/reports/health-incident";
+
               return (
                 <Link
                   key={c.href}
                   href={c.href}
-                  className={`block rounded-lg px-3 py-1.5 text-sm italic transition-colors
+                  className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm italic transition-colors
                     ${
                       isChildActive
                         ? "bg-bac-panel text-yellow-200"
                         : "text-yellow-300 hover:bg-bac-panel/70 hover:text-yellow-200"
                     }`}
                 >
-                  {c.label}
+                  <span>{c.label}</span>
+                  {isHealthIncidentChild ? renderHealthIncidentChildBadge() : null}
                 </Link>
               );
             })}
@@ -294,7 +434,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
   };
 
   const renderAdminSection = () => {
-    // 🔒 Admin section itself should only be visible to ADMIN
     if (!isAdmin) return null;
 
     const isOpen = openParent === "Admin";
@@ -328,7 +467,6 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
     );
   };
 
-  // ✅ NEW: Account section for ALL logged-in users
   const renderAccountSection = () => {
     const isOpen = openParent === "Account";
 
@@ -403,9 +541,7 @@ export default function Sidebar({ onLogoClick }: SidebarProps) {
 
         <nav className="space-y-1 px-2">{VISIBLE_MENU.map(renderMainItem)}</nav>
 
-        {/* ✅ NEW: Account section visible to all users */}
         {renderAccountSection()}
-
         {renderAdminSection()}
       </div>
     </div>

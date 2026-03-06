@@ -1,10 +1,12 @@
-// Web/app/api/medication/individuals/route.ts
+// web/app/api/medication/individuals/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+export const runtime = "nodejs";
+
 export async function GET() {
   try {
-    // Note: Avoid ordering by createdAt because some schemas don't have it.
+    // Primary source of truth: Individuals table via Prisma model Individual
     const items = await prisma.individual.findMany({
       select: {
         id: true,
@@ -17,18 +19,21 @@ export async function GET() {
       take: 500,
     });
 
-    // Standard response shape: { items: [...] }
     return NextResponse.json({ items }, { status: 200 });
   } catch (err: any) {
-    console.error("[GET /api/medication/individuals] error:", err);
+    // IMPORTANT:
+    // Do NOT return 500 here because MARClient treats non-OK as fatal.
+    // Return 200 with warning so UI can fallback gracefully.
+    console.error("GET /api/medication/individuals error:", err);
 
     return NextResponse.json(
       {
         items: [],
-        error: "Failed to load individuals for Medication module.",
+        warning:
+          "Individuals endpoint failed (DB/schema mismatch). Returning empty list so UI can fallback.",
         errorDetail: String(err?.message || err),
       },
-      { status: 500 },
+      { status: 200 },
     );
   }
 }
