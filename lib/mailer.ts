@@ -219,7 +219,7 @@ ${companyWebsite}
   <div style="display:flex; gap:10px; flex-wrap:wrap; margin:8px 0 14px 0;">
     <a href="${iosDownloadUrl}" target="_blank" rel="noreferrer"
        style="text-decoration:none; padding:10px 12px; border-radius:10px; background:#000; color:#fff; display:inline-block;">
-      🍎 iPhone (iOS – TestFlight)
+      🍎 iPhone (iOS – Apple Store)
     </a>
 
     <a href="${androidDownloadUrl}" target="_blank" rel="noreferrer"
