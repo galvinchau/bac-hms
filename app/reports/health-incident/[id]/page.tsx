@@ -4,7 +4,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import HealthIncidentReportHeader from "@/components/reports/HealthIncidentReportHeader";
 
-type Status = "DRAFT" | "SUBMITTED" | "IN_REVIEW" | "ASSIGNED" | "CLOSED";
+type Status =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "IN_REVIEW"
+  | "ASSIGNED"
+  | "INVESTIGATED"
+  | "CLOSED";
 
 type MeResponse = {
   user?: {
@@ -21,8 +27,38 @@ type MeResponse = {
   } | null;
 };
 
+type TimelineItem = {
+  id: string;
+  actionType: string;
+  actorUserId?: string | null;
+  actorEmployeeId?: string | null;
+  actorName?: string | null;
+  actorRole?: string | null;
+  note?: string | null;
+  meta?: any;
+  createdAt?: string | null;
+  createdAtLocal?: string | null;
+};
+
+type AttachmentItem = {
+  id: string;
+  category: string;
+  fileName: string;
+  filePath: string;
+  mimeType?: string | null;
+  fileSize?: number | null;
+  description?: string | null;
+  uploadedByUserId?: string | null;
+  uploadedByEmployeeId?: string | null;
+  uploadedByName?: string | null;
+  uploadedByRole?: string | null;
+  createdAt?: string | null;
+  createdAtLocal?: string | null;
+};
+
 type HealthIncidentDetail = {
   id: string;
+  caseNumber?: string | null;
 
   status: Status;
 
@@ -53,6 +89,22 @@ type HealthIncidentDetail = {
   ciAssignedAt?: string | null;
   ciAssignedByUserId?: string | null;
   ciAssignedByName?: string | null;
+
+  investigationFindings?: string | null;
+  rootCause?: string | null;
+  witnessNotes?: string | null;
+  correctiveActions?: string | null;
+  recommendation?: string | null;
+  investigatedAt?: string | null;
+  investigatedByStaffId?: string | null;
+  investigatedByName?: string | null;
+
+  allowDspViewOutcome?: boolean | null;
+  finalDecision?: string | null;
+  finalSummary?: string | null;
+  closedAt?: string | null;
+  closedByUserId?: string | null;
+  closedByName?: string | null;
 
   payload?: any;
 };
@@ -186,6 +238,14 @@ function isIncidentTypeChecked(selected: string[], item: string) {
   return selected.some((x) => x.trim().toLowerCase() === item.trim().toLowerCase());
 }
 
+function formatBytes(bytes?: number | null) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return "—";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 function CheckboxLabel({
   checked,
   label,
@@ -203,6 +263,23 @@ function CheckboxLabel({
   );
 }
 
+function statusTextClass(status?: string) {
+  switch (safeStr(status).toUpperCase()) {
+    case "SUBMITTED":
+      return "text-bac-primary";
+    case "IN_REVIEW":
+      return "text-yellow-400";
+    case "ASSIGNED":
+      return "text-blue-400";
+    case "INVESTIGATED":
+      return "text-violet-400";
+    case "CLOSED":
+      return "text-emerald-400";
+    default:
+      return "text-slate-200";
+  }
+}
+
 export default function HealthIncidentReportDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -212,8 +289,12 @@ export default function HealthIncidentReportDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [me, setMe] = useState<MeResponse | null>(null);
-
   const [detail, setDetail] = useState<HealthIncidentDetail | null>(null);
+
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
+  const [attachmentItems, setAttachmentItems] = useState<AttachmentItem[]>([]);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [loadingAttachments, setLoadingAttachments] = useState(false);
 
   const [supStatus, setSupStatus] = useState<Status>("IN_REVIEW");
   const [supDecision, setSupDecision] = useState("");
@@ -227,9 +308,31 @@ export default function HealthIncidentReportDetailPage() {
   const [assigningCI, setAssigningCI] = useState(false);
   const [assignMsg, setAssignMsg] = useState<string | null>(null);
 
+  const [investigationFindings, setInvestigationFindings] = useState("");
+  const [rootCause, setRootCause] = useState("");
+  const [witnessNotes, setWitnessNotes] = useState("");
+  const [correctiveActions, setCorrectiveActions] = useState("");
+  const [recommendation, setRecommendation] = useState("");
+  const [investigatedByName, setInvestigatedByName] = useState("");
+  const [savingInvestigation, setSavingInvestigation] = useState(false);
+  const [investigationMsg, setInvestigationMsg] = useState<string | null>(null);
+
+  const [finalDecision, setFinalDecision] = useState("");
+  const [finalSummary, setFinalSummary] = useState("");
+  const [allowDspViewOutcome, setAllowDspViewOutcome] = useState(false);
+  const [closingCase, setClosingCase] = useState(false);
+  const [closeMsg, setCloseMsg] = useState<string | null>(null);
+
+  const [attachmentCategory, setAttachmentCategory] = useState("CI_EVIDENCE");
+  const [attachmentDescription, setAttachmentDescription] = useState("");
+  const [selectedAttachmentFile, setSelectedAttachmentFile] = useState<File | null>(null);
+  const [savingAttachment, setSavingAttachment] = useState(false);
+  const [attachmentMsg, setAttachmentMsg] = useState<string | null>(null);
+
   const SAMPLE_DETAIL: HealthIncidentDetail = useMemo(
     () => ({
       id: "SAMPLE_ID",
+      caseNumber: "HIR-000001",
       status: "SUBMITTED",
       date: new Date().toISOString(),
       createdAt: new Date().toISOString(),
@@ -259,6 +362,22 @@ export default function HealthIncidentReportDetailPage() {
       ciAssignedByUserId: "",
       ciAssignedByName: "",
 
+      investigationFindings: "",
+      rootCause: "",
+      witnessNotes: "",
+      correctiveActions: "",
+      recommendation: "",
+      investigatedAt: null,
+      investigatedByStaffId: "",
+      investigatedByName: "",
+
+      allowDspViewOutcome: false,
+      finalDecision: "",
+      finalSummary: "",
+      closedAt: null,
+      closedByUserId: "",
+      closedByName: "",
+
       payload: {
         reportDate: isoDateOnly(new Date().toISOString()),
         incidentDate: isoDateOnly(new Date().toISOString()),
@@ -280,6 +399,54 @@ export default function HealthIncidentReportDetailPage() {
     []
   );
 
+  async function loadTimeline(reportId: string) {
+    try {
+      setLoadingTimeline(true);
+      const res = await fetch(`/api/reports/health-incident/${reportId}/timeline`, {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(
+          `Failed to load timeline: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
+        );
+      }
+
+      const data = await res.json();
+      setTimelineItems(data.items ?? []);
+    } catch (e) {
+      console.error(e);
+      setTimelineItems([]);
+    } finally {
+      setLoadingTimeline(false);
+    }
+  }
+
+  async function loadAttachments(reportId: string) {
+    try {
+      setLoadingAttachments(true);
+      const res = await fetch(`/api/reports/health-incident/${reportId}/attachments`, {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(
+          `Failed to load attachments: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
+        );
+      }
+
+      const data = await res.json();
+      setAttachmentItems(data.items ?? []);
+    } catch (e) {
+      console.error(e);
+      setAttachmentItems([]);
+    } finally {
+      setLoadingAttachments(false);
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -289,6 +456,9 @@ export default function HealthIncidentReportDetailPage() {
         setError(null);
         setSaveMsg(null);
         setAssignMsg(null);
+        setInvestigationMsg(null);
+        setCloseMsg(null);
+        setAttachmentMsg(null);
 
         if (!id) throw new Error("Missing id in URL");
 
@@ -309,10 +479,7 @@ export default function HealthIncidentReportDetailPage() {
         if (!res.ok) {
           const txt = await res.text();
           throw new Error(
-            `Failed to load detail: ${res.status} ${res.statusText}. ${txt.slice(
-              0,
-              200
-            )}`
+            `Failed to load detail: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
           );
         }
 
@@ -324,9 +491,11 @@ export default function HealthIncidentReportDetailPage() {
         const seedStatus =
           d.status === "CLOSED"
             ? "CLOSED"
-            : d.status === "ASSIGNED"
-            ? "ASSIGNED"
-            : "IN_REVIEW";
+            : d.status === "INVESTIGATED"
+              ? "INVESTIGATED"
+              : d.status === "ASSIGNED"
+                ? "ASSIGNED"
+                : "IN_REVIEW";
 
         setSupStatus(seedStatus as Status);
         setSupDecision(safeStr(d.supervisorDecision));
@@ -335,6 +504,21 @@ export default function HealthIncidentReportDetailPage() {
         setCiName(safeStr(d.ciName));
         setCiEmail(safeStr(d.ciEmail));
         setCiPhone(safeStr(d.ciPhone));
+
+        setInvestigationFindings(safeStr(d.investigationFindings));
+        setRootCause(safeStr(d.rootCause));
+        setWitnessNotes(safeStr(d.witnessNotes));
+        setCorrectiveActions(safeStr(d.correctiveActions));
+        setRecommendation(safeStr(d.recommendation));
+        setInvestigatedByName(
+          safeStr(d.investigatedByName) || buildActorName(me) || ""
+        );
+
+        setFinalDecision(safeStr(d.finalDecision));
+        setFinalSummary(safeStr(d.finalSummary));
+        setAllowDspViewOutcome(Boolean(d.allowDspViewOutcome));
+
+        await Promise.all([loadTimeline(id), loadAttachments(id)]);
       } catch (e: any) {
         console.error(e);
         if (!mounted) return;
@@ -349,6 +533,20 @@ export default function HealthIncidentReportDetailPage() {
         setCiName(safeStr(SAMPLE_DETAIL.ciName));
         setCiEmail(safeStr(SAMPLE_DETAIL.ciEmail));
         setCiPhone(safeStr(SAMPLE_DETAIL.ciPhone));
+
+        setInvestigationFindings(safeStr(SAMPLE_DETAIL.investigationFindings));
+        setRootCause(safeStr(SAMPLE_DETAIL.rootCause));
+        setWitnessNotes(safeStr(SAMPLE_DETAIL.witnessNotes));
+        setCorrectiveActions(safeStr(SAMPLE_DETAIL.correctiveActions));
+        setRecommendation(safeStr(SAMPLE_DETAIL.recommendation));
+        setInvestigatedByName(safeStr(SAMPLE_DETAIL.investigatedByName));
+
+        setFinalDecision(safeStr(SAMPLE_DETAIL.finalDecision));
+        setFinalSummary(safeStr(SAMPLE_DETAIL.finalSummary));
+        setAllowDspViewOutcome(Boolean(SAMPLE_DETAIL.allowDspViewOutcome));
+
+        setTimelineItems([]);
+        setAttachmentItems([]);
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -395,7 +593,6 @@ export default function HealthIncidentReportDetailPage() {
     asText(payload.details) ||
     asText(payload.incidentDescription);
 
-  // ✅ NEW: reporter signature block replaces Who Was Notified
   const reporterSignatureName =
     asText(payload.reportedByName) ||
     safeStr(d.staffName).trim() ||
@@ -444,6 +641,8 @@ export default function HealthIncidentReportDetailPage() {
         supervisorName: actorName || undefined,
         supervisorDecision: supDecision,
         supervisorActionsTaken: supActions,
+        actorUserId: safeStr(me?.user?.id).trim() || undefined,
+        actorName: actorName || undefined,
       };
 
       const res = await fetch(`/api/reports/health-incident/${id}/review`, {
@@ -456,10 +655,7 @@ export default function HealthIncidentReportDetailPage() {
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(
-          `Failed to save review: ${res.status} ${res.statusText}. ${txt.slice(
-            0,
-            200
-          )}`
+          `Failed to save review: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
         );
       }
 
@@ -467,6 +663,7 @@ export default function HealthIncidentReportDetailPage() {
       setDetail(updated);
       setSupStatus(updated.status);
       setSaveMsg("Saved.");
+      await loadTimeline(id);
     } catch (e: any) {
       console.error(e);
       setSaveMsg(e?.message ?? "Failed to save supervisor review");
@@ -511,10 +708,7 @@ export default function HealthIncidentReportDetailPage() {
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(
-          `Failed to assign CI: ${res.status} ${res.statusText}. ${txt.slice(
-            0,
-            200
-          )}`
+          `Failed to assign CI: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
         );
       }
 
@@ -529,12 +723,179 @@ export default function HealthIncidentReportDetailPage() {
       setCiPhone(safeStr(updated.ciPhone));
 
       setAssignMsg("CI assigned.");
+      await loadTimeline(effectiveId);
     } catch (e: any) {
       console.error(e);
       setAssignMsg(e?.message ?? "Failed to assign CI");
     } finally {
       setAssigningCI(false);
       setTimeout(() => setAssignMsg(null), 2500);
+    }
+  }
+
+  async function submitInvestigation() {
+    if (!id) return;
+
+    try {
+      setSavingInvestigation(true);
+      setInvestigationMsg(null);
+
+      const body = {
+        investigationFindings,
+        rootCause,
+        witnessNotes,
+        correctiveActions,
+        recommendation,
+        investigatedByStaffId: safeStr(me?.employee?.staffId).trim() || undefined,
+        investigatedByName: investigatedByName.trim() || actorName || undefined,
+        actorUserId: safeStr(me?.user?.id).trim() || undefined,
+        actorName: actorName || investigatedByName.trim() || undefined,
+      };
+
+      const res = await fetch(`/api/reports/health-incident/${id}/investigation`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(
+          `Failed to submit investigation: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
+        );
+      }
+
+      const updated = (await res.json()) as HealthIncidentDetail;
+      setDetail(updated);
+      setSupStatus(updated.status);
+      setInvestigationFindings(safeStr(updated.investigationFindings));
+      setRootCause(safeStr(updated.rootCause));
+      setWitnessNotes(safeStr(updated.witnessNotes));
+      setCorrectiveActions(safeStr(updated.correctiveActions));
+      setRecommendation(safeStr(updated.recommendation));
+      setInvestigatedByName(safeStr(updated.investigatedByName));
+
+      setInvestigationMsg("Investigation submitted.");
+      await loadTimeline(id);
+    } catch (e: any) {
+      console.error(e);
+      setInvestigationMsg(e?.message ?? "Failed to submit investigation");
+    } finally {
+      setSavingInvestigation(false);
+      setTimeout(() => setInvestigationMsg(null), 2500);
+    }
+  }
+
+  async function closeCase() {
+    if (!id) return;
+
+    try {
+      setClosingCase(true);
+      setCloseMsg(null);
+
+      const body = {
+        supervisorName: actorName || undefined,
+        supervisorDecision: supDecision,
+        supervisorActionsTaken: supActions,
+        finalDecision: finalDecision || undefined,
+        finalSummary: finalSummary || undefined,
+        allowDspViewOutcome,
+        closedByUserId: safeStr(me?.user?.id).trim() || undefined,
+        closedByName: actorName || undefined,
+        actorUserId: safeStr(me?.user?.id).trim() || undefined,
+        actorName: actorName || undefined,
+      };
+
+      const res = await fetch(`/api/reports/health-incident/${id}/close`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(
+          `Failed to close case: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
+        );
+      }
+
+      const updated = (await res.json()) as HealthIncidentDetail;
+      setDetail(updated);
+      setSupStatus(updated.status);
+      setFinalDecision(safeStr(updated.finalDecision));
+      setFinalSummary(safeStr(updated.finalSummary));
+      setAllowDspViewOutcome(Boolean(updated.allowDspViewOutcome));
+
+      setCloseMsg("Case closed.");
+      await loadTimeline(id);
+    } catch (e: any) {
+      console.error(e);
+      setCloseMsg(e?.message ?? "Failed to close case");
+    } finally {
+      setClosingCase(false);
+      setTimeout(() => setCloseMsg(null), 2500);
+    }
+  }
+
+  async function uploadAttachment() {
+    if (!id) return;
+
+    try {
+      setSavingAttachment(true);
+      setAttachmentMsg(null);
+
+      if (!selectedAttachmentFile) {
+        throw new Error("Please choose a file");
+      }
+
+      const form = new FormData();
+      form.append("category", attachmentCategory || "CI_EVIDENCE");
+      form.append("description", attachmentDescription.trim() || "");
+      form.append("uploadedByUserId", safeStr(me?.user?.id).trim() || "");
+      form.append(
+        "uploadedByEmployeeId",
+        safeStr(me?.employee?.staffId).trim() || ""
+      );
+      form.append("uploadedByName", actorName || "");
+      form.append("uploadedByRole", canSupervisorReview ? "SUPERVISOR" : "CI");
+      form.append("file", selectedAttachmentFile, selectedAttachmentFile.name);
+
+      const res = await fetch(
+        `/api/reports/health-incident/${id}/attachments?mode=upload`,
+        {
+          method: "POST",
+          cache: "no-store",
+          body: form,
+        }
+      );
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(
+          `Failed to upload attachment: ${res.status} ${res.statusText}. ${txt.slice(0, 200)}`
+        );
+      }
+
+      setSelectedAttachmentFile(null);
+      setAttachmentDescription("");
+
+      const fileInput = document.getElementById(
+        "health-incident-attachment-file"
+      ) as HTMLInputElement | null;
+      if (fileInput) {
+        fileInput.value = "";
+      }
+
+      setAttachmentMsg("Attachment uploaded.");
+      await Promise.all([loadAttachments(id), loadTimeline(id)]);
+    } catch (e: any) {
+      console.error(e);
+      setAttachmentMsg(e?.message ?? "Failed to upload attachment");
+    } finally {
+      setSavingAttachment(false);
+      setTimeout(() => setAttachmentMsg(null), 3500);
     }
   }
 
@@ -545,11 +906,25 @@ export default function HealthIncidentReportDetailPage() {
       <div className="mb-4 flex items-start justify-between gap-4 print:hidden">
         <div>
           <h1 className="text-2xl font-semibold text-white">
-            Health & Incident Report
+            Health & Incident Case Detail
           </h1>
           <p className="text-sm text-slate-400">
-            Preview/Print layout. Supervisor can review and close report.
+            Review, assign, investigate, track timeline, and close case.
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+            <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-slate-200">
+              Case #:{" "}
+              <span className="font-semibold text-white">
+                {sanitizeForDisplay(safeStr(d.caseNumber))}
+              </span>
+            </span>
+            <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-slate-200">
+              Status:{" "}
+              <span className={`font-semibold ${statusTextClass(d.status)}`}>
+                {sanitizeForDisplay(safeStr(d.status))}
+              </span>
+            </span>
+          </div>
           {loading && <p className="mt-2 text-xs text-slate-400">Loading...</p>}
           {error && (
             <div className="mt-3 rounded-lg border border-red-500/60 bg-red-950/60 px-3 py-2 text-xs text-red-200">
@@ -572,7 +947,7 @@ export default function HealthIncidentReportDetailPage() {
             className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-4 text-sm font-medium text-slate-100 hover:bg-slate-800"
             title="Close"
           >
-            Close
+            Back
           </button>
         </div>
       </div>
@@ -678,6 +1053,7 @@ export default function HealthIncidentReportDetailPage() {
               >
                 <option value="IN_REVIEW">IN_REVIEW</option>
                 <option value="ASSIGNED">ASSIGNED</option>
+                <option value="INVESTIGATED">INVESTIGATED</option>
                 <option value="CLOSED">CLOSED</option>
               </select>
 
@@ -687,15 +1063,6 @@ export default function HealthIncidentReportDetailPage() {
                 className="inline-flex h-10 items-center justify-center rounded-lg bg-bac-primary px-6 text-sm font-medium text-white shadow hover:bg-bac-primary/90 disabled:opacity-60"
               >
                 {savingReview ? "Saving..." : "Save"}
-              </button>
-
-              <button
-                disabled={savingReview}
-                onClick={() => saveSupervisorReview("CLOSED")}
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-700 px-6 text-sm font-medium text-white shadow hover:bg-emerald-700/90 disabled:opacity-60"
-                title="Set CLOSED and save"
-              >
-                Close Report
               </button>
             </div>
           </div>
@@ -732,9 +1099,436 @@ export default function HealthIncidentReportDetailPage() {
         </div>
       )}
 
+      <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-white">
+              CI Investigation
+            </div>
+            <div className="mt-1 text-xs text-slate-400">
+              Investigation details and findings. Submit when review is complete.
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              disabled={savingInvestigation}
+              onClick={submitInvestigation}
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-violet-700 px-6 text-sm font-medium text-white shadow hover:bg-violet-700/90 disabled:opacity-60"
+            >
+              {savingInvestigation ? "Submitting..." : "Submit Investigation"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3">
+          <div className="flex flex-col">
+            <label className="mb-1 text-xs font-medium text-slate-300">
+              Investigation Findings
+            </label>
+            <textarea
+              value={investigationFindings}
+              onChange={(e) => setInvestigationFindings(e.target.value)}
+              className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+              placeholder="Findings..."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Root Cause
+              </label>
+              <textarea
+                value={rootCause}
+                onChange={(e) => setRootCause(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Root cause..."
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Witness Notes
+              </label>
+              <textarea
+                value={witnessNotes}
+                onChange={(e) => setWitnessNotes(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Witness notes..."
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Corrective Actions
+              </label>
+              <textarea
+                value={correctiveActions}
+                onChange={(e) => setCorrectiveActions(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Corrective actions..."
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Recommendation
+              </label>
+              <textarea
+                value={recommendation}
+                onChange={(e) => setRecommendation(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Recommendation..."
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Investigated By
+              </label>
+              <input
+                value={investigatedByName}
+                onChange={(e) => setInvestigatedByName(e.target.value)}
+                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Investigator name"
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Investigated At
+              </label>
+              <div className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-300 flex items-center">
+                {sanitizeForDisplay(safeStr(d.investigatedAt))}
+              </div>
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Current Status
+              </label>
+              <div className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm flex items-center">
+                <span className={`font-medium ${statusTextClass(d.status)}`}>
+                  {sanitizeForDisplay(safeStr(d.status))}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {investigationMsg && (
+          <div className="mt-3 text-xs text-slate-200">{investigationMsg}</div>
+        )}
+      </div>
+
+      {canSupervisorReview && (
+        <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-white">
+                Final Close Decision
+              </div>
+              <div className="mt-1 text-xs text-slate-400">
+                Final supervisor decision and close-case summary.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                disabled={closingCase}
+                onClick={closeCase}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-700 px-6 text-sm font-medium text-white shadow hover:bg-emerald-700/90 disabled:opacity-60"
+              >
+                {closingCase ? "Closing..." : "Close Case"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Final Decision
+              </label>
+              <textarea
+                value={finalDecision}
+                onChange={(e) => setFinalDecision(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Final decision..."
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Final Summary
+              </label>
+              <textarea
+                value={finalSummary}
+                onChange={(e) => setFinalSummary(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+                placeholder="Final summary..."
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              id="allowDspViewOutcome"
+              type="checkbox"
+              checked={allowDspViewOutcome}
+              onChange={(e) => setAllowDspViewOutcome(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-bac-primary focus:ring-bac-primary"
+            />
+            <label
+              htmlFor="allowDspViewOutcome"
+              className="text-sm text-slate-200"
+            >
+              Allow DSP to view case outcome
+            </label>
+          </div>
+
+          {closeMsg && (
+            <div className="mt-3 text-xs text-slate-200">{closeMsg}</div>
+          )}
+        </div>
+      )}
+
+      <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
+        <div className="text-sm font-semibold text-white">Attachments</div>
+        <div className="mt-1 text-xs text-slate-400">
+          Upload file to server and save attachment metadata automatically.
+          <span className="ml-2 text-slate-300">
+            Allowed: pdf, jpg, jpeg, png, doc, docx • Max 10MB
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="flex flex-col">
+            <label className="mb-1 text-xs font-medium text-slate-300">
+              Category
+            </label>
+            <select
+              value={attachmentCategory}
+              onChange={(e) => setAttachmentCategory(e.target.value)}
+              className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+            >
+              <option value="CI_EVIDENCE">CI_EVIDENCE</option>
+              <option value="SUPERVISOR_NOTE">SUPERVISOR_NOTE</option>
+              <option value="INITIAL_REPORT">INITIAL_REPORT</option>
+              <option value="FINAL_DOCUMENT">FINAL_DOCUMENT</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col">
+            <label className="mb-1 text-xs font-medium text-slate-300">
+              Choose File
+            </label>
+            <input
+              id="health-incident-attachment-file"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                setSelectedAttachmentFile(file);
+              }}
+              className="block h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 file:mr-3 file:rounded-md file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-100 hover:file:bg-slate-700"
+            />
+          </div>
+
+          <div className="flex flex-col md:col-span-2">
+            <label className="mb-1 text-xs font-medium text-slate-300">
+              Description
+            </label>
+            <input
+              value={attachmentDescription}
+              onChange={(e) => setAttachmentDescription(e.target.value)}
+              className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
+              placeholder="Short description..."
+            />
+          </div>
+        </div>
+
+        {selectedAttachmentFile ? (
+          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+            Selected file:{" "}
+            <span className="font-semibold text-slate-100">
+              {selectedAttachmentFile.name}
+            </span>
+            {" • "}
+            {formatBytes(selectedAttachmentFile.size)}
+            {" • "}
+            {selectedAttachmentFile.type || "unknown"}
+          </div>
+        ) : null}
+
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            disabled={savingAttachment}
+            onClick={uploadAttachment}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-sky-700 px-6 text-sm font-medium text-white shadow hover:bg-sky-700/90 disabled:opacity-60"
+          >
+            {savingAttachment ? "Uploading..." : "Upload Attachment"}
+          </button>
+        </div>
+
+        {attachmentMsg && (
+          <div className="mt-3 text-xs text-slate-200">{attachmentMsg}</div>
+        )}
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-slate-700">
+          <table className="min-w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-900 text-slate-200">
+                <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-left">Category</th>
+                <th className="px-3 py-2 text-left">File Name</th>
+                <th className="px-3 py-2 text-left">Path</th>
+                <th className="px-3 py-2 text-left">Uploaded By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingAttachments && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-3 text-center text-slate-300">
+                    Loading attachments...
+                  </td>
+                </tr>
+              )}
+
+              {!loadingAttachments && attachmentItems.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-3 text-center text-slate-400">
+                    No attachments yet.
+                  </td>
+                </tr>
+              )}
+
+              {!loadingAttachments &&
+                attachmentItems.map((it) => (
+                  <tr
+                    key={it.id}
+                    className="border-t border-slate-800 bg-slate-950 text-slate-100"
+                  >
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {sanitizeForDisplay(safeStr(it.createdAtLocal || it.createdAt))}
+                    </td>
+                    <td className="px-3 py-2">{sanitizeForDisplay(it.category)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={`/api/reports/health-incident/${encodeURIComponent(
+                            d.id
+                          )}/attachments/${encodeURIComponent(it.id)}/download`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-sky-400 underline hover:text-sky-300"
+                          title="Open attachment"
+                        >
+                          {sanitizeForDisplay(it.fileName)}
+                        </a>
+
+                        <a
+                          href={`/api/reports/health-incident/${encodeURIComponent(
+                            d.id
+                          )}/attachments/${encodeURIComponent(it.id)}/download`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center rounded border border-slate-600 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-slate-800"
+                          title="Open"
+                        >
+                          Open
+                        </a>
+                      </div>
+
+                      <div className="mt-1 text-[11px] text-slate-400">
+                        {sanitizeForDisplay(safeStr(it.mimeType))} • {formatBytes(it.fileSize)}
+                      </div>
+
+                      {it.description ? (
+                        <div className="mt-1 text-[11px] text-slate-400">
+                          {it.description}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 break-all">{sanitizeForDisplay(it.filePath)}</td>
+                    <td className="px-3 py-2">
+                      {sanitizeForDisplay(safeStr(it.uploadedByName))}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
+        <div className="text-sm font-semibold text-white">Timeline / Audit Trail</div>
+        <div className="mt-1 text-xs text-slate-400">
+          Full activity history for this case.
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {loadingTimeline && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-300">
+              Loading timeline...
+            </div>
+          )}
+
+          {!loadingTimeline && timelineItems.length === 0 && (
+            <div className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-400">
+              No timeline items yet.
+            </div>
+          )}
+
+          {!loadingTimeline &&
+            timelineItems.map((it) => (
+              <div
+                key={it.id}
+                className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-3"
+              >
+                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                  <div className="text-sm font-semibold text-white">
+                    {sanitizeForDisplay(it.actionType)}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {sanitizeForDisplay(
+                      safeStr(it.createdAtLocal || it.createdAt)
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-1 text-xs text-slate-300">
+                  Actor:{" "}
+                  <span className="font-medium text-slate-100">
+                    {sanitizeForDisplay(safeStr(it.actorName))}
+                  </span>
+                  {it.actorRole ? (
+                    <>
+                      {" "}
+                      • Role:{" "}
+                      <span className="font-medium text-slate-100">
+                        {sanitizeForDisplay(safeStr(it.actorRole))}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+
+                {it.note ? (
+                  <div className="mt-2 whitespace-pre-wrap text-sm text-slate-200">
+                    {it.note}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+        </div>
+      </div>
+
       <div className="hi-print-root">
         <div className="mx-auto max-w-[900px] space-y-6">
-          {/* PAGE 1 */}
           <div className="hi-page rounded-md bg-white p-6 text-black shadow print:shadow-none">
             <HealthIncidentReportHeader
               subtitleRight={
@@ -746,6 +1540,10 @@ export default function HealthIncidentReportDetailPage() {
                 </div>
               }
             />
+
+            <div className="mt-2 text-[12px] font-semibold">
+              Case Number: {sanitizeForDisplay(safeStr(d.caseNumber))}
+            </div>
 
             <div className="mt-4">
               <table className="w-full border-collapse text-[12px]">
@@ -866,7 +1664,6 @@ export default function HealthIncidentReportDetailPage() {
                     </td>
                   </tr>
 
-                  {/* ✅ Signature of Reporter replaces Who Was Notified */}
                   <tr>
                     <td className="border border-black p-2 align-top">
                       <div className="font-semibold">Signature of Reporter</div>
@@ -904,7 +1701,6 @@ export default function HealthIncidentReportDetailPage() {
             </div>
           </div>
 
-          {/* PAGE 2 */}
           <div className="hi-page rounded-md bg-white p-6 text-black shadow print:shadow-none">
             <div className="text-[14px] font-bold">Supervisor Review</div>
 
@@ -971,6 +1767,96 @@ export default function HealthIncidentReportDetailPage() {
                       <div className="font-semibold">Actions Taken</div>
                       <div className="mt-2 min-h-[120px] whitespace-pre-wrap border border-black p-2 text-[12px]">
                         {safeStr(d.supervisorActionsTaken) || ""}
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td className="border border-black p-2 align-top" colSpan={2}>
+                      <div className="font-semibold">CI Investigation</div>
+                      <div className="mt-2 space-y-3 text-[12px]">
+                        <div>
+                          <div className="font-semibold">Investigation Findings</div>
+                          <div className="mt-1 min-h-[40px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.investigationFindings) || ""}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-semibold">Root Cause</div>
+                          <div className="mt-1 min-h-[40px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.rootCause) || ""}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-semibold">Witness Notes</div>
+                          <div className="mt-1 min-h-[40px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.witnessNotes) || ""}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-semibold">Corrective Actions</div>
+                          <div className="mt-1 min-h-[40px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.correctiveActions) || ""}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-semibold">Recommendation</div>
+                          <div className="mt-1 min-h-[40px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.recommendation) || ""}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <span className="font-semibold">Investigated By:</span>{" "}
+                            {sanitizeForDisplay(safeStr(d.investigatedByName))}
+                          </div>
+                          <div>
+                            <span className="font-semibold">Investigated At:</span>{" "}
+                            {sanitizeForDisplay(safeStr(d.investigatedAt))}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td className="border border-black p-2 align-top" colSpan={2}>
+                      <div className="font-semibold">Final Close Decision</div>
+                      <div className="mt-2 space-y-3 text-[12px]">
+                        <div>
+                          <div className="font-semibold">Final Decision</div>
+                          <div className="mt-1 min-h-[40px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.finalDecision) || ""}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-semibold">Final Summary</div>
+                          <div className="mt-1 min-h-[50px] whitespace-pre-wrap border border-black p-2">
+                            {safeStr(d.finalSummary) || ""}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <span className="font-semibold">Closed By:</span>{" "}
+                            {sanitizeForDisplay(safeStr(d.closedByName))}
+                          </div>
+                          <div>
+                            <span className="font-semibold">Closed At:</span>{" "}
+                            {sanitizeForDisplay(safeStr(d.closedAt))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span className="font-semibold">DSP Can View Outcome:</span>{" "}
+                          {d.allowDspViewOutcome ? "Yes" : "No"}
+                        </div>
                       </div>
                     </td>
                   </tr>

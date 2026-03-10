@@ -3,10 +3,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Status = "DRAFT" | "SUBMITTED" | "IN_REVIEW" | "CLOSED";
+type Status =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "IN_REVIEW"
+  | "ASSIGNED"
+  | "INVESTIGATED"
+  | "CLOSED";
 
 type HealthIncidentListItem = {
   id: string;
+
+  caseNumber?: string | null;
 
   date: string; // ISO (preferred)
   createdAt?: string; // ISO fallback
@@ -18,6 +26,8 @@ type HealthIncidentListItem = {
 
   staffId: string;
   staffName: string | null;
+
+  ciName?: string | null;
 
   // Optional: depends on your DB shape
   incidentType?: string | null;
@@ -47,6 +57,10 @@ function statusBadge(status: Status) {
       return "bg-bac-primary/80 text-white";
     case "IN_REVIEW":
       return "bg-yellow-600/80 text-white";
+    case "ASSIGNED":
+      return "bg-blue-700/80 text-white";
+    case "INVESTIGATED":
+      return "bg-violet-700/80 text-white";
     case "CLOSED":
       return "bg-emerald-700/80 text-white";
     default:
@@ -83,13 +97,17 @@ export default function HealthIncidentReportListPage() {
       if (params?.from) qs.set("from", params.from);
       if (params?.to) qs.set("to", params.to);
 
-      if (params?.staffId && params.staffId !== "ALL")
+      if (params?.staffId && params.staffId !== "ALL") {
         qs.set("staffId", params.staffId);
+      }
 
-      if (params?.individualId && params.individualId !== "ALL")
+      if (params?.individualId && params.individualId !== "ALL") {
         qs.set("individualId", params.individualId);
+      }
 
-      if (params?.status && params.status !== "ALL") qs.set("status", params.status);
+      if (params?.status && params.status !== "ALL") {
+        qs.set("status", params.status);
+      }
 
       const res = await fetch(
         `/api/reports/health-incident${qs.toString() ? `?${qs.toString()}` : ""}`,
@@ -108,7 +126,7 @@ export default function HealthIncidentReportListPage() {
     } catch (err: any) {
       console.error(err);
       setError(err?.message ?? "Failed to load Health & Incident reports");
-      setItems([]); // keep safe
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -118,7 +136,6 @@ export default function HealthIncidentReportListPage() {
     loadData();
   }, []);
 
-  // Build dropdown options from currently loaded items (same pattern as Daily Notes)
   const staffOptions: Option[] = useMemo(() => {
     const map = new Map<string, string>();
     for (const it of items) {
@@ -170,20 +187,22 @@ export default function HealthIncidentReportListPage() {
 
   return (
     <div className="px-6 py-6 space-y-6">
-      {/* TITLE */}
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-white">Health & Incident Report</h1>
+        <h1 className="text-2xl font-semibold text-white">
+          Health & Incident Report
+        </h1>
         <p className="text-sm text-slate-400">
-          View and search Health & Incident reports submitted from BAC Mobile.
+          View and search Health & Incident cases submitted from BAC Mobile.
         </p>
       </div>
 
-      {/* FILTER BAR */}
       <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-5">
             <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">DSP (Staff)</label>
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                DSP (Staff)
+              </label>
               <select
                 value={staffId}
                 onChange={(e) => setStaffId(e.target.value)}
@@ -198,7 +217,9 @@ export default function HealthIncidentReportListPage() {
             </div>
 
             <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">Individual</label>
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Individual
+              </label>
               <select
                 value={individualId}
                 onChange={(e) => setIndividualId(e.target.value)}
@@ -213,7 +234,9 @@ export default function HealthIncidentReportListPage() {
             </div>
 
             <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">Status</label>
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                Status
+              </label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as any)}
@@ -223,12 +246,16 @@ export default function HealthIncidentReportListPage() {
                 <option value="DRAFT">DRAFT</option>
                 <option value="SUBMITTED">SUBMITTED</option>
                 <option value="IN_REVIEW">IN_REVIEW</option>
+                <option value="ASSIGNED">ASSIGNED</option>
+                <option value="INVESTIGATED">INVESTIGATED</option>
                 <option value="CLOSED">CLOSED</option>
               </select>
             </div>
 
             <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">From date</label>
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                From date
+              </label>
               <input
                 type="date"
                 value={fromDate}
@@ -238,7 +265,9 @@ export default function HealthIncidentReportListPage() {
             </div>
 
             <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">To date</label>
+              <label className="mb-1 text-xs font-medium text-slate-300">
+                To date
+              </label>
               <input
                 type="date"
                 value={toDate}
@@ -263,15 +292,16 @@ export default function HealthIncidentReportListPage() {
         )}
       </div>
 
-      {/* TABLE */}
       <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950/90 shadow-lg shadow-black/40">
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse text-xs">
             <thead>
               <tr className="bg-slate-900/95 text-[11px] uppercase tracking-wide text-slate-200">
+                <th className="px-3 py-2 text-left">Case #</th>
                 <th className="px-3 py-2 text-left">Date</th>
                 <th className="px-3 py-2 text-left">Individual</th>
                 <th className="px-3 py-2 text-left">Staff</th>
+                <th className="px-3 py-2 text-left">CI</th>
                 <th className="px-3 py-2 text-left">Shift</th>
                 <th className="px-3 py-2 text-left">Incident Type</th>
                 <th className="px-3 py-2 text-left">Status</th>
@@ -281,7 +311,7 @@ export default function HealthIncidentReportListPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-4 text-center text-slate-300">
+                  <td colSpan={8} className="px-3 py-4 text-center text-slate-300">
                     Loading...
                   </td>
                 </tr>
@@ -289,7 +319,7 @@ export default function HealthIncidentReportListPage() {
 
               {!loading && items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-4 text-center text-slate-400">
+                  <td colSpan={8} className="px-3 py-4 text-center text-slate-400">
                     No data.
                   </td>
                 </tr>
@@ -301,8 +331,12 @@ export default function HealthIncidentReportListPage() {
                     key={it.id}
                     onClick={() => openDetail(it.id)}
                     className="cursor-pointer border-t border-slate-800 odd:bg-slate-950 even:bg-slate-900/70 hover:bg-slate-800/70"
-                    title="Click to open report"
+                    title="Click to open case detail"
                   >
+                    <td className="px-3 py-2 text-slate-100 whitespace-nowrap font-semibold">
+                      {safeStr(it.caseNumber) || "—"}
+                    </td>
+
                     <td className="px-3 py-2 text-slate-100 whitespace-nowrap">
                       {displayDate(it)}
                     </td>
@@ -313,6 +347,10 @@ export default function HealthIncidentReportListPage() {
 
                     <td className="px-3 py-2 text-[13px] font-medium text-slate-100">
                       {it.staffName ?? "—"}
+                    </td>
+
+                    <td className="px-3 py-2 text-slate-100">
+                      {safeStr(it.ciName) || "—"}
                     </td>
 
                     <td className="px-3 py-2 text-slate-100 whitespace-nowrap">
