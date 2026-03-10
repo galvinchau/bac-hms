@@ -171,7 +171,7 @@ Employee ID: ${employee.employeeId}
 Login email: ${to}
 
 Download Blue Angels Care Mobile App:
-- iPhone (iOS – TestFlight): ${iosDownloadUrl}
+- iPhone (iOS – Apple Store): ${iosDownloadUrl}
 - Android (Google Play): ${androidDownloadUrl}
 
 How to Log In (OTP):
