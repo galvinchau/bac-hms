@@ -953,149 +953,165 @@ export default function HealthIncidentReportDetailPage() {
       </div>
 
       {canSupervisorReview && (
-        <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
-          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-white">Assign CI</div>
-              <div className="mt-1 text-xs text-slate-400">
-                Assign a CI (Incident Coordinator) for investigation/follow-up.
-                {showCiAssignedAt ? (
-                  <span className="ml-2 text-slate-300">
-                    Current assigned at:{" "}
-                    <span className="font-semibold">{showCiAssignedAt}</span>
-                    {d.ciAssignedByName ? (
-                      <>
-                        {" "}
-                        by{" "}
-                        <span className="font-semibold">
-                          {sanitizeForDisplay(d.ciAssignedByName)}
-                        </span>
-                      </>
-                    ) : null}
-                  </span>
-                ) : null}
+        <div className="mb-6 rounded-xl border border-yellow-500/70 bg-yellow-950/10 p-4 shadow-md shadow-black/40 print:hidden">
+          <div className="mb-4 border-b border-yellow-500/30 pb-3">
+            <div className="text-base font-semibold text-yellow-300">
+              Supervisor Initial Review & CI Assignment
+            </div>
+            <div className="mt-1 text-xs text-yellow-200">
+              Supervisor reviews the report submitted by DSP, records the
+              initial review, and then determines whether to close the case
+              directly or assign a Certified Investigator (CI) for further
+              investigation.
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-yellow-500/40 bg-slate-900/60 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-yellow-300">
+                  Supervisor Review
+                </div>
+                <div className="mt-1 text-xs text-yellow-200">
+                  Initial review by supervisor. Set status, add decision, and
+                  actions taken before assigning CI or closing the case.
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <select
+                  value={supStatus}
+                  onChange={(e) => setSupStatus(e.target.value as Status)}
+                  className="h-10 rounded-lg border border-yellow-500/60 bg-slate-950 px-3 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                >
+                  <option value="IN_REVIEW">IN_REVIEW</option>
+                  <option value="ASSIGNED">ASSIGNED</option>
+                  <option value="INVESTIGATED">INVESTIGATED</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+
+                <button
+                  disabled={savingReview}
+                  onClick={() => saveSupervisorReview()}
+                  className="inline-flex h-10 items-center justify-center rounded-lg bg-yellow-500 px-6 text-sm font-bold text-black shadow hover:bg-yellow-400 disabled:opacity-60"
+                >
+                  {savingReview ? "Saving..." : "Save"}
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                disabled={assigningCI}
-                onClick={assignCI}
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-yellow-600 px-6 text-sm font-medium text-white shadow hover:bg-yellow-600/90 disabled:opacity-60"
-                title="Assign CI and set status ASSIGNED"
-              >
-                {assigningCI ? "Assigning..." : "Assign CI"}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                CI Name
-              </label>
-              <input
-                value={ciName}
-                onChange={(e) => setCiName(e.target.value)}
-                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="CI name..."
-              />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                CI Email
-              </label>
-              <input
-                value={ciEmail}
-                onChange={(e) => setCiEmail(e.target.value)}
-                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="ci@email.com"
-              />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                CI Phone
-              </label>
-              <input
-                value={ciPhone}
-                onChange={(e) => setCiPhone(e.target.value)}
-                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="(xxx) xxx-xxxx"
-              />
-            </div>
-          </div>
-
-          {assignMsg && (
-            <div className="mt-3 text-xs text-slate-200">{assignMsg}</div>
-          )}
-        </div>
-      )}
-
-      {canSupervisorReview && (
-        <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-white">
-                Supervisor Review
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="flex flex-col">
+                <label className="mb-1 text-xs font-semibold text-yellow-300">
+                  Supervisor Decision
+                </label>
+                <textarea
+                  value={supDecision}
+                  onChange={(e) => setSupDecision(e.target.value)}
+                  className="min-h-[90px] rounded-lg border border-yellow-500/60 bg-slate-950 px-3 py-2 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                  placeholder="Decision / determination..."
+                />
               </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Set status, add decision & actions taken.
+
+              <div className="flex flex-col">
+                <label className="mb-1 text-xs font-semibold text-yellow-300">
+                  Actions Taken
+                </label>
+                <textarea
+                  value={supActions}
+                  onChange={(e) => setSupActions(e.target.value)}
+                  className="min-h-[90px] rounded-lg border border-yellow-500/60 bg-slate-950 px-3 py-2 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                  placeholder="Actions / follow-up..."
+                />
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <select
-                value={supStatus}
-                onChange={(e) => setSupStatus(e.target.value as Status)}
-                className="h-10 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-              >
-                <option value="IN_REVIEW">IN_REVIEW</option>
-                <option value="ASSIGNED">ASSIGNED</option>
-                <option value="INVESTIGATED">INVESTIGATED</option>
-                <option value="CLOSED">CLOSED</option>
-              </select>
-
-              <button
-                disabled={savingReview}
-                onClick={() => saveSupervisorReview()}
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-bac-primary px-6 text-sm font-medium text-white shadow hover:bg-bac-primary/90 disabled:opacity-60"
-              >
-                {savingReview ? "Saving..." : "Save"}
-              </button>
-            </div>
+            {saveMsg && (
+              <div className="mt-3 text-xs text-yellow-200">{saveMsg}</div>
+            )}
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                Supervisor Decision
-              </label>
-              <textarea
-                value={supDecision}
-                onChange={(e) => setSupDecision(e.target.value)}
-                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="Decision / determination..."
-              />
+          <div className="mt-4 rounded-xl border border-yellow-500/40 bg-slate-900/60 p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-yellow-300">
+                  Assign CI
+                </div>
+                <div className="mt-1 text-xs text-yellow-200">
+                  Assign a Certified Investigator (CI) for
+                  investigation/follow-up after the initial supervisor review.
+                  {showCiAssignedAt ? (
+                    <span className="ml-2 text-yellow-100">
+                      Current assigned at:{" "}
+                      <span className="font-semibold">{showCiAssignedAt}</span>
+                      {d.ciAssignedByName ? (
+                        <>
+                          {" "}
+                          by{" "}
+                          <span className="font-semibold">
+                            {sanitizeForDisplay(d.ciAssignedByName)}
+                          </span>
+                        </>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  disabled={assigningCI}
+                  onClick={assignCI}
+                  className="inline-flex h-10 items-center justify-center rounded-lg bg-yellow-500 px-6 text-sm font-bold text-black shadow hover:bg-yellow-400 disabled:opacity-60"
+                  title="Assign CI and set status ASSIGNED"
+                >
+                  {assigningCI ? "Assigning..." : "Assign CI"}
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                Actions Taken
-              </label>
-              <textarea
-                value={supActions}
-                onChange={(e) => setSupActions(e.target.value)}
-                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="Actions / follow-up..."
-              />
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="flex flex-col">
+                <label className="mb-1 text-xs font-semibold text-yellow-300">
+                  CI Name
+                </label>
+                <input
+                  value={ciName}
+                  onChange={(e) => setCiName(e.target.value)}
+                  className="h-10 rounded-lg border border-yellow-500/60 bg-slate-950 px-3 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                  placeholder="CI name..."
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="mb-1 text-xs font-semibold text-yellow-300">
+                  CI Email
+                </label>
+                <input
+                  value={ciEmail}
+                  onChange={(e) => setCiEmail(e.target.value)}
+                  className="h-10 rounded-lg border border-yellow-500/60 bg-slate-950 px-3 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                  placeholder="ci@email.com"
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="mb-1 text-xs font-semibold text-yellow-300">
+                  CI Phone
+                </label>
+                <input
+                  value={ciPhone}
+                  onChange={(e) => setCiPhone(e.target.value)}
+                  className="h-10 rounded-lg border border-yellow-500/60 bg-slate-950 px-3 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                  placeholder="(xxx) xxx-xxxx"
+                />
+              </div>
             </div>
+
+            {assignMsg && (
+              <div className="mt-3 text-xs text-yellow-200">{assignMsg}</div>
+            )}
           </div>
-
-          {saveMsg && (
-            <div className="mt-3 text-xs text-slate-200">{saveMsg}</div>
-          )}
         </div>
       )}
 
@@ -1225,77 +1241,6 @@ export default function HealthIncidentReportDetailPage() {
           <div className="mt-3 text-xs text-slate-200">{investigationMsg}</div>
         )}
       </div>
-
-      {canSupervisorReview && (
-        <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
-          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-white">
-                Final Close Decision
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Final supervisor decision and close-case summary.
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                disabled={closingCase}
-                onClick={closeCase}
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-700 px-6 text-sm font-medium text-white shadow hover:bg-emerald-700/90 disabled:opacity-60"
-              >
-                {closingCase ? "Closing..." : "Close Case"}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                Final Decision
-              </label>
-              <textarea
-                value={finalDecision}
-                onChange={(e) => setFinalDecision(e.target.value)}
-                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="Final decision..."
-              />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="mb-1 text-xs font-medium text-slate-300">
-                Final Summary
-              </label>
-              <textarea
-                value={finalSummary}
-                onChange={(e) => setFinalSummary(e.target.value)}
-                className="min-h-[90px] rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-bac-primary focus:ring-1 focus:ring-bac-primary"
-                placeholder="Final summary..."
-              />
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-3">
-            <input
-              id="allowDspViewOutcome"
-              type="checkbox"
-              checked={allowDspViewOutcome}
-              onChange={(e) => setAllowDspViewOutcome(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-bac-primary focus:ring-bac-primary"
-            />
-            <label
-              htmlFor="allowDspViewOutcome"
-              className="text-sm text-slate-200"
-            >
-              Allow DSP to view case outcome
-            </label>
-          </div>
-
-          {closeMsg && (
-            <div className="mt-3 text-xs text-slate-200">{closeMsg}</div>
-          )}
-        </div>
-      )}
 
       <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-md shadow-black/40 print:hidden">
         <div className="text-sm font-semibold text-white">Attachments</div>
@@ -1526,6 +1471,77 @@ export default function HealthIncidentReportDetailPage() {
             ))}
         </div>
       </div>
+
+      {canSupervisorReview && (
+        <div className="mb-6 rounded-xl border border-yellow-500/70 bg-yellow-950/10 p-4 shadow-md shadow-black/40 print:hidden">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-yellow-300">
+                Final Decision of Administrator
+              </div>
+              <div className="mt-1 text-xs text-yellow-200">
+                Final administrator decision and close-case summary.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                disabled={closingCase}
+                onClick={closeCase}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-yellow-500 px-6 text-sm font-bold text-black shadow hover:bg-yellow-400 disabled:opacity-60"
+              >
+                {closingCase ? "Closing..." : "Close Case"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-semibold text-yellow-300">
+                Final Decision
+              </label>
+              <textarea
+                value={finalDecision}
+                onChange={(e) => setFinalDecision(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-yellow-500/70 bg-slate-950 px-3 py-2 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                placeholder="Final decision..."
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="mb-1 text-xs font-semibold text-yellow-300">
+                Final Summary
+              </label>
+              <textarea
+                value={finalSummary}
+                onChange={(e) => setFinalSummary(e.target.value)}
+                className="min-h-[90px] rounded-lg border border-yellow-500/70 bg-slate-950 px-3 py-2 text-sm font-semibold text-yellow-200 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+                placeholder="Final summary..."
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              id="allowDspViewOutcome"
+              type="checkbox"
+              checked={allowDspViewOutcome}
+              onChange={(e) => setAllowDspViewOutcome(e.target.checked)}
+              className="h-4 w-4 rounded border-yellow-500 bg-slate-950 text-yellow-400 focus:ring-yellow-400"
+            />
+            <label
+              htmlFor="allowDspViewOutcome"
+              className="text-sm font-semibold text-yellow-200"
+            >
+              Allow DSP to view case outcome
+            </label>
+          </div>
+
+          {closeMsg && (
+            <div className="mt-3 text-xs text-yellow-200">{closeMsg}</div>
+          )}
+        </div>
+      )}
 
       <div className="hi-print-root">
         <div className="mx-auto max-w-[900px] space-y-6">
@@ -1826,7 +1842,7 @@ export default function HealthIncidentReportDetailPage() {
 
                   <tr>
                     <td className="border border-black p-2 align-top" colSpan={2}>
-                      <div className="font-semibold">Final Close Decision</div>
+                      <div className="font-semibold">Final Decision of Administrator</div>
                       <div className="mt-2 space-y-3 text-[12px]">
                         <div>
                           <div className="font-semibold">Final Decision</div>
