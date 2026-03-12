@@ -689,6 +689,11 @@ model MedicationOrder {
 
   medicationName String  @map("medicationname")
   form           String? @map("form")
+
+  // NEW (Option B)
+  strengthText        String? @map("strengthtext")
+  doseAmount          Float?  @map("doseamount")
+
   doseValue      Float   @map("dosevalue")
   doseUnit       String  @map("doseunit")
   route          String? @map("route")
@@ -702,6 +707,13 @@ model MedicationOrder {
 
   startDate DateTime  @map("startdate")
   endDate   DateTime? @map("enddate")
+
+  // NEW (Option B)
+  daysSupply          Int?    @map("dayssupply")
+  refills             Int?    @map("refills")
+  directionsSig       String? @map("directionssig")
+  prnReason           String? @map("prnreason")
+  specialInstructions String? @map("specialinstructions")
 
   status MedicationOrderStatus @default(ACTIVE)
 
