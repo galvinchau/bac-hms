@@ -889,7 +889,7 @@ const AddOrderModal: React.FC<{
                   <option value="tsp">tsp</option>
                   <option value="Tbsp">Tbsp</option>
                   <option value="gm">gm</option>
-                  <option value="mea">mea</option>
+                  <option value="meq">meq</option>
                   <option value="other">other</option>
 
                 </select>
