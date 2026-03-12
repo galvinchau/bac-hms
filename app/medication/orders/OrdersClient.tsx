@@ -314,9 +314,8 @@ export default function OrdersClient() {
       if (selectedType !== "ALL" && o.type !== selectedType) return false;
       if (searchOrders.trim()) {
         const term = searchOrders.toLowerCase();
-        const blob = `${o.individualName} ${o.medicationName} ${o.route} ${
-          o.frequencyText ?? ""
-        } ${o.prescriber ?? ""}`.toLowerCase();
+        const blob = `${o.individualName} ${o.medicationName} ${o.route} ${o.frequencyText ?? ""
+          } ${o.prescriber ?? ""}`.toLowerCase();
         if (!blob.includes(term)) return false;
       }
       return true;
@@ -575,11 +574,10 @@ export default function OrdersClient() {
                         </td>
                         <td className="px-4 py-3 align-top text-sm text-bac-text">
                           {o.type === "SCHEDULED"
-                            ? `${o.frequencyText ?? ""} ${
-                                o.timesOfDay?.length
-                                  ? "– " + [...o.timesOfDay].sort().join(", ")
-                                  : ""
-                              }`
+                            ? `${o.frequencyText ?? ""} ${o.timesOfDay?.length
+                              ? "– " + [...o.timesOfDay].sort().join(", ")
+                              : ""
+                            }`
                             : "PRN"}
                         </td>
                         <td className="px-4 py-3 align-top text-sm text-bac-text">
@@ -752,303 +750,315 @@ const AddOrderModal: React.FC<{
   onClose,
   onCreate,
 }) => {
-  const [medicationName, setMedicationName] = useState("");
-  const [form, setForm] = useState("");
-  const [doseValue, setDoseValue] = useState<string>("");
-  const [doseUnit, setDoseUnit] = useState("mg");
-  const [route, setRoute] = useState("PO");
+    const [medicationName, setMedicationName] = useState("");
+    const [form, setForm] = useState("");
+    const [doseValue, setDoseValue] = useState<string>("");
+    const [doseUnit, setDoseUnit] = useState("mg");
+    const [route, setRoute] = useState("PO");
 
-  const [type, setType] = useState<MedicationType>("SCHEDULED");
-  const [frequencyText, setFrequencyText] = useState("");
-  const [timesText, setTimesText] = useState("08:00, 20:00");
+    const [type, setType] = useState<MedicationType>("SCHEDULED");
+    const [frequencyText, setFrequencyText] = useState("");
+    const [timesText, setTimesText] = useState("08:00, 20:00");
 
-  const [startDate, setStartDate] = useState<string>(defaultStartDate || "");
-  const [endDate, setEndDate] = useState<string>("");
+    const [startDate, setStartDate] = useState<string>(defaultStartDate || "");
+    const [endDate, setEndDate] = useState<string>("");
 
-  const [status, setStatus] = useState<MedicationStatus>("ACTIVE");
+    const [status, setStatus] = useState<MedicationStatus>("ACTIVE");
 
-  const [prescriberName, setPrescriberName] = useState("");
-  const [pharmacyName, setPharmacyName] = useState("");
-  const [indications, setIndications] = useState("");
-  const [allergyFlag, setAllergyFlag] = useState(false);
+    const [prescriberName, setPrescriberName] = useState("");
+    const [pharmacyName, setPharmacyName] = useState("");
+    const [indications, setIndications] = useState("");
+    const [allergyFlag, setAllergyFlag] = useState(false);
 
-  const canSubmit = useMemo(() => {
-    if (!medicationName.trim()) return false;
-    const dv = Number(doseValue);
-    if (!Number.isFinite(dv) || dv <= 0) return false;
-    if (!doseUnit.trim()) return false;
-    if (!startDate) return false;
-    return true;
-  }, [medicationName, doseValue, doseUnit, startDate]);
+    const canSubmit = useMemo(() => {
+      if (!medicationName.trim()) return false;
+      const dv = Number(doseValue);
+      if (!Number.isFinite(dv) || dv <= 0) return false;
+      if (!doseUnit.trim()) return false;
+      if (!startDate) return false;
+      return true;
+    }, [medicationName, doseValue, doseUnit, startDate]);
 
-  const submit = () => {
-    const dv = Number(doseValue);
-    const times = type === "SCHEDULED" ? toTimesArray(timesText) : [];
+    const submit = () => {
+      const dv = Number(doseValue);
+      const times = type === "SCHEDULED" ? toTimesArray(timesText) : [];
 
-    onCreate({
-      medicationName: medicationName.trim(),
-      form: form.trim() ? form.trim() : null,
-      doseValue: Number.isFinite(dv) ? dv : 0,
-      doseUnit: doseUnit.trim(),
-      route: route.trim() ? route.trim() : null,
-      type,
-      frequencyText: frequencyText.trim() ? frequencyText.trim() : null,
-      timesOfDay: times,
-      startDate,
-      endDate: endDate ? endDate : null,
-      prescriberName: prescriberName.trim() ? prescriberName.trim() : null,
-      pharmacyName: pharmacyName.trim() ? pharmacyName.trim() : null,
-      indications: indications.trim() ? indications.trim() : null,
-      allergyFlag,
-      status,
-    });
-  };
+      onCreate({
+        medicationName: medicationName.trim(),
+        form: form.trim() ? form.trim() : null,
+        doseValue: Number.isFinite(dv) ? dv : 0,
+        doseUnit: doseUnit.trim(),
+        route: route.trim() ? route.trim() : null,
+        type,
+        frequencyText: frequencyText.trim() ? frequencyText.trim() : null,
+        timesOfDay: times,
+        startDate,
+        endDate: endDate ? endDate : null,
+        prescriberName: prescriberName.trim() ? prescriberName.trim() : null,
+        pharmacyName: pharmacyName.trim() ? pharmacyName.trim() : null,
+        indications: indications.trim() ? indications.trim() : null,
+        allergyFlag,
+        status,
+      });
+    };
 
-  return (
-    <div className="fixed inset-0 z-50 flex">
-      <div
-        className="flex-1 bg-black/40"
-        onClick={() => !saving && onClose()}
-      />
-      <div className="h-full w-full max-w-lg border-l border-bac-border bg-bac-panel p-6 shadow-2xl">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-bac-text">Add order</h2>
-            <p className="mt-1 text-xs text-bac-muted">
-              Create a medication order for{" "}
-              <span className="text-bac-text">{individualName}</span>.
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-full border border-bac-border px-3 py-1 text-xs text-bac-muted hover:bg-bac-bg disabled:opacity-50"
-          >
-            Close
-          </button>
-        </div>
-
-        {error && (
-          <div className="mt-4 rounded-xl border border-bac-red/40 bg-bac-red/10 px-3 py-2 text-sm text-bac-red">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-5 space-y-4 text-sm">
-          <div className="grid gap-3 md:grid-cols-2">
+    return (
+      <div className="fixed inset-0 z-50 flex">
+        <div
+          className="flex-1 bg-black/40"
+          onClick={() => !saving && onClose()}
+        />
+        <div className="h-full w-full max-w-lg border-l border-bac-border bg-bac-panel p-6 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Medication name <span className="text-bac-red">*</span>
-              </label>
-              <input
-                value={medicationName}
-                onChange={(e) => setMedicationName(e.target.value)}
-                placeholder="e.g. Metformin"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
+              <h2 className="text-lg font-semibold text-bac-text">Add order</h2>
+              <p className="mt-1 text-xs text-bac-muted">
+                Create a medication order for{" "}
+                <span className="text-bac-text">{individualName}</span>.
+              </p>
             </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Form
-              </label>
-              <input
-                value={form}
-                onChange={(e) => setForm(e.target.value)}
-                placeholder="e.g. tablet"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="rounded-full border border-bac-border px-3 py-1 text-xs text-bac-muted hover:bg-bac-bg disabled:opacity-50"
+            >
+              Close
+            </button>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Dose value <span className="text-bac-red">*</span>
-              </label>
-              <input
-                value={doseValue}
-                onChange={(e) => setDoseValue(e.target.value)}
-                placeholder="e.g. 500"
-                inputMode="decimal"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
+          {error && (
+            <div className="mt-4 rounded-xl border border-bac-red/40 bg-bac-red/10 px-3 py-2 text-sm text-bac-red">
+              {error}
             </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Dose unit <span className="text-bac-red">*</span>
-              </label>
-              <input
-                value={doseUnit}
-                onChange={(e) => setDoseUnit(e.target.value)}
-                placeholder="mg"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Route
-              </label>
-              <input
-                value={route}
-                onChange={(e) => setRoute(e.target.value)}
-                placeholder="PO"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
-          </div>
+          )}
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Type
-              </label>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value as MedicationType)}
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              >
-                <option value="SCHEDULED">Scheduled</option>
-                <option value="PRN">PRN</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Status
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as MedicationStatus)}
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              >
-                <option value="ACTIVE">Active</option>
-                <option value="ON_HOLD">On hold</option>
-                <option value="DISCONTINUED">Discontinued</option>
-              </select>
-            </div>
-
-            <div className="flex items-end gap-2">
-              <label className="flex items-center gap-2 text-xs text-bac-text">
+          <div className="mt-5 space-y-4 text-sm">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Medication name <span className="text-bac-red">*</span>
+                </label>
                 <input
-                  type="checkbox"
-                  checked={allergyFlag}
-                  onChange={(e) => setAllergyFlag(e.target.checked)}
+                  value={medicationName}
+                  onChange={(e) => setMedicationName(e.target.value)}
+                  placeholder="e.g. Metformin"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
                 />
-                Allergy flag
-              </label>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Start date <span className="text-bac-red">*</span>
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                End date
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Frequency
-              </label>
-              <input
-                value={frequencyText}
-                onChange={(e) => setFrequencyText(e.target.value)}
-                placeholder="e.g. BID, TID, QHS, PRN"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Times of day (Scheduled)
-              </label>
-              <input
-                value={timesText}
-                onChange={(e) => setTimesText(e.target.value)}
-                disabled={type !== "SCHEDULED"}
-                placeholder="08:00, 20:00"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text disabled:opacity-50"
-              />
-              <div className="mt-1 text-[11px] text-bac-muted">
-                Use comma or new lines. Example: 08:00, 20:00
+              </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Form
+                </label>
+                <input
+                  value={form}
+                  onChange={(e) => setForm(e.target.value)}
+                  placeholder="e.g. tablet"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
               </div>
             </div>
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Dose value <span className="text-bac-red">*</span>
+                </label>
+                <input
+                  value={doseValue}
+                  onChange={(e) => setDoseValue(e.target.value)}
+                  placeholder="e.g. 500"
+                  inputMode="decimal"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Dose unit <span className="text-bac-red">*</span>
+                </label>
+                <select
+                  value={doseUnit}
+                  onChange={(e) => setDoseUnit(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                >
+                  <option value="mg">mg</option>
+                  <option value="mcg">mcg</option>
+                  <option value="units">units</option>
+                  <option value="drops">drops</option>
+                  <option value="sprays">sprays</option>
+                  <option value="ml">ml</option>
+                  <option value="tsp">tsp</option>
+                  <option value="Tbsp">Tbsp</option>
+                  <option value="gm">gm</option>
+                  <option value="mea">mea</option>
+                  <option value="other">other</option>
+
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Route
+                </label>
+                <input
+                  value={route}
+                  onChange={(e) => setRoute(e.target.value)}
+                  placeholder="PO"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Type
+                </label>
+                <select
+                  value={type}
+                  onChange={(e) => setType(e.target.value as MedicationType)}
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                >
+                  <option value="SCHEDULED">Scheduled</option>
+                  <option value="PRN">PRN</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Status
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as MedicationStatus)}
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                >
+                  <option value="ACTIVE">Active</option>
+                  <option value="ON_HOLD">On hold</option>
+                  <option value="DISCONTINUED">Discontinued</option>
+                </select>
+              </div>
+
+              <div className="flex items-end gap-2">
+                <label className="flex items-center gap-2 text-xs text-bac-text">
+                  <input
+                    type="checkbox"
+                    checked={allergyFlag}
+                    onChange={(e) => setAllergyFlag(e.target.checked)}
+                  />
+                  Allergy flag
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Start date <span className="text-bac-red">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  End date
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Frequency
+                </label>
+                <input
+                  value={frequencyText}
+                  onChange={(e) => setFrequencyText(e.target.value)}
+                  placeholder="e.g. BID, TID, QHS, PRN"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Times of day (Scheduled)
+                </label>
+                <input
+                  value={timesText}
+                  onChange={(e) => setTimesText(e.target.value)}
+                  disabled={type !== "SCHEDULED"}
+                  placeholder="08:00, 20:00"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text disabled:opacity-50"
+                />
+                <div className="mt-1 text-[11px] text-bac-muted">
+                  Use comma or new lines. Example: 08:00, 20:00
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Prescriber
+                </label>
+                <input
+                  value={prescriberName}
+                  onChange={(e) => setPrescriberName(e.target.value)}
+                  placeholder="e.g. Dr. Smith"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                  Pharmacy
+                </label>
+                <input
+                  value={pharmacyName}
+                  onChange={(e) => setPharmacyName(e.target.value)}
+                  placeholder="e.g. CVS"
+                  className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Prescriber
+                Indications / Notes
               </label>
-              <input
-                value={prescriberName}
-                onChange={(e) => setPrescriberName(e.target.value)}
-                placeholder="e.g. Dr. Smith"
+              <textarea
+                value={indications}
+                onChange={(e) => setIndications(e.target.value)}
+                rows={3}
+                placeholder="Reason for medication, special notes..."
                 className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
               />
             </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-                Pharmacy
-              </label>
-              <input
-                value={pharmacyName}
-                onChange={(e) => setPharmacyName(e.target.value)}
-                placeholder="e.g. CVS"
-                className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-              />
-            </div>
           </div>
 
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-bac-muted">
-              Indications / Notes
-            </label>
-            <textarea
-              value={indications}
-              onChange={(e) => setIndications(e.target.value)}
-              rows={3}
-              placeholder="Reason for medication, special notes..."
-              className="mt-1 w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-            />
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="rounded-xl border border-bac-border px-4 py-2 text-xs font-medium text-bac-muted hover:bg-bac-bg disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={!canSubmit || saving}
+              className="rounded-xl bg-bac-primary px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Creating..." : "Create order"}
+            </button>
           </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-xl border border-bac-border px-4 py-2 text-xs font-medium text-bac-muted hover:bg-bac-bg disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={!canSubmit || saving}
-            className="rounded-xl bg-bac-primary px-4 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {saving ? "Creating..." : "Create order"}
-          </button>
         </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
