@@ -11,6 +11,7 @@ type MedicationType = "SCHEDULED" | "PRN";
 
 interface MedicationOrder {
   id: string;
+  orderNumber?: string;
   individualId: string;
   individualName: string;
   medicationName: string;
@@ -78,6 +79,7 @@ interface OrderFormPayload {
 const mockOrders: MedicationOrder[] = [
   {
     id: "order-1",
+    orderNumber: "MO-2026-000001",
     individualId: "IND-001",
     individualName: "John Smith",
     medicationName: "Metformin",
@@ -103,6 +105,7 @@ const mockOrders: MedicationOrder[] = [
   },
   {
     id: "order-2",
+    orderNumber: "MO-2026-000002",
     individualId: "IND-001",
     individualName: "John Smith",
     medicationName: "Atorvastatin",
@@ -128,6 +131,7 @@ const mockOrders: MedicationOrder[] = [
   },
   {
     id: "order-3",
+    orderNumber: "MO-2026-000003",
     individualId: "IND-001",
     individualName: "John Smith",
     medicationName: "Lorazepam",
@@ -249,6 +253,11 @@ function toTimesArray(input: string): string[] {
 function monthToStartDate(monthValue: string): string {
   if (!monthValue || !/^\d{4}-\d{2}$/.test(monthValue)) return "";
   return `${monthValue}-01`;
+}
+
+function openOrderPrintPage(orderId: string) {
+  if (!orderId) return;
+  window.open(`/medication/orders/print/${orderId}`, "_blank", "noopener,noreferrer");
 }
 
 /* ================================
@@ -406,6 +415,7 @@ export default function OrdersClient() {
       const list = Array.isArray(data?.orders) ? data.orders : [];
       const mapped: MedicationOrder[] = list.map((o: any) => ({
         id: o.id,
+        orderNumber: o.orderNumber ?? undefined,
         individualId: o.individualId,
         individualName: selectedIndividualName || "Individual",
         medicationName: o.medicationName,
@@ -464,7 +474,7 @@ export default function OrdersClient() {
       if (selectedType !== "ALL" && o.type !== selectedType) return false;
       if (searchOrders.trim()) {
         const term = searchOrders.toLowerCase();
-        const blob = `${o.individualName} ${o.medicationName} ${o.route} ${
+        const blob = `${o.orderNumber ?? ""} ${o.individualName} ${o.medicationName} ${o.route} ${
           o.frequencyText ?? ""
         } ${o.prescriber ?? ""} ${o.form ?? ""} ${o.strengthText ?? ""} ${
           o.specialInstructions ?? ""
@@ -752,7 +762,7 @@ export default function OrdersClient() {
                 <div className="mt-1 flex gap-2">
                   <input
                     className="flex-1 rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text"
-                    placeholder="Search by medication, prescriber..."
+                    placeholder="Search by order #, medication, prescriber..."
                     value={searchOrders}
                     onChange={(e) => setSearchOrders(e.target.value)}
                   />
@@ -777,6 +787,7 @@ export default function OrdersClient() {
               <table className="min-w-full text-left text-sm">
                 <thead className="sticky top-0 bg-bac-panel/95 backdrop-blur">
                   <tr className="border-b border-bac-border text-xs uppercase tracking-wide text-bac-muted">
+                    <th className="px-4 py-3">Order #</th>
                     <th className="px-4 py-3">Medication</th>
                     <th className="px-4 py-3">Route</th>
                     <th className="px-4 py-3">Type</th>
@@ -784,13 +795,14 @@ export default function OrdersClient() {
                     <th className="px-4 py-3">Instruction</th>
                     <th className="px-4 py-3">Start / End</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Print</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOrders.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={9}
                         className="px-4 py-6 text-center text-sm text-bac-muted"
                       >
                         No medication orders found.
@@ -815,6 +827,11 @@ export default function OrdersClient() {
                               : "hover:bg-bac-bg/40"
                           }`}
                         >
+                          <td className="px-4 py-3 align-top text-sm text-bac-text">
+                            <div className="font-medium text-bac-text">
+                              {o.orderNumber || "—"}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 align-top">
                             <div className="font-medium text-bac-text">
                               {o.medicationName}{" "}
@@ -858,6 +875,18 @@ export default function OrdersClient() {
                           <td className="px-4 py-3 align-top">
                             <OrderStatusBadge status={o.status} />
                           </td>
+                          <td className="px-4 py-3 align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openOrderPrintPage(o.id);
+                              }}
+                              className="rounded-xl border border-bac-border px-3 py-1.5 text-xs font-medium text-bac-text hover:bg-bac-bg"
+                            >
+                              Print
+                            </button>
+                          </td>
                         </tr>
                       );
                     })
@@ -881,6 +910,13 @@ export default function OrdersClient() {
               </div>
               {selectedOrder && (
                 <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openOrderPrintPage(selectedOrder.id)}
+                    className="rounded-xl border border-bac-border px-3 py-2 text-xs font-medium text-bac-text hover:bg-bac-bg"
+                  >
+                    Print order
+                  </button>
                   <button
                     type="button"
                     onClick={openEditOrder}
@@ -908,6 +944,15 @@ export default function OrdersClient() {
 
             {selectedOrder ? (
               <div className="mt-4 space-y-3 text-sm">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-bac-muted">
+                    Order number
+                  </div>
+                  <div className="mt-1 font-medium text-bac-text">
+                    {selectedOrder.orderNumber || "—"}
+                  </div>
+                </div>
+
                 <div>
                   <div className="text-xs font-medium uppercase tracking-wide text-bac-muted">
                     Medication

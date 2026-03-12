@@ -683,6 +683,9 @@ enum MedicationIncidentStatus {
 model MedicationOrder {
   id String @id @default(cuid())
 
+  // NEW: hospital-style order number
+  orderNumber String? @unique @map("ordernumber")
+
   // DB column: individualid
   individualId String     @map("individualid")
   individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
@@ -691,12 +694,12 @@ model MedicationOrder {
   form           String? @map("form")
 
   // NEW (Option B)
-  strengthText        String? @map("strengthtext")
-  doseAmount          Float?  @map("doseamount")
+  strengthText String? @map("strengthtext")
+  doseAmount   Float?  @map("doseamount")
 
-  doseValue      Float   @map("dosevalue")
-  doseUnit       String  @map("doseunit")
-  route          String? @map("route")
+  doseValue Float  @map("dosevalue")
+  doseUnit  String @map("doseunit")
+  route     String? @map("route")
 
   type MedicationType
 
@@ -729,6 +732,7 @@ model MedicationOrder {
   inventories     MedicationInventory[]
 
   @@index([individualId])
+  @@index([orderNumber])
   @@map("MedicationOrder")
 }
 
@@ -798,13 +802,13 @@ model MedicationIncident {
   individualId String     @map("individualid")
   individual   Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
 
-  individualName String                     @map("individualname")
-  date           DateTime                   @map("date")
-  medicationName String?                    @map("medicationname")
-  type           String                     @map("type")
+  individualName String                   @map("individualname")
+  date           DateTime                 @map("date")
+  medicationName String?                  @map("medicationname")
+  type           String                   @map("type")
   severity       MedicationIncidentSeverity
-  status         MedicationIncidentStatus   @default(OPEN)
-  notes          String?                    @map("notes")
+  status         MedicationIncidentStatus @default(OPEN)
+  notes          String?                  @map("notes")
 
   createdAt DateTime @default(now()) @map("createdat")
   updatedAt DateTime @updatedAt @map("updatedat")

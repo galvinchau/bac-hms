@@ -13,6 +13,13 @@ function isMissingTableError(err: any) {
   );
 }
 
+function isUniqueConstraintError(err: any) {
+  if (!err) return false;
+  if (err?.code === "P2002") return true; // Prisma: unique constraint failed
+  const msg = String(err?.message || err).toLowerCase();
+  return msg.includes("unique") || msg.includes("constraint");
+}
+
 function toNullableString(value: unknown): string | null {
   if (value == null) return null;
   const s = String(value).trim();
@@ -29,6 +36,41 @@ function toNullableInt(value: unknown): number | null {
   if (value == null || value === "") return null;
   const n = Number(value);
   return Number.isInteger(n) ? n : null;
+}
+
+function padOrderSequence(n: number): string {
+  return String(n).padStart(6, "0");
+}
+
+function extractOrderSequence(orderNumber: string | null | undefined): number {
+  if (!orderNumber) return 0;
+  const match = /^MO-(\d{4})-(\d{6})$/i.exec(String(orderNumber).trim());
+  if (!match) return 0;
+  return Number(match[2] || 0);
+}
+
+async function generateNextMedicationOrderNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `MO-${year}-`;
+
+  const lastOrder = await prisma.medicationOrder.findFirst({
+    where: {
+      orderNumber: {
+        startsWith: prefix,
+      },
+    },
+    orderBy: {
+      orderNumber: "desc",
+    },
+    select: {
+      orderNumber: true,
+    },
+  });
+
+  const lastSeq = extractOrderSequence(lastOrder?.orderNumber);
+  const nextSeq = lastSeq + 1;
+
+  return `${prefix}${padOrderSequence(nextSeq)}`;
 }
 
 //
@@ -174,33 +216,58 @@ export async function POST(req: Request) {
           .filter(Boolean)
       : [];
 
-    const newOrder = await prisma.medicationOrder.create({
-      data: {
-        individualId: String(individualId).trim(),
-        medicationName: String(medicationName).trim(),
-        form: toNullableString(form),
-        strengthText: toNullableString(strengthText),
-        doseAmount: parsedDoseAmount,
-        doseValue: parsedDoseValue,
-        doseUnit: String(doseUnit).trim(),
-        route: toNullableString(route),
-        type: type ?? "SCHEDULED",
-        frequencyText: toNullableString(frequencyText),
-        timesOfDay: normalizedTimesOfDay,
-        startDate: start,
-        endDate: end,
-        daysSupply: parsedDaysSupply,
-        refills: parsedRefills,
-        prescriberName: toNullableString(prescriberName),
-        pharmacyName: toNullableString(pharmacyName),
-        directionsSig: toNullableString(directionsSig),
-        prnReason: toNullableString(prnReason),
-        specialInstructions: toNullableString(specialInstructions),
-        indications: toNullableString(indications),
-        allergyFlag: Boolean(allergyFlag ?? false),
-        status: status ?? "ACTIVE",
-      },
-    });
+    let newOrder: any = null;
+    let lastCreateError: any = null;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const orderNumber = await generateNextMedicationOrderNumber();
+
+        newOrder = await prisma.medicationOrder.create({
+          data: {
+            orderNumber,
+            individualId: String(individualId).trim(),
+            medicationName: String(medicationName).trim(),
+            form: toNullableString(form),
+            strengthText: toNullableString(strengthText),
+            doseAmount: parsedDoseAmount,
+            doseValue: parsedDoseValue,
+            doseUnit: String(doseUnit).trim(),
+            route: toNullableString(route),
+            type: type ?? "SCHEDULED",
+            frequencyText: toNullableString(frequencyText),
+            timesOfDay: normalizedTimesOfDay,
+            startDate: start,
+            endDate: end,
+            daysSupply: parsedDaysSupply,
+            refills: parsedRefills,
+            prescriberName: toNullableString(prescriberName),
+            pharmacyName: toNullableString(pharmacyName),
+            directionsSig: toNullableString(directionsSig),
+            prnReason: toNullableString(prnReason),
+            specialInstructions: toNullableString(specialInstructions),
+            indications: toNullableString(indications),
+            allergyFlag: Boolean(allergyFlag ?? false),
+            status: status ?? "ACTIVE",
+          },
+        });
+
+        break;
+      } catch (err: any) {
+        lastCreateError = err;
+
+        // Nếu đụng unique orderNumber do tạo gần như cùng lúc, retry
+        if (isUniqueConstraintError(err) && attempt < 3) {
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    if (!newOrder) {
+      throw lastCreateError || new Error("Unable to create medication order.");
+    }
 
     return NextResponse.json({ order: newOrder }, { status: 201 });
   } catch (error: any) {
