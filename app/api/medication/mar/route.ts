@@ -1,11 +1,9 @@
 // web/app/api/medication/mar/route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 const TZ = "America/New_York";
-
-// ✅ Auto-generated rows: status MUST be null because enum has only GIVEN/REFUSED/MISSED/...
-const GENERATED_STATUS = null as any;
 
 /**
  * Parse YYYY-MM to { year, monthIndex0 }
@@ -226,7 +224,6 @@ async function generateAndFetchMar(individualId: string, month: string) {
     );
     if (!range) continue;
 
-    // dedupe times
     const timeSet = new Set<string>();
     for (const t of o.timesOfDay) {
       const norm = String(t || "").trim();
@@ -293,7 +290,8 @@ async function generateAndFetchMar(individualId: string, month: string) {
           individualId: x.individualId,
           scheduledDateTime: x.scheduledDateTime,
           actualDateTime: null,
-          status: GENERATED_STATUS, // ✅ null
+          // ✅ IMPORTANT: do NOT send status:null
+          // Let DB default handle status
           reason: null,
           vitalsSummary: null,
           staffId: null,
@@ -302,25 +300,26 @@ async function generateAndFetchMar(individualId: string, month: string) {
         skipDuplicates: true,
       });
     } catch (e) {
-      await prisma.$transaction(
-        toCreate.map((x) =>
-          prisma.medicationAdministration
-            .create({
-              data: {
-                orderId: x.orderId,
-                individualId: x.individualId,
-                scheduledDateTime: x.scheduledDateTime,
-                actualDateTime: null,
-                status: GENERATED_STATUS, // ✅ null
-                reason: null,
-                vitalsSummary: null,
-                staffId: null,
-                staffName: null,
-              },
-            })
-            .catch(() => null),
-        ),
-      );
+      for (const x of toCreate) {
+        try {
+          await prisma.medicationAdministration.create({
+            data: {
+              orderId: x.orderId,
+              individualId: x.individualId,
+              scheduledDateTime: x.scheduledDateTime,
+              actualDateTime: null,
+              // ✅ IMPORTANT: do NOT send status:null
+              // Let DB default handle status
+              reason: null,
+              vitalsSummary: null,
+              staffId: null,
+              staffName: null,
+            },
+          });
+        } catch {
+          // ignore duplicate / single-row create failures
+        }
+      }
     }
   }
 
