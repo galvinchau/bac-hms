@@ -834,7 +834,8 @@ export default function VisitedMaintenancePage() {
   }, [rows]);
 
   const allSummary = useMemo(() => {
-    const base = rowsData;
+    const base = rows;
+    
     return {
       all: base.length,
       needsReview: base.filter((r) => getVisitMeta(r).needsReview).length,
@@ -843,7 +844,7 @@ export default function VisitedMaintenancePage() {
       canceled: base.filter((r) => r.status === "CANCELED").length,
       open: base.filter((r) => r.status === "OPEN").length,
     };
-  }, [rowsData]);
+  }, [rows]);
 
   const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
   const selectedVisibleCount = selectedIds.filter((id) => visibleIds.includes(id)).length;
@@ -912,10 +913,10 @@ export default function VisitedMaintenancePage() {
       prev.map((row) =>
         row.id === inlineFixId
           ? {
-              ...row,
-              checkIn: fixCheckIn || null,
-              checkOut: fixCheckOut || null,
-            }
+            ...row,
+            checkIn: fixCheckIn || null,
+            checkOut: fixCheckOut || null,
+          }
           : row
       )
     );
