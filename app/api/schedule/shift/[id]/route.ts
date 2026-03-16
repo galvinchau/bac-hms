@@ -70,6 +70,7 @@ export async function PUT(req: Request, context: any) {
     if (plannedEnd) data.plannedEnd = new Date(plannedEnd);
 
     // ===== AUTO STATUS ƯU TIÊN THEO CHECK IN / OUT =====
+    
     let autoStatus: string | undefined;
     if (checkInAt && checkOutAt) {
       autoStatus = "COMPLETED";
