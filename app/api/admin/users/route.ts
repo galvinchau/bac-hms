@@ -136,13 +136,22 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ Send welcome email (do not block creation if SMTP fails)
-    sendHmsWelcomeEmail({
-      email: normalizedEmail,
-      firstName,
-      lastName,
-      tempPassword,
-    }).catch((e) => console.error("[mail] HMS welcome email error:", e));
+    // ✅ Send welcome email
+    // IMPORTANT for Vercel/Next.js route handlers:
+    // await the mail send before returning response,
+    // otherwise the runtime may finish before email is actually sent.
+    try {
+      await sendHmsWelcomeEmail({
+        email: normalizedEmail,
+        firstName,
+        lastName,
+        tempPassword,
+      });
+      console.log("[mail] HMS welcome email sent successfully to:", normalizedEmail);
+    } catch (e) {
+      console.error("[mail] HMS welcome email error:", e);
+      // Do not fail user creation if email sending fails
+    }
 
     return NextResponse.json({ success: true, id: user.id });
   } catch (err) {
