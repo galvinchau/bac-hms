@@ -323,7 +323,7 @@ model Service {
 model Authorization {
   id String @id @default(cuid())
 
-  authorizationNumber String @unique
+  authorizationNumber String
 
   individualId String
   serviceId    String
@@ -365,9 +365,11 @@ model Authorization {
   individual Individual @relation(fields: [individualId], references: [id], onDelete: Cascade)
   service    Service    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
+  @@unique([individualId, authorizationNumber, serviceId])
   @@index([individualId, startDate])
   @@index([serviceId, startDate])
   @@index([status])
+  @@index([authorizationNumber])
 }
 
 // =====================================================

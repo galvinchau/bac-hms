@@ -4,13 +4,27 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type AuthStatus = "ACTIVE" | "PENDING" | "EXPIRED" | "SUSPENDED";
+type AuthPayer = "ODP" | "CHC" | "PRIVATE" | "OTHER";
+type AuthSource = "MANUAL" | "IMPORT";
+
+type ServiceLine = {
+  key: string;
+  serviceId: string;
+  eventCode: string;
+  format: string;
+  program: string;
+  modifier1: string;
+  modifier2: string;
+  modifier3: string;
+  modifier4: string;
+};
 
 type AuthRow = {
   id: string;
   authorizationNumber: string;
   individualId: string;
   individualName: string;
-  payer: "ODP" | "CHC" | "PRIVATE" | "OTHER";
+  payer: AuthPayer;
   program?: string | null;
   serviceId: string;
   serviceCode: string;
@@ -22,7 +36,7 @@ type AuthRow = {
   unitsRemaining: number;
   status: AuthStatus;
   notes?: string | null;
-  source: "MANUAL" | "IMPORT";
+  source: AuthSource;
   eventCode?: string | null;
   format?: string | null;
   modifier1?: string | null;
@@ -30,13 +44,17 @@ type AuthRow = {
   modifier3?: string | null;
   modifier4?: string | null;
   voided?: boolean;
+  intervalType?: string | null;
+  intervalLimit?: number | null;
+  intervalStart?: string | null;
+  intervalEnd?: string | null;
 };
 
 type AuthorizationApiItem = {
   id: string;
   authorizationNumber: string;
   individualId: string;
-  payer: "ODP" | "CHC" | "PRIVATE" | "OTHER";
+  payer: AuthPayer;
   program?: string | null;
   serviceId: string;
   serviceCode: string;
@@ -47,7 +65,7 @@ type AuthorizationApiItem = {
   used: number;
   remaining: number;
   status: AuthStatus;
-  source: "MANUAL" | "IMPORT";
+  source: AuthSource;
   comments?: string | null;
   eventCode?: string | null;
   format?: string | null;
@@ -56,6 +74,10 @@ type AuthorizationApiItem = {
   modifier3?: string | null;
   modifier4?: string | null;
   voided?: boolean;
+  intervalType?: string | null;
+  intervalLimit?: number | null;
+  intervalStart?: string | null;
+  intervalEnd?: string | null;
   individual?: {
     id: string;
     code: string;
@@ -160,6 +182,20 @@ function formatServiceLabel(service?: ServiceApiItem | null) {
 function formatDateOnly(value?: string | null) {
   if (!value) return "";
   return String(value).slice(0, 10);
+}
+
+function createEmptyServiceLine(defaultServiceId = ""): ServiceLine {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    serviceId: defaultServiceId,
+    eventCode: "NONE",
+    format: "Units",
+    program: "ID/A",
+    modifier1: "",
+    modifier2: "",
+    modifier3: "",
+    modifier4: "",
+  };
 }
 
 function Badge({
@@ -362,25 +398,20 @@ export default function AuthorizationsPage() {
   const [selected, setSelected] = useState<AuthRow | null>(null);
   const [openDetail, setOpenDetail] = useState(false);
   const [openNew, setOpenNew] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
 
   const [dbRows, setDbRows] = useState<AuthRow[]>([]);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
 
   const [newIndividual, setNewIndividual] = useState("");
-  const [newPayer, setNewPayer] =
-    useState<"ODP" | "CHC" | "PRIVATE" | "OTHER">("ODP");
+  const [newPayer, setNewPayer] = useState<AuthPayer>("ODP");
   const [newAuthorizationNumber, setNewAuthorizationNumber] = useState("");
   const [newStatus, setNewStatus] = useState<AuthStatus>("PENDING");
-  const [newSource, setNewSource] = useState<"MANUAL" | "IMPORT">("MANUAL");
-  const [newServiceId, setNewServiceId] = useState("");
-  const [newEventCode, setNewEventCode] = useState("NONE");
-  const [newFormat, setNewFormat] = useState("Units");
-  const [newProgram, setNewProgram] = useState("ID/A");
-  const [newModifier1, setNewModifier1] = useState("");
-  const [newModifier2, setNewModifier2] = useState("");
-  const [newModifier3, setNewModifier3] = useState("");
-  const [newModifier4, setNewModifier4] = useState("");
+  const [newSource, setNewSource] = useState<AuthSource>("MANUAL");
+  const [serviceLines, setServiceLines] = useState<ServiceLine[]>([
+    createEmptyServiceLine(""),
+  ]);
   const [newStartDate, setNewStartDate] = useState("2026-02-01");
   const [newEndDate, setNewEndDate] = useState("2026-04-30");
   const [newVoided, setNewVoided] = useState(false);
@@ -392,6 +423,32 @@ export default function AuthorizationsPage() {
   const [intervalStart, setIntervalStart] = useState("");
   const [intervalEnd, setIntervalEnd] = useState("");
   const [saveLoading, setSaveLoading] = useState(false);
+
+  const [editId, setEditId] = useState("");
+  const [editPayer, setEditPayer] = useState<AuthPayer>("ODP");
+  const [editAuthorizationNumber, setEditAuthorizationNumber] = useState("");
+  const [editStatus, setEditStatus] = useState<AuthStatus>("PENDING");
+  const [editSource, setEditSource] = useState<AuthSource>("MANUAL");
+  const [editServiceId, setEditServiceId] = useState("");
+  const [editEventCode, setEditEventCode] = useState("NONE");
+  const [editFormat, setEditFormat] = useState("Units");
+  const [editProgram, setEditProgram] = useState("ID/A");
+  const [editModifier1, setEditModifier1] = useState("");
+  const [editModifier2, setEditModifier2] = useState("");
+  const [editModifier3, setEditModifier3] = useState("");
+  const [editModifier4, setEditModifier4] = useState("");
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editVoided, setEditVoided] = useState(false);
+  const [editComments, setEditComments] = useState("");
+  const [editMaximum, setEditMaximum] = useState("0");
+  const [editHasIntervalLimit, setEditHasIntervalLimit] = useState(false);
+  const [editIntervalType, setEditIntervalType] = useState("Weekly");
+  const [editIntervalLimit, setEditIntervalLimit] = useState("10");
+  const [editIntervalStart, setEditIntervalStart] = useState("");
+  const [editIntervalEnd, setEditIntervalEnd] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [deleteLoadingId, setDeleteLoadingId] = useState("");
 
   const [individualSearch, setIndividualSearch] = useState("");
   const [individualOptions, setIndividualOptions] = useState<
@@ -455,6 +512,11 @@ export default function AuthorizationsPage() {
         modifier3: r.modifier3 ?? null,
         modifier4: r.modifier4 ?? null,
         voided: !!r.voided,
+        intervalType: r.intervalType ?? null,
+        intervalLimit:
+          typeof r.intervalLimit === "number" ? r.intervalLimit : null,
+        intervalStart: formatDateOnly(r.intervalStart),
+        intervalEnd: formatDateOnly(r.intervalEnd),
       }));
 
       setDbRows(mapped);
@@ -496,9 +558,13 @@ export default function AuthorizationsPage() {
 
         setServiceOptions(activeOnly);
 
-        if (!newServiceId && activeOnly.length > 0) {
-          setNewServiceId(activeOnly[0].id);
-        }
+        setServiceLines((prev) =>
+          prev.map((line, index) => ({
+            ...line,
+            serviceId:
+              line.serviceId || (index === 0 ? activeOnly[0]?.id ?? "" : ""),
+          })),
+        );
       } catch (err: any) {
         console.error("Load services error:", err);
         setServiceOptionsError("Failed to load services.");
@@ -508,12 +574,7 @@ export default function AuthorizationsPage() {
     }
 
     loadServices();
-  }, [newServiceId]);
-
-  const selectedService = useMemo(
-    () => serviceOptions.find((s) => s.id === newServiceId) ?? null,
-    [serviceOptions, newServiceId],
-  );
+  }, []);
 
   const rows = useMemo(() => {
     const qLower = q.trim().toLowerCase();
@@ -598,14 +659,7 @@ export default function AuthorizationsPage() {
     setNewAuthorizationNumber("");
     setNewStatus("PENDING");
     setNewSource("MANUAL");
-    setNewServiceId(serviceOptions[0]?.id ?? "");
-    setNewEventCode("NONE");
-    setNewFormat("Units");
-    setNewProgram("ID/A");
-    setNewModifier1("");
-    setNewModifier2("");
-    setNewModifier3("");
-    setNewModifier4("");
+    setServiceLines([createEmptyServiceLine(serviceOptions[0]?.id ?? "")]);
     setNewStartDate("2026-02-01");
     setNewEndDate("2026-04-30");
     setNewVoided(false);
@@ -742,6 +796,30 @@ export default function AuthorizationsPage() {
     setNewIndividual(individualSearch);
   };
 
+  const updateServiceLine = (
+    key: string,
+    field: keyof Omit<ServiceLine, "key">,
+    value: string,
+  ) => {
+    setServiceLines((prev) =>
+      prev.map((line) => (line.key === key ? { ...line, [field]: value } : line)),
+    );
+  };
+
+  const addServiceLine = () => {
+    setServiceLines((prev) => {
+      if (prev.length >= 5) return prev;
+      return [...prev, createEmptyServiceLine("")];
+    });
+  };
+
+  const removeServiceLine = (key: string) => {
+    setServiceLines((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((line) => line.key !== key);
+    });
+  };
+
   const handleSaveAuthorization = async () => {
     const maximum = Number(newMaximum);
 
@@ -755,13 +833,45 @@ export default function AuthorizationsPage() {
       return;
     }
 
-    if (!newServiceId) {
-      alert("Please select a Service.");
+    if (!Number.isFinite(maximum)) {
+      alert("Maximum must be a valid number.");
       return;
     }
 
-    if (!Number.isFinite(maximum)) {
-      alert("Maximum must be a valid number.");
+    const cleanedServices = serviceLines
+      .map((line) => ({
+        serviceId: line.serviceId.trim(),
+        eventCode: line.eventCode === "NONE" ? null : line.eventCode,
+        format: line.format.trim(),
+        program: line.program.trim() || null,
+        modifier1: line.modifier1.trim() || null,
+        modifier2: line.modifier2.trim() || null,
+        modifier3: line.modifier3.trim() || null,
+        modifier4: line.modifier4.trim() || null,
+      }))
+      .filter((line) => line.serviceId);
+
+    if (cleanedServices.length === 0) {
+      alert("Please add at least one Service line.");
+      return;
+    }
+
+    if (cleanedServices.length > 5) {
+      alert("You can add up to 5 Service lines only.");
+      return;
+    }
+
+    const duplicateIds = cleanedServices
+      .map((line) => line.serviceId)
+      .filter((id, idx, arr) => arr.indexOf(id) !== idx);
+
+    if (duplicateIds.length > 0) {
+      alert("Duplicate services are not allowed in the same authorization.");
+      return;
+    }
+
+    if (cleanedServices.some((line) => !line.format)) {
+      alert("Each Service line must have a Format.");
       return;
     }
 
@@ -775,14 +885,7 @@ export default function AuthorizationsPage() {
           authorizationNumber: newAuthorizationNumber.trim(),
           individualId: selectedIndividualId,
           payer: newPayer,
-          serviceId: newServiceId,
-          eventCode: newEventCode === "NONE" ? null : newEventCode,
-          format: newFormat,
-          program: newProgram || null,
-          modifier1: newModifier1 || null,
-          modifier2: newModifier2 || null,
-          modifier3: newModifier3 || null,
-          modifier4: newModifier4 || null,
+          services: cleanedServices,
           startDate: newStartDate,
           endDate: newEndDate,
           maximum,
@@ -800,13 +903,6 @@ export default function AuthorizationsPage() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        if (res.status === 409 && data?.field === "authorizationNumber") {
-          alert(
-            "Authorization Number already exists.\nPlease enter a different number.",
-          );
-          return;
-        }
-
         alert(data?.message || "Failed to save authorization.");
         return;
       }
@@ -814,12 +910,148 @@ export default function AuthorizationsPage() {
       await loadAuthorizations();
       setOpenNew(false);
       resetNewForm();
-      alert("Authorization saved successfully!");
+      alert(`Authorization saved successfully! ${data?.count ?? ""}`.trim());
     } catch (err: any) {
       console.error("Save authorization error:", err);
       alert("Failed to save authorization.");
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  const openEditModal = (row: AuthRow) => {
+    setEditId(row.id);
+    setEditPayer(row.payer);
+    setEditAuthorizationNumber(row.authorizationNumber);
+    setEditStatus(row.status);
+    setEditSource(row.source);
+    setEditServiceId(row.serviceId);
+    setEditEventCode(row.eventCode || "NONE");
+    setEditFormat(row.format || "Units");
+    setEditProgram(row.program || "ID/A");
+    setEditModifier1(row.modifier1 || "");
+    setEditModifier2(row.modifier2 || "");
+    setEditModifier3(row.modifier3 || "");
+    setEditModifier4(row.modifier4 || "");
+    setEditStartDate(row.startDate);
+    setEditEndDate(row.endDate);
+    setEditVoided(!!row.voided);
+    setEditComments(row.notes || "");
+    setEditMaximum(String(row.unitsAuthorized || 0));
+    setEditHasIntervalLimit(!!row.intervalType || row.intervalLimit != null);
+    setEditIntervalType(row.intervalType || "Weekly");
+    setEditIntervalLimit(
+      row.intervalLimit != null ? String(row.intervalLimit) : "10",
+    );
+    setEditIntervalStart(row.intervalStart || "");
+    setEditIntervalEnd(row.intervalEnd || "");
+    setOpenEdit(true);
+  };
+
+  const handleUpdateAuthorization = async () => {
+    const maximum = Number(editMaximum);
+
+    if (!editId) {
+      alert("Missing record id.");
+      return;
+    }
+
+    if (!editAuthorizationNumber.trim()) {
+      alert("Please enter Authorization Number.");
+      return;
+    }
+
+    if (!editServiceId) {
+      alert("Please select Service.");
+      return;
+    }
+
+    if (!editFormat.trim()) {
+      alert("Please select Format.");
+      return;
+    }
+
+    if (!Number.isFinite(maximum)) {
+      alert("Maximum must be a valid number.");
+      return;
+    }
+
+    try {
+      setEditLoading(true);
+
+      const res = await fetch(`/api/authorizations/${editId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          authorizationNumber: editAuthorizationNumber.trim(),
+          payer: editPayer,
+          serviceId: editServiceId,
+          eventCode: editEventCode === "NONE" ? null : editEventCode,
+          format: editFormat,
+          program: editProgram || null,
+          modifier1: editModifier1 || null,
+          modifier2: editModifier2 || null,
+          modifier3: editModifier3 || null,
+          modifier4: editModifier4 || null,
+          startDate: editStartDate,
+          endDate: editEndDate,
+          maximum,
+          status: editStatus,
+          source: editSource,
+          voided: editVoided,
+          comments: editComments || null,
+          intervalType: editHasIntervalLimit ? editIntervalType : null,
+          intervalLimit: editHasIntervalLimit ? editIntervalLimit : null,
+          intervalStart: editHasIntervalLimit ? editIntervalStart || null : null,
+          intervalEnd: editHasIntervalLimit ? editIntervalEnd || null : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        alert(data?.message || "Failed to update authorization record.");
+        return;
+      }
+
+      await loadAuthorizations();
+      setOpenEdit(false);
+      alert("Authorization record updated successfully!");
+    } catch (err: any) {
+      console.error("Update authorization error:", err);
+      alert("Failed to update authorization record.");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDeleteAuthorization = async (row: AuthRow) => {
+    const ok = window.confirm(
+      `Delete this authorization service record?\n\nAuthorization: ${row.authorizationNumber}\nService: ${row.serviceCode} - ${row.serviceName}`,
+    );
+    if (!ok) return;
+
+    try {
+      setDeleteLoadingId(row.id);
+
+      const res = await fetch(`/api/authorizations/${row.id}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        alert(data?.message || "Failed to delete authorization record.");
+        return;
+      }
+
+      await loadAuthorizations();
+      alert("Authorization record deleted successfully!");
+    } catch (err: any) {
+      console.error("Delete authorization error:", err);
+      alert("Failed to delete authorization record.");
+    } finally {
+      setDeleteLoadingId("");
     }
   };
 
@@ -986,7 +1218,7 @@ export default function AuthorizationsPage() {
 
           <div className="overflow-hidden rounded-2xl border border-bac-border bg-bac-panel">
             <div className="overflow-x-auto">
-              <table className="min-w-[1200px] w-full text-left text-sm">
+              <table className="min-w-[1320px] w-full text-left text-sm">
                 <thead className="border-b border-bac-border text-bac-muted">
                   <tr>
                     <th className="px-4 py-3">Authorization Number</th>
@@ -1001,6 +1233,8 @@ export default function AuthorizationsPage() {
                     <th className="px-4 py-3">Remaining</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Source</th>
+                    <th className="px-4 py-3 text-center">Edit</th>
+                    <th className="px-4 py-3 text-center">Delete</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -1008,7 +1242,7 @@ export default function AuthorizationsPage() {
                   {authLoading ? (
                     <tr>
                       <td
-                        colSpan={13}
+                        colSpan={15}
                         className="px-4 py-10 text-center text-bac-muted"
                       >
                         Loading authorizations...
@@ -1017,7 +1251,7 @@ export default function AuthorizationsPage() {
                   ) : rows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={13}
+                        colSpan={15}
                         className="px-4 py-10 text-center text-bac-muted"
                       >
                         No authorizations found for the current filters.
@@ -1068,6 +1302,23 @@ export default function AuthorizationsPage() {
                         <td className="px-4 py-3">
                           <Badge variant="muted">{r.source}</Badge>
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            className="rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm hover:bg-white/5"
+                            onClick={() => openEditModal(r)}
+                          >
+                            Edit
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            className="rounded-xl border border-bac-red/40 bg-bac-red/10 px-3 py-2 text-sm text-bac-red hover:bg-bac-red/15 disabled:opacity-60"
+                            disabled={deleteLoadingId === r.id}
+                            onClick={() => handleDeleteAuthorization(r)}
+                          >
+                            {deleteLoadingId === r.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
                             <button
@@ -1075,14 +1326,6 @@ export default function AuthorizationsPage() {
                               onClick={() => openDetails(r)}
                             >
                               Details
-                            </button>
-                            <button
-                              className="rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm hover:bg-white/5"
-                              onClick={() =>
-                                alert("Edit/suspend will be wired next phase")
-                              }
-                            >
-                              Edit
                             </button>
                           </div>
                         </td>
@@ -1094,8 +1337,7 @@ export default function AuthorizationsPage() {
             </div>
 
             <div className="border-t border-bac-border px-4 py-3 text-xs text-bac-muted">
-              Phase 3 complete: authorizations now save to and load from the real
-              database.
+              Phase 3.1 complete: multi-service authorization create plus record-level edit/delete.
             </div>
           </div>
         </>
@@ -1348,8 +1590,8 @@ export default function AuthorizationsPage() {
       >
         <div className="space-y-4">
           <div className="text-sm text-bac-muted">
-            Phase 3: Save Authorization now writes to the real database and
-            refreshes the list immediately.
+            Phase 3.1: Save Authorization now supports up to 5 service lines and
+            writes all records to the real database.
           </div>
 
           <SectionCard
@@ -1521,16 +1763,14 @@ export default function AuthorizationsPage() {
 
           <SectionCard
             title="Authorization Details"
-            subtitle="Enter payer, authorization number, service, event code, format, modifiers, date range, and notes."
+            subtitle="Enter payer, authorization number, multiple service lines, date range, and notes."
           >
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
               <div className="lg:col-span-3">
                 <Field label="Payer" required>
                   <Select
                     value={newPayer}
-                    onChange={(v) =>
-                      setNewPayer(v as "ODP" | "CHC" | "PRIVATE" | "OTHER")
-                    }
+                    onChange={(v) => setNewPayer(v as AuthPayer)}
                     options={[
                       { value: "ODP", label: "ODP" },
                       { value: "CHC", label: "CHC" },
@@ -1571,7 +1811,7 @@ export default function AuthorizationsPage() {
                 <Field label="Source" required>
                   <Select
                     value={newSource}
-                    onChange={(v) => setNewSource(v as "MANUAL" | "IMPORT")}
+                    onChange={(v) => setNewSource(v as AuthSource)}
                     options={[
                       { value: "MANUAL", label: "Manual" },
                       { value: "IMPORT", label: "Import" },
@@ -1580,127 +1820,215 @@ export default function AuthorizationsPage() {
                 </Field>
               </div>
 
-              <div className="lg:col-span-6">
-                <Field label="Service" required>
-                  <select
-                    value={newServiceId}
-                    onChange={(e) => setNewServiceId(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+              <div className="lg:col-span-12">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-bac-text">
+                    Service Lines
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text hover:bg-white/5 disabled:opacity-50"
+                    disabled={serviceLines.length >= 5}
+                    onClick={addServiceLine}
                   >
-                    <option value="">Select Service</option>
-                    {serviceOptions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {formatServiceLabel(s)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {serviceOptionsLoading ? (
-                    <Badge variant="warning">Loading services...</Badge>
-                  ) : null}
-                  {selectedService ? (
-                    <Badge variant="success">
-                      Selected: {formatServiceLabel(selectedService)}
-                    </Badge>
-                  ) : null}
-                  {serviceOptionsError ? (
-                    <Badge variant="danger">{serviceOptionsError}</Badge>
-                  ) : null}
+                    Add Service
+                  </button>
                 </div>
-              </div>
 
-              <div className="lg:col-span-3">
-                <Field label="Event Code" required>
-                  <Select
-                    value={newEventCode}
-                    onChange={setNewEventCode}
-                    options={[
-                      { value: "NONE", label: "NONE - None" },
-                      { value: "U1-ECS", label: "U1 - ECS" },
-                      { value: "U4-NOBENEFIT", label: "U4 - NoBenefit" },
-                      {
-                        value: "U4U1-NOBENEFIT-ECS",
-                        label: "U4U1 - NoBenefit ECS",
-                      },
-                    ]}
-                  />
-                </Field>
-              </div>
+                <div className="space-y-3">
+                  {serviceLines.map((line, index) => {
+                    const selectedService =
+                      serviceOptions.find((s) => s.id === line.serviceId) ?? null;
 
-              <div className="lg:col-span-3">
-                <Field label="Format" required>
-                  <Select
-                    value={newFormat}
-                    onChange={setNewFormat}
-                    options={[
-                      { value: "Days", label: "Days" },
-                      { value: "Hours", label: "Hours" },
-                      { value: "Units", label: "Units" },
-                      { value: "Visits", label: "Visits" },
-                    ]}
-                  />
-                </Field>
-              </div>
+                    return (
+                      <div
+                        key={line.key}
+                        className="rounded-2xl border border-bac-border bg-bac-bg p-4"
+                      >
+                        <div className="mb-3 flex items-center justify-between">
+                          <div className="text-sm font-medium text-bac-text">
+                            Service #{index + 1}
+                          </div>
+                          <button
+                            type="button"
+                            className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-white/5 disabled:opacity-50"
+                            disabled={serviceLines.length <= 1}
+                            onClick={() => removeServiceLine(line.key)}
+                          >
+                            Remove
+                          </button>
+                        </div>
 
-              <div className="lg:col-span-3">
-                <Field label="Program">
-                  <Select
-                    value={newProgram}
-                    onChange={setNewProgram}
-                    options={[
-                      { value: "ID/A", label: "ID/A" },
-                      { value: "CHC", label: "CHC" },
-                      { value: "OBRA", label: "OBRA" },
-                      { value: "Other", label: "Other" },
-                    ]}
-                  />
-                </Field>
-              </div>
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                          <div className="lg:col-span-6">
+                            <Field label="Service" required>
+                              <select
+                                value={line.serviceId}
+                                onChange={(e) =>
+                                  updateServiceLine(
+                                    line.key,
+                                    "serviceId",
+                                    e.target.value,
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                              >
+                                <option value="">Select Service</option>
+                                {serviceOptions.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {formatServiceLabel(s)}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
 
-              <div className="lg:col-span-2">
-                <Field label="Modifier 1">
-                  <input
-                    value={newModifier1}
-                    onChange={(e) => setNewModifier1(e.target.value)}
-                    placeholder="Optional"
-                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
-                  />
-                </Field>
-              </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {index === 0 && serviceOptionsLoading ? (
+                                <Badge variant="warning">Loading services...</Badge>
+                              ) : null}
+                              {selectedService ? (
+                                <Badge variant="success">
+                                  Selected: {formatServiceLabel(selectedService)}
+                                </Badge>
+                              ) : null}
+                              {index === 0 && serviceOptionsError ? (
+                                <Badge variant="danger">{serviceOptionsError}</Badge>
+                              ) : null}
+                            </div>
+                          </div>
 
-              <div className="lg:col-span-2">
-                <Field label="Modifier 2">
-                  <input
-                    value={newModifier2}
-                    onChange={(e) => setNewModifier2(e.target.value)}
-                    placeholder="Optional"
-                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
-                  />
-                </Field>
-              </div>
+                          <div className="lg:col-span-3">
+                            <Field label="Event Code">
+                              <Select
+                                value={line.eventCode}
+                                onChange={(v) =>
+                                  updateServiceLine(line.key, "eventCode", v)
+                                }
+                                options={[
+                                  { value: "NONE", label: "NONE - None" },
+                                  { value: "U1-ECS", label: "U1 - ECS" },
+                                  { value: "U4-NOBENEFIT", label: "U4 - NoBenefit" },
+                                  {
+                                    value: "U4U1-NOBENEFIT-ECS",
+                                    label: "U4U1 - NoBenefit ECS",
+                                  },
+                                ]}
+                              />
+                            </Field>
+                          </div>
 
-              <div className="lg:col-span-2">
-                <Field label="Modifier 3">
-                  <input
-                    value={newModifier3}
-                    onChange={(e) => setNewModifier3(e.target.value)}
-                    placeholder="Optional"
-                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
-                  />
-                </Field>
-              </div>
+                          <div className="lg:col-span-3">
+                            <Field label="Format" required>
+                              <Select
+                                value={line.format}
+                                onChange={(v) =>
+                                  updateServiceLine(line.key, "format", v)
+                                }
+                                options={[
+                                  { value: "Days", label: "Days" },
+                                  { value: "Hours", label: "Hours" },
+                                  { value: "Units", label: "Units" },
+                                  { value: "Visits", label: "Visits" },
+                                ]}
+                              />
+                            </Field>
+                          </div>
 
-              <div className="lg:col-span-2">
-                <Field label="Modifier 4">
-                  <input
-                    value={newModifier4}
-                    onChange={(e) => setNewModifier4(e.target.value)}
-                    placeholder="Optional"
-                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
-                  />
-                </Field>
+                          <div className="lg:col-span-4">
+                            <Field label="Program">
+                              <Select
+                                value={line.program}
+                                onChange={(v) =>
+                                  updateServiceLine(line.key, "program", v)
+                                }
+                                options={[
+                                  { value: "ID/A", label: "ID/A" },
+                                  { value: "CHC", label: "CHC" },
+                                  { value: "OBRA", label: "OBRA" },
+                                  { value: "Other", label: "Other" },
+                                ]}
+                              />
+                            </Field>
+                          </div>
+
+                          <div className="lg:col-span-2">
+                            <Field label="Modifier 1">
+                              <input
+                                value={line.modifier1}
+                                onChange={(e) =>
+                                  updateServiceLine(
+                                    line.key,
+                                    "modifier1",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Optional"
+                                className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
+                              />
+                            </Field>
+                          </div>
+
+                          <div className="lg:col-span-2">
+                            <Field label="Modifier 2">
+                              <input
+                                value={line.modifier2}
+                                onChange={(e) =>
+                                  updateServiceLine(
+                                    line.key,
+                                    "modifier2",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Optional"
+                                className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
+                              />
+                            </Field>
+                          </div>
+
+                          <div className="lg:col-span-2">
+                            <Field label="Modifier 3">
+                              <input
+                                value={line.modifier3}
+                                onChange={(e) =>
+                                  updateServiceLine(
+                                    line.key,
+                                    "modifier3",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Optional"
+                                className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
+                              />
+                            </Field>
+                          </div>
+
+                          <div className="lg:col-span-2">
+                            <Field label="Modifier 4">
+                              <input
+                                value={line.modifier4}
+                                onChange={(e) =>
+                                  updateServiceLine(
+                                    line.key,
+                                    "modifier4",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Optional"
+                                className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text placeholder:text-bac-muted outline-none focus:ring-2 focus:ring-bac-primary/40"
+                              />
+                            </Field>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-2">
+                  <Badge variant="muted">
+                    {serviceLines.length}/5 service lines
+                  </Badge>
+                </div>
               </div>
 
               <div className="lg:col-span-2">
@@ -1758,10 +2086,7 @@ export default function AuthorizationsPage() {
               >
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                   <div className="lg:col-span-5">
-                    <Field
-                      label={`Maximum ${newFormat ? `(${newFormat})` : ""}`}
-                      required
-                    >
+                    <Field label="Maximum" required>
                       <input
                         value={newMaximum}
                         onChange={(e) => setNewMaximum(e.target.value)}
@@ -1865,10 +2190,7 @@ export default function AuthorizationsPage() {
                 subtitle="Preview the authorization amount and remaining balance for this record."
               >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                  <StatCard
-                    label={`Authorized ${newFormat}`}
-                    value={newAuthorizedNumeric || 0}
-                  />
+                  <StatCard label="Authorized" value={newAuthorizedNumeric || 0} />
                   <StatCard label="Used" value={newUsedNumeric} />
                   <StatCard label="Remaining" value={newRemainingNumeric} />
                 </div>
@@ -1887,7 +2209,7 @@ export default function AuthorizationsPage() {
                   </div>
 
                   <div className="mt-3 rounded-2xl border border-dashed border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
-                    Phase 3 default: used = 0, remaining = maximum. Real visit
+                    Phase 3.1 default: used = 0, remaining = maximum. Real visit
                     utilization will come later.
                   </div>
                 </div>
@@ -1911,8 +2233,12 @@ export default function AuthorizationsPage() {
             </button>
 
             <button
-              className="rounded-xl border border-bac-primary bg-bac-primary/10 px-4 py-2 text-sm font-medium text-bac-text hover:bg-bac-primary/15"
-              onClick={() => alert("Save & Add New can be added next")}
+              className="rounded-xl border border-bac-border bg-bac-panel px-4 py-2 text-sm text-bac-text hover:bg-white/5"
+              onClick={() => {
+                handleSaveAuthorization().then(() => {
+                  if (!saveLoading) resetNewForm();
+                });
+              }}
             >
               Save & Add New
             </button>
@@ -1923,6 +2249,329 @@ export default function AuthorizationsPage() {
               onClick={handleSaveAuthorization}
             >
               {saveLoading ? "Saving..." : "Save Authorization"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openEdit}
+        title="Edit Authorization Record"
+        onClose={() => setOpenEdit(false)}
+        maxWidthClass="max-w-4xl"
+      >
+        <div className="space-y-4">
+          <SectionCard
+            title="Edit Record"
+            subtitle="This updates one authorization service record only."
+          >
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+              <div className="lg:col-span-3">
+                <Field label="Payer" required>
+                  <Select
+                    value={editPayer}
+                    onChange={(v) => setEditPayer(v as AuthPayer)}
+                    options={[
+                      { value: "ODP", label: "ODP" },
+                      { value: "CHC", label: "CHC" },
+                      { value: "PRIVATE", label: "Private" },
+                      { value: "OTHER", label: "Other" },
+                    ]}
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-5">
+                <Field label="Authorization Number" required>
+                  <input
+                    value={editAuthorizationNumber}
+                    onChange={(e) => setEditAuthorizationNumber(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Status" required>
+                  <Select
+                    value={editStatus}
+                    onChange={(v) => setEditStatus(v as AuthStatus)}
+                    options={[
+                      { value: "PENDING", label: "Pending" },
+                      { value: "ACTIVE", label: "Active" },
+                      { value: "EXPIRED", label: "Expired" },
+                      { value: "SUSPENDED", label: "Suspended" },
+                    ]}
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Source" required>
+                  <Select
+                    value={editSource}
+                    onChange={(v) => setEditSource(v as AuthSource)}
+                    options={[
+                      { value: "MANUAL", label: "Manual" },
+                      { value: "IMPORT", label: "Import" },
+                    ]}
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-6">
+                <Field label="Service" required>
+                  <select
+                    value={editServiceId}
+                    onChange={(e) => setEditServiceId(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  >
+                    <option value="">Select Service</option>
+                    {serviceOptions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {formatServiceLabel(s)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+
+              <div className="lg:col-span-3">
+                <Field label="Event Code">
+                  <Select
+                    value={editEventCode}
+                    onChange={setEditEventCode}
+                    options={[
+                      { value: "NONE", label: "NONE - None" },
+                      { value: "U1-ECS", label: "U1 - ECS" },
+                      { value: "U4-NOBENEFIT", label: "U4 - NoBenefit" },
+                      {
+                        value: "U4U1-NOBENEFIT-ECS",
+                        label: "U4U1 - NoBenefit ECS",
+                      },
+                    ]}
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-3">
+                <Field label="Format" required>
+                  <Select
+                    value={editFormat}
+                    onChange={setEditFormat}
+                    options={[
+                      { value: "Days", label: "Days" },
+                      { value: "Hours", label: "Hours" },
+                      { value: "Units", label: "Units" },
+                      { value: "Visits", label: "Visits" },
+                    ]}
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-3">
+                <Field label="Program">
+                  <Select
+                    value={editProgram}
+                    onChange={setEditProgram}
+                    options={[
+                      { value: "ID/A", label: "ID/A" },
+                      { value: "CHC", label: "CHC" },
+                      { value: "OBRA", label: "OBRA" },
+                      { value: "Other", label: "Other" },
+                    ]}
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Modifier 1">
+                  <input
+                    value={editModifier1}
+                    onChange={(e) => setEditModifier1(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Modifier 2">
+                  <input
+                    value={editModifier2}
+                    onChange={(e) => setEditModifier2(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Modifier 3">
+                  <input
+                    value={editModifier3}
+                    onChange={(e) => setEditModifier3(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Modifier 4">
+                  <input
+                    value={editModifier4}
+                    onChange={(e) => setEditModifier4(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Start Date" required>
+                  <input
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="End Date" required>
+                  <input
+                    type="date"
+                    value={editEndDate}
+                    onChange={(e) => setEditEndDate(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2">
+                <Field label="Maximum" required>
+                  <input
+                    value={editMaximum}
+                    onChange={(e) => setEditMaximum(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-2 flex items-end">
+                <label className="flex h-10 items-center gap-2 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text">
+                  <input
+                    type="checkbox"
+                    checked={editVoided}
+                    onChange={(e) => setEditVoided(e.target.checked)}
+                    className="h-4 w-4 rounded border-bac-border bg-bac-panel"
+                  />
+                  Voided
+                </label>
+              </div>
+
+              <div className="lg:col-span-12">
+                <Field label="Comments">
+                  <textarea
+                    value={editComments}
+                    onChange={(e) => setEditComments(e.target.value)}
+                    className="min-h-[110px] w-full rounded-xl border border-bac-border bg-bac-bg px-3 py-2 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                  />
+                </Field>
+              </div>
+
+              <div className="lg:col-span-12">
+                <div className="mb-2 text-xs text-bac-muted">
+                  Interval Based Limits
+                </div>
+
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm text-bac-text">
+                    <input
+                      type="radio"
+                      name="editIntervalLimitMode"
+                      checked={!editHasIntervalLimit}
+                      onChange={() => setEditHasIntervalLimit(false)}
+                    />
+                    None
+                  </label>
+
+                  <label className="flex items-center gap-2 text-sm text-bac-text">
+                    <input
+                      type="radio"
+                      name="editIntervalLimitMode"
+                      checked={editHasIntervalLimit}
+                      onChange={() => setEditHasIntervalLimit(true)}
+                    />
+                    Has Limitations
+                  </label>
+                </div>
+              </div>
+
+              {editHasIntervalLimit ? (
+                <>
+                  <div className="lg:col-span-3">
+                    <Field label="Interval Type">
+                      <Select
+                        value={editIntervalType}
+                        onChange={setEditIntervalType}
+                        options={[
+                          { value: "Daily", label: "Daily" },
+                          { value: "Weekly", label: "Weekly" },
+                          { value: "Monthly", label: "Monthly" },
+                        ]}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-3">
+                    <Field label="Interval Limit">
+                      <input
+                        value={editIntervalLimit}
+                        onChange={(e) => setEditIntervalLimit(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-3">
+                    <Field label="Effective Start">
+                      <input
+                        type="date"
+                        value={editIntervalStart}
+                        onChange={(e) => setEditIntervalStart(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-3">
+                    <Field label="Effective End">
+                      <input
+                        type="date"
+                        value={editIntervalEnd}
+                        onChange={(e) => setEditIntervalEnd(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </SectionCard>
+
+          <div className="flex justify-end gap-2 border-t border-bac-border pt-4">
+            <button
+              className="rounded-xl border border-bac-border bg-bac-panel px-4 py-2 text-sm text-bac-text hover:bg-white/5"
+              onClick={() => setOpenEdit(false)}
+            >
+              Cancel
+            </button>
+
+            <button
+              className="rounded-xl bg-bac-primary px-4 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+              disabled={editLoading}
+              onClick={handleUpdateAuthorization}
+            >
+              {editLoading ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </div>

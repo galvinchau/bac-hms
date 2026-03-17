@@ -100,6 +100,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       "/medication",
       "/individual/detail",
       "/visited-maintenance",
+      "/authorizations",
     ];
 
     return fullWidthPrefixes.some(
