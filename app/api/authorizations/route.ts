@@ -1,3 +1,5 @@
+//bac-hms\web\app\api\authorizations\route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -17,6 +19,68 @@ function toStringOrNull(value: unknown) {
   if (value === null || value === undefined) return null;
   const s = String(value).trim();
   return s ? s : null;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function computeAuthorizationUsage(input: {
+  maximum?: unknown;
+  manualUsed?: unknown;
+  manualMissed?: unknown;
+  autoUsed?: unknown;
+  autoMissed?: unknown;
+}) {
+  const maximum = toNumber(input.maximum, 0);
+  const manualUsed = toNumber(input.manualUsed, 0);
+  const manualMissed = toNumber(input.manualMissed, 0);
+  const autoUsed = toNumber(input.autoUsed, 0);
+  const autoMissed = toNumber(input.autoMissed, 0);
+
+  const totalUsed = manualUsed + autoUsed;
+  const totalMissed = manualMissed + autoMissed;
+  const remaining = maximum - totalUsed - totalMissed;
+
+  return {
+    maximum,
+    manualUsed,
+    manualMissed,
+    autoUsed,
+    autoMissed,
+    totalUsed,
+    totalMissed,
+    remaining,
+  };
+}
+
+function enrichAuthorization<T extends {
+  maximum: number;
+  manualUsed?: number | null;
+  manualMissed?: number | null;
+}>(item: T) {
+  const autoUsed = 0;
+  const autoMissed = 0;
+
+  const calc = computeAuthorizationUsage({
+    maximum: item.maximum,
+    manualUsed: item.manualUsed ?? 0,
+    manualMissed: item.manualMissed ?? 0,
+    autoUsed,
+    autoMissed,
+  });
+
+  return {
+    ...item,
+    manualUsed: item.manualUsed ?? 0,
+    manualMissed: item.manualMissed ?? 0,
+    autoUsed,
+    autoMissed,
+    totalUsed: calc.totalUsed,
+    totalMissed: calc.totalMissed,
+    remaining: calc.remaining,
+  };
 }
 
 type IncomingServiceLine = {
@@ -58,7 +122,7 @@ export async function GET() {
     });
 
     return NextResponse.json(
-      { items },
+      { items: items.map(enrichAuthorization) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err: any) {
@@ -85,6 +149,10 @@ export async function POST(req: Request) {
     const startDate = toDate(body?.startDate);
     const endDate = toDate(body?.endDate);
     const maximum = Number(body?.maximum ?? 0);
+
+    const snapshotThroughDate = toDate(body?.snapshotThroughDate);
+    const manualUsed = toNumber(body?.manualUsed, 0);
+    const manualMissed = toNumber(body?.manualMissed, 0);
 
     const rawServices: IncomingServiceLine[] = Array.isArray(body?.services)
       ? body.services
@@ -194,7 +262,14 @@ export async function POST(req: Request) {
 
     const serviceMap = new Map(serviceList.map((s) => [s.id, s]));
     const used = 0;
-    const remaining = Math.max(maximum - used, 0);
+
+    const calc = computeAuthorizationUsage({
+      maximum,
+      manualUsed,
+      manualMissed,
+      autoUsed: 0,
+      autoMissed: 0,
+    });
 
     const created = await prisma.$transaction(
       services.map((line) => {
@@ -217,7 +292,10 @@ export async function POST(req: Request) {
             endDate,
             maximum,
             used,
-            remaining,
+            remaining: calc.remaining, // keep DB field populated, but response uses Phase 3.2 calculation
+            snapshotThroughDate,
+            manualUsed,
+            manualMissed,
             status: body?.status ? String(body.status) : "PENDING",
             source: body?.source ? String(body.source) : "MANUAL",
             voided: !!body?.voided,
@@ -237,7 +315,7 @@ export async function POST(req: Request) {
       {
         message: "Authorization saved successfully.",
         count: created.length,
-        items: created,
+        items: created.map(enrichAuthorization),
       },
       { status: 201 },
     );

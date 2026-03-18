@@ -1,3 +1,4 @@
+//bac-hms\web\app\authorizations\page.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -33,7 +34,13 @@ type AuthRow = {
   endDate: string;
   unitsAuthorized: number;
   unitsUsed: number;
+  unitsMissed: number;
   unitsRemaining: number;
+  manualUsed: number;
+  manualMissed: number;
+  autoUsed: number;
+  autoMissed: number;
+  snapshotThroughDate?: string | null;
   status: AuthStatus;
   notes?: string | null;
   source: AuthSource;
@@ -64,6 +71,13 @@ type AuthorizationApiItem = {
   maximum: number;
   used: number;
   remaining: number;
+  manualUsed?: number | null;
+  manualMissed?: number | null;
+  autoUsed?: number | null;
+  autoMissed?: number | null;
+  totalUsed?: number | null;
+  totalMissed?: number | null;
+  snapshotThroughDate?: string | null;
   status: AuthStatus;
   source: AuthSource;
   comments?: string | null;
@@ -195,6 +209,40 @@ function createEmptyServiceLine(defaultServiceId = ""): ServiceLine {
     modifier2: "",
     modifier3: "",
     modifier4: "",
+  };
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function computeAuthorizationUsage(input: {
+  maximum?: unknown;
+  manualUsed?: unknown;
+  manualMissed?: unknown;
+  autoUsed?: unknown;
+  autoMissed?: unknown;
+}) {
+  const maximum = toNumber(input.maximum, 0);
+  const manualUsed = toNumber(input.manualUsed, 0);
+  const manualMissed = toNumber(input.manualMissed, 0);
+  const autoUsed = toNumber(input.autoUsed, 0);
+  const autoMissed = toNumber(input.autoMissed, 0);
+
+  const totalUsed = manualUsed + autoUsed;
+  const totalMissed = manualMissed + autoMissed;
+  const remaining = maximum - totalUsed - totalMissed;
+
+  return {
+    maximum,
+    manualUsed,
+    manualMissed,
+    autoUsed,
+    autoMissed,
+    totalUsed,
+    totalMissed,
+    remaining,
   };
 }
 
@@ -417,6 +465,9 @@ export default function AuthorizationsPage() {
   const [newVoided, setNewVoided] = useState(false);
   const [newComments, setNewComments] = useState("");
   const [newMaximum, setNewMaximum] = useState("40");
+  const [newSnapshotThroughDate, setNewSnapshotThroughDate] = useState("");
+  const [newManualUsed, setNewManualUsed] = useState("0");
+  const [newManualMissed, setNewManualMissed] = useState("0");
   const [hasIntervalLimit, setHasIntervalLimit] = useState(false);
   const [intervalType, setIntervalType] = useState("Weekly");
   const [intervalLimit, setIntervalLimit] = useState("10");
@@ -442,6 +493,9 @@ export default function AuthorizationsPage() {
   const [editVoided, setEditVoided] = useState(false);
   const [editComments, setEditComments] = useState("");
   const [editMaximum, setEditMaximum] = useState("0");
+  const [editSnapshotThroughDate, setEditSnapshotThroughDate] = useState("");
+  const [editManualUsed, setEditManualUsed] = useState("0");
+  const [editManualMissed, setEditManualMissed] = useState("0");
   const [editHasIntervalLimit, setEditHasIntervalLimit] = useState(false);
   const [editIntervalType, setEditIntervalType] = useState("Weekly");
   const [editIntervalLimit, setEditIntervalLimit] = useState("10");
@@ -500,8 +554,14 @@ export default function AuthorizationsPage() {
         startDate: formatDateOnly(r.startDate),
         endDate: formatDateOnly(r.endDate),
         unitsAuthorized: Number(r.maximum ?? 0),
-        unitsUsed: Number(r.used ?? 0),
+        unitsUsed: Number(r.totalUsed ?? r.used ?? 0),
+        unitsMissed: Number(r.totalMissed ?? 0),
         unitsRemaining: Number(r.remaining ?? 0),
+        manualUsed: Number(r.manualUsed ?? 0),
+        manualMissed: Number(r.manualMissed ?? 0),
+        autoUsed: Number(r.autoUsed ?? 0),
+        autoMissed: Number(r.autoMissed ?? 0),
+        snapshotThroughDate: formatDateOnly(r.snapshotThroughDate),
         status: r.status,
         notes: r.comments ?? null,
         source: r.source,
@@ -600,9 +660,19 @@ export default function AuthorizationsPage() {
 
     const authorized = rows.reduce((a, r) => a + (r.unitsAuthorized || 0), 0);
     const used = rows.reduce((a, r) => a + (r.unitsUsed || 0), 0);
+    const missed = rows.reduce((a, r) => a + (r.unitsMissed || 0), 0);
     const remaining = rows.reduce((a, r) => a + (r.unitsRemaining || 0), 0);
 
-    return { count, active, pending, expired, authorized, used, remaining };
+    return {
+      count,
+      active,
+      pending,
+      expired,
+      authorized,
+      used,
+      missed,
+      remaining,
+    };
   }, [rows]);
 
   const utilRows = useMemo(() => {
@@ -614,6 +684,7 @@ export default function AuthorizationsPage() {
         payer: string;
         authorized: number;
         used: number;
+        missed: number;
         remaining: number;
       }
     >();
@@ -628,11 +699,13 @@ export default function AuthorizationsPage() {
           payer: r.payer,
           authorized: r.unitsAuthorized,
           used: r.unitsUsed,
+          missed: r.unitsMissed,
           remaining: r.unitsRemaining,
         });
       } else {
         cur.authorized += r.unitsAuthorized;
         cur.used += r.unitsUsed;
+        cur.missed += r.unitsMissed;
         cur.remaining += r.unitsRemaining;
       }
     });
@@ -665,6 +738,9 @@ export default function AuthorizationsPage() {
     setNewVoided(false);
     setNewComments("");
     setNewMaximum("40");
+    setNewSnapshotThroughDate("");
+    setNewManualUsed("0");
+    setNewManualMissed("0");
     setHasIntervalLimit(false);
     setIntervalType("Weekly");
     setIntervalLimit("10");
@@ -672,12 +748,42 @@ export default function AuthorizationsPage() {
     setIntervalEnd("");
   }, [serviceOptions]);
 
-  const newAuthorizedNumeric = Number(newMaximum) || 0;
-  const newUsedNumeric = 0;
-  const newRemainingNumeric = Math.max(newAuthorizedNumeric - newUsedNumeric, 0);
+  const newUtilization = useMemo(() => {
+    return computeAuthorizationUsage({
+      maximum: newMaximum,
+      manualUsed: newManualUsed,
+      manualMissed: newManualMissed,
+      autoUsed: 0,
+      autoMissed: 0,
+    });
+  }, [newMaximum, newManualUsed, newManualMissed]);
+
   const newUsedPct =
-    newAuthorizedNumeric > 0
-      ? Math.min(Math.round((newUsedNumeric / newAuthorizedNumeric) * 100), 100)
+    newUtilization.maximum > 0
+      ? Math.min(
+          Math.round((newUtilization.totalUsed / newUtilization.maximum) * 100),
+          100,
+        )
+      : 0;
+
+  const editUtilization = useMemo(() => {
+    return computeAuthorizationUsage({
+      maximum: editMaximum,
+      manualUsed: editManualUsed,
+      manualMissed: editManualMissed,
+      autoUsed: 0,
+      autoMissed: 0,
+    });
+  }, [editMaximum, editManualUsed, editManualMissed]);
+
+  const editUsedPct =
+    editUtilization.maximum > 0
+      ? Math.min(
+          Math.round(
+            (editUtilization.totalUsed / editUtilization.maximum) * 100,
+          ),
+          100,
+        )
       : 0;
 
   const previewProfile = useMemo(() => {
@@ -822,6 +928,8 @@ export default function AuthorizationsPage() {
 
   const handleSaveAuthorization = async () => {
     const maximum = Number(newMaximum);
+    const manualUsed = Number(newManualUsed || 0);
+    const manualMissed = Number(newManualMissed || 0);
 
     if (!selectedIndividualId) {
       alert("Please select an Individual.");
@@ -835,6 +943,16 @@ export default function AuthorizationsPage() {
 
     if (!Number.isFinite(maximum)) {
       alert("Maximum must be a valid number.");
+      return;
+    }
+
+    if (!Number.isFinite(manualUsed)) {
+      alert("Manual Used must be a valid number.");
+      return;
+    }
+
+    if (!Number.isFinite(manualMissed)) {
+      alert("Manual Missed must be a valid number.");
       return;
     }
 
@@ -889,6 +1007,9 @@ export default function AuthorizationsPage() {
           startDate: newStartDate,
           endDate: newEndDate,
           maximum,
+          snapshotThroughDate: newSnapshotThroughDate || null,
+          manualUsed,
+          manualMissed,
           status: newStatus,
           source: newSource,
           voided: newVoided,
@@ -938,6 +1059,9 @@ export default function AuthorizationsPage() {
     setEditVoided(!!row.voided);
     setEditComments(row.notes || "");
     setEditMaximum(String(row.unitsAuthorized || 0));
+    setEditSnapshotThroughDate(row.snapshotThroughDate || "");
+    setEditManualUsed(String(row.manualUsed ?? 0));
+    setEditManualMissed(String(row.manualMissed ?? 0));
     setEditHasIntervalLimit(!!row.intervalType || row.intervalLimit != null);
     setEditIntervalType(row.intervalType || "Weekly");
     setEditIntervalLimit(
@@ -950,6 +1074,8 @@ export default function AuthorizationsPage() {
 
   const handleUpdateAuthorization = async () => {
     const maximum = Number(editMaximum);
+    const manualUsed = Number(editManualUsed || 0);
+    const manualMissed = Number(editManualMissed || 0);
 
     if (!editId) {
       alert("Missing record id.");
@@ -976,6 +1102,16 @@ export default function AuthorizationsPage() {
       return;
     }
 
+    if (!Number.isFinite(manualUsed)) {
+      alert("Manual Used must be a valid number.");
+      return;
+    }
+
+    if (!Number.isFinite(manualMissed)) {
+      alert("Manual Missed must be a valid number.");
+      return;
+    }
+
     try {
       setEditLoading(true);
 
@@ -996,6 +1132,9 @@ export default function AuthorizationsPage() {
           startDate: editStartDate,
           endDate: editEndDate,
           maximum,
+          snapshotThroughDate: editSnapshotThroughDate || null,
+          manualUsed,
+          manualMissed,
           status: editStatus,
           source: editSource,
           voided: editVoided,
@@ -1205,6 +1344,7 @@ export default function AuthorizationsPage() {
                 <Badge variant="danger">Expired: {summary.expired}</Badge>
                 <Badge variant="muted">Authorized: {summary.authorized}</Badge>
                 <Badge variant="muted">Used: {summary.used}</Badge>
+                <Badge variant="muted">Missed: {summary.missed}</Badge>
                 <Badge variant="muted">Remaining: {summary.remaining}</Badge>
               </div>
             </div>
@@ -1218,7 +1358,7 @@ export default function AuthorizationsPage() {
 
           <div className="overflow-hidden rounded-2xl border border-bac-border bg-bac-panel">
             <div className="overflow-x-auto">
-              <table className="min-w-[1320px] w-full text-left text-sm">
+              <table className="min-w-[1440px] w-full text-left text-sm">
                 <thead className="border-b border-bac-border text-bac-muted">
                   <tr>
                     <th className="px-4 py-3">Authorization Number</th>
@@ -1230,6 +1370,7 @@ export default function AuthorizationsPage() {
                     <th className="px-4 py-3">End</th>
                     <th className="px-4 py-3">Authorized</th>
                     <th className="px-4 py-3">Used</th>
+                    <th className="px-4 py-3">Missed</th>
                     <th className="px-4 py-3">Remaining</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Source</th>
@@ -1242,7 +1383,7 @@ export default function AuthorizationsPage() {
                   {authLoading ? (
                     <tr>
                       <td
-                        colSpan={15}
+                        colSpan={16}
                         className="px-4 py-10 text-center text-bac-muted"
                       >
                         Loading authorizations...
@@ -1251,7 +1392,7 @@ export default function AuthorizationsPage() {
                   ) : rows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={15}
+                        colSpan={16}
                         className="px-4 py-10 text-center text-bac-muted"
                       >
                         No authorizations found for the current filters.
@@ -1282,6 +1423,7 @@ export default function AuthorizationsPage() {
                         <td className="px-4 py-3">{r.endDate}</td>
                         <td className="px-4 py-3">{r.unitsAuthorized}</td>
                         <td className="px-4 py-3">{r.unitsUsed}</td>
+                        <td className="px-4 py-3">{r.unitsMissed}</td>
                         <td className="px-4 py-3 font-medium">
                           {r.unitsRemaining}
                         </td>
@@ -1337,7 +1479,8 @@ export default function AuthorizationsPage() {
             </div>
 
             <div className="border-t border-bac-border px-4 py-3 text-xs text-bac-muted">
-              Phase 3.1 complete: multi-service authorization create plus record-level edit/delete.
+              Phase 3.2 complete: historical snapshot fields added with manual
+              used/missed and auto-calculation preview after snapshot date.
             </div>
           </div>
         </>
@@ -1350,13 +1493,13 @@ export default function AuthorizationsPage() {
               Utilization (live authorization data)
             </div>
             <div className="mt-1 text-sm text-bac-muted">
-              Summary by Individual + Service. Real used/remaining from visits
-              will be added in a later phase.
+              Summary by Individual + Service. Historical snapshot is included.
+              Real visit-based auto used/missed will be added in a later phase.
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-[900px] w-full text-left text-sm">
+            <table className="min-w-[980px] w-full text-left text-sm">
               <thead className="border-b border-bac-border text-bac-muted">
                 <tr>
                   <th className="px-4 py-3">Individual</th>
@@ -1364,6 +1507,7 @@ export default function AuthorizationsPage() {
                   <th className="px-4 py-3">Payer</th>
                   <th className="px-4 py-3">Authorized</th>
                   <th className="px-4 py-3">Used</th>
+                  <th className="px-4 py-3">Missed</th>
                   <th className="px-4 py-3">Remaining</th>
                   <th className="px-4 py-3">Utilization</th>
                 </tr>
@@ -1372,7 +1516,7 @@ export default function AuthorizationsPage() {
                 {utilRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-4 py-10 text-center text-bac-muted"
                     >
                       No utilization data for current filters.
@@ -1403,6 +1547,7 @@ export default function AuthorizationsPage() {
                         </td>
                         <td className="px-4 py-3">{r.authorized}</td>
                         <td className="px-4 py-3">{r.used}</td>
+                        <td className="px-4 py-3">{r.missed}</td>
                         <td className="px-4 py-3 font-medium">
                           {r.remaining}
                         </td>
@@ -1523,6 +1668,13 @@ export default function AuthorizationsPage() {
                 {selected.serviceCode} - {selected.serviceName}
               </div>
 
+              <div className="mt-3 text-xs text-bac-muted">
+                Snapshot Through Date
+              </div>
+              <div className="mt-1 text-sm font-medium text-bac-text">
+                {selected.snapshotThroughDate || "—"}
+              </div>
+
               <div className="mt-3 text-xs text-bac-muted">Status</div>
               <div className="mt-1">
                 <Badge
@@ -1561,10 +1713,44 @@ export default function AuthorizationsPage() {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
-                  <div className="text-xs text-bac-muted">Remaining</div>
+                  <div className="text-xs text-bac-muted">Missed</div>
                   <div className="mt-1 text-lg font-semibold text-bac-text">
-                    {selected.unitsRemaining}
+                    {selected.unitsMissed}
                   </div>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                  <div className="text-xs text-bac-muted">Manual Used</div>
+                  <div className="mt-1 text-lg font-semibold text-bac-text">
+                    {selected.manualUsed}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                  <div className="text-xs text-bac-muted">Manual Missed</div>
+                  <div className="mt-1 text-lg font-semibold text-bac-text">
+                    {selected.manualMissed}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                  <div className="text-xs text-bac-muted">Auto Used</div>
+                  <div className="mt-1 text-lg font-semibold text-bac-text">
+                    {selected.autoUsed}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-bac-border bg-bac-bg p-3">
+                  <div className="text-xs text-bac-muted">Auto Missed</div>
+                  <div className="mt-1 text-lg font-semibold text-bac-text">
+                    {selected.autoMissed}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-bac-border bg-bac-bg p-3">
+                <div className="text-xs text-bac-muted">Remaining</div>
+                <div className="mt-1 text-lg font-semibold text-bac-text">
+                  {selected.unitsRemaining}
                 </div>
               </div>
 
@@ -1590,8 +1776,8 @@ export default function AuthorizationsPage() {
       >
         <div className="space-y-4">
           <div className="text-sm text-bac-muted">
-            Phase 3.1: Save Authorization now supports up to 5 service lines and
-            writes all records to the real database.
+            Phase 3.2: Save Authorization now supports historical usage snapshot
+            fields plus manual used/missed totals before system auto-calculation.
           </div>
 
           <SectionCard
@@ -2086,7 +2272,7 @@ export default function AuthorizationsPage() {
               >
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                   <div className="lg:col-span-5">
-                    <Field label="Maximum" required>
+                    <Field label="Maximum Authorized" required>
                       <input
                         value={newMaximum}
                         onChange={(e) => setNewMaximum(e.target.value)}
@@ -2097,9 +2283,18 @@ export default function AuthorizationsPage() {
 
                   <div className="lg:col-span-7">
                     <div className="grid grid-cols-3 gap-3">
-                      <StatCard label="Total Used" value="0.00" />
-                      <StatCard label="Total Missed" value="0.00" />
-                      <StatCard label="Total Remaining" value="0.00" />
+                      <StatCard
+                        label="Total Used (Calculated)"
+                        value={newUtilization.totalUsed.toFixed(2)}
+                      />
+                      <StatCard
+                        label="Total Missed (Calculated)"
+                        value={newUtilization.totalMissed.toFixed(2)}
+                      />
+                      <StatCard
+                        label="Total Remaining (Calculated)"
+                        value={newUtilization.remaining.toFixed(2)}
+                      />
                     </div>
                   </div>
 
@@ -2182,22 +2377,89 @@ export default function AuthorizationsPage() {
                   ) : null}
                 </div>
               </SectionCard>
+
+              <SectionCard
+                title="Historical Usage Snapshot"
+                subtitle="Enter historical totals through a cutoff date. System will auto-calculate usage after this date."
+              >
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                  <div className="lg:col-span-4">
+                    <Field label="Snapshot Through Date">
+                      <input
+                        type="date"
+                        value={newSnapshotThroughDate}
+                        onChange={(e) =>
+                          setNewSnapshotThroughDate(e.target.value)
+                        }
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <Field label="Manual Used">
+                      <input
+                        value={newManualUsed}
+                        onChange={(e) => setNewManualUsed(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <Field label="Manual Missed">
+                      <input
+                        value={newManualMissed}
+                        onChange={(e) => setNewManualMissed(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-12">
+                    <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
+                      System will auto-calculate usage after this date.
+                    </div>
+                  </div>
+                </div>
+              </SectionCard>
             </div>
 
             <div className="xl:col-span-5">
               <SectionCard
                 title="Utilization Preview"
-                subtitle="Preview the authorization amount and remaining balance for this record."
+                subtitle="Preview authorized, manual, auto, and remaining values for this record."
               >
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                  <StatCard label="Authorized" value={newAuthorizedNumeric || 0} />
-                  <StatCard label="Used" value={newUsedNumeric} />
-                  <StatCard label="Remaining" value={newRemainingNumeric} />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
+                  <StatCard
+                    label="Authorized"
+                    value={newUtilization.maximum.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Manual Used"
+                    value={newUtilization.manualUsed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Manual Missed"
+                    value={newUtilization.manualMissed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Auto Used"
+                    value={newUtilization.autoUsed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Auto Missed"
+                    value={newUtilization.autoMissed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Remaining"
+                    value={newUtilization.remaining.toFixed(2)}
+                  />
                 </div>
 
                 <div className="mt-4">
                   <div className="mb-2 flex items-center justify-between text-xs text-bac-muted">
-                    <span>Utilization Progress</span>
+                    <span>Used Progress</span>
                     <span>{newUsedPct}%</span>
                   </div>
 
@@ -2209,8 +2471,16 @@ export default function AuthorizationsPage() {
                   </div>
 
                   <div className="mt-3 rounded-2xl border border-dashed border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
-                    Phase 3.1 default: used = 0, remaining = maximum. Real visit
-                    utilization will come later.
+                    Current phase preview:
+                    <br />
+                    Total Used = Manual Used + Auto Used
+                    <br />
+                    Total Missed = Manual Missed + Auto Missed
+                    <br />
+                    Remaining = Authorized - Total Used - Total Missed
+                    <br />
+                    Auto Used and Auto Missed are currently 0 until schedule/visit
+                    auto-calculation is added.
                   </div>
                 </div>
               </SectionCard>
@@ -2258,7 +2528,7 @@ export default function AuthorizationsPage() {
         open={openEdit}
         title="Edit Authorization Record"
         onClose={() => setOpenEdit(false)}
-        maxWidthClass="max-w-4xl"
+        maxWidthClass="max-w-5xl"
       >
         <div className="space-y-4">
           <SectionCard
@@ -2447,7 +2717,7 @@ export default function AuthorizationsPage() {
               </div>
 
               <div className="lg:col-span-2">
-                <Field label="Maximum" required>
+                <Field label="Maximum Authorized" required>
                   <input
                     value={editMaximum}
                     onChange={(e) => setEditMaximum(e.target.value)}
@@ -2557,6 +2827,112 @@ export default function AuthorizationsPage() {
               ) : null}
             </div>
           </SectionCard>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <div className="xl:col-span-7">
+              <SectionCard
+                title="Historical Usage Snapshot"
+                subtitle="Update manual historical totals through the cutoff date. System will auto-calculate usage after this date."
+              >
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                  <div className="lg:col-span-4">
+                    <Field label="Snapshot Through Date">
+                      <input
+                        type="date"
+                        value={editSnapshotThroughDate}
+                        onChange={(e) =>
+                          setEditSnapshotThroughDate(e.target.value)
+                        }
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <Field label="Manual Used">
+                      <input
+                        value={editManualUsed}
+                        onChange={(e) => setEditManualUsed(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-4">
+                    <Field label="Manual Missed">
+                      <input
+                        value={editManualMissed}
+                        onChange={(e) => setEditManualMissed(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none focus:ring-2 focus:ring-bac-primary/40"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="lg:col-span-12">
+                    <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
+                      System will auto-calculate usage after this date.
+                    </div>
+                  </div>
+                </div>
+              </SectionCard>
+            </div>
+
+            <div className="xl:col-span-5">
+              <SectionCard
+                title="Utilization Preview"
+                subtitle="Preview the current authorization totals for this record."
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
+                  <StatCard
+                    label="Authorized"
+                    value={editUtilization.maximum.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Manual Used"
+                    value={editUtilization.manualUsed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Manual Missed"
+                    value={editUtilization.manualMissed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Auto Used"
+                    value={editUtilization.autoUsed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Auto Missed"
+                    value={editUtilization.autoMissed.toFixed(2)}
+                  />
+                  <StatCard
+                    label="Remaining"
+                    value={editUtilization.remaining.toFixed(2)}
+                  />
+                </div>
+
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center justify-between text-xs text-bac-muted">
+                    <span>Used Progress</span>
+                    <span>{editUsedPct}%</span>
+                  </div>
+
+                  <div className="h-3 w-full overflow-hidden rounded-full bg-bac-bg">
+                    <div
+                      className="h-full rounded-full bg-bac-primary transition-all"
+                      style={{ width: `${editUsedPct}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border border-dashed border-bac-border bg-bac-bg p-3 text-xs text-bac-muted">
+                    Total Used = Manual Used + Auto Used
+                    <br />
+                    Total Missed = Manual Missed + Auto Missed
+                    <br />
+                    Remaining = Authorized - Total Used - Total Missed
+                  </div>
+                </div>
+              </SectionCard>
+            </div>
+          </div>
 
           <div className="flex justify-end gap-2 border-t border-bac-border pt-4">
             <button

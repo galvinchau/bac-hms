@@ -345,6 +345,11 @@ model Authorization {
   used      Float @default(0)
   remaining Float @default(0)
 
+  // ✅ NEW: historical snapshot fields
+  snapshotThroughDate DateTime?
+  manualUsed          Float @default(0)
+  manualMissed        Float @default(0)
+
   status String @default("PENDING")
   source String @default("MANUAL")
 
