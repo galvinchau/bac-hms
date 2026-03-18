@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 type BillingRatePayer = "ODP";
-type BillingRateStatus = "ACTIVE";
+type BillingRateStatus = "ACTIVE" | "INACTIVE" | "FUTURE" | "EXPIRED";
 
 type ServiceOption = {
   id: string;
@@ -23,6 +23,9 @@ type BillingRateRow = {
   serviceName: string;
   payer: BillingRatePayer;
   rate: number;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  isActive: boolean;
   notes?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -36,6 +39,9 @@ type RateFormState = {
   serviceName: string;
   payer: BillingRatePayer;
   rate: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+  isActive: boolean;
   notes: string;
 };
 
@@ -51,6 +57,9 @@ type ServiceRatesResponse = {
     serviceStatus?: string | null;
     billable?: boolean | null;
     rate: number;
+    effectiveFrom: string;
+    effectiveTo?: string | null;
+    isActive: boolean;
     notes?: string | null;
     createdAt?: string;
     updatedAt?: string;
@@ -75,11 +84,27 @@ const ALLOWED_BILLING_CODES = new Set([
   "W8996",
 ]);
 
+function getRateStatus(row: BillingRateRow): BillingRateStatus {
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (!row.isActive) return "INACTIVE";
+  if (row.effectiveFrom && row.effectiveFrom > today) return "FUTURE";
+  if (row.effectiveTo && row.effectiveTo < today) return "EXPIRED";
+  return "ACTIVE";
+}
+
 function statusClass(status: BillingRateStatus) {
   switch (status) {
     case "ACTIVE":
-    default:
       return "bg-bac-green/15 text-bac-green border-bac-green/30";
+    case "FUTURE":
+      return "bg-sky-500/15 text-sky-200 border-sky-500/30";
+    case "EXPIRED":
+      return "bg-yellow-500/15 text-yellow-200 border-yellow-500/30";
+    case "INACTIVE":
+      return "bg-white/10 text-bac-muted border-bac-border";
+    default:
+      return "bg-white/10 text-bac-text border-bac-border";
   }
 }
 
@@ -131,7 +156,7 @@ function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-      <div className="w-full max-w-3xl rounded-2xl border border-bac-border bg-bac-bg shadow-2xl">
+      <div className="w-full max-w-4xl rounded-2xl border border-bac-border bg-bac-bg shadow-2xl">
         <div className="flex items-center justify-between border-b border-bac-border px-5 py-4">
           <div className="text-base font-semibold text-bac-text">{title}</div>
           <button
@@ -157,6 +182,9 @@ function emptyForm(): RateFormState {
     serviceName: "",
     payer: "ODP",
     rate: "",
+    effectiveFrom: "",
+    effectiveTo: "",
+    isActive: true,
     notes: "",
   };
 }
@@ -177,6 +205,13 @@ function normalizeRateRows(items: ServiceRatesResponse["items"]): BillingRateRow
     serviceName: item.serviceName,
     payer: item.payer,
     rate: Number(item.rate || 0),
+    effectiveFrom: item.effectiveFrom
+      ? String(item.effectiveFrom).slice(0, 10)
+      : "",
+    effectiveTo: item.effectiveTo
+      ? String(item.effectiveTo).slice(0, 10)
+      : null,
+    isActive: Boolean(item.isActive),
     notes: item.notes || null,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -276,8 +311,10 @@ export default function BillingRateSetupCard() {
     const q = search.trim().toLowerCase();
 
     return rows.filter((row) => {
+      const rowStatus = getRateStatus(row);
+
       if (serviceFilter !== "ALL" && row.serviceId !== serviceFilter) return false;
-      if (statusFilter !== "ALL" && statusFilter !== "ACTIVE") return false;
+      if (statusFilter !== "ALL" && rowStatus !== statusFilter) return false;
 
       if (!q) return true;
 
@@ -304,6 +341,9 @@ export default function BillingRateSetupCard() {
       serviceName: row.serviceName,
       payer: "ODP",
       rate: String(row.rate),
+      effectiveFrom: row.effectiveFrom || "",
+      effectiveTo: row.effectiveTo || "",
+      isActive: row.isActive,
       notes: row.notes || "",
     });
     setActionMessage(null);
@@ -332,8 +372,8 @@ export default function BillingRateSetupCard() {
   async function saveForm() {
     setActionMessage(null);
 
-    if (!form.serviceId || !form.rate) {
-      alert("Please complete Service and Rate.");
+    if (!form.serviceId || !form.rate || !form.effectiveFrom) {
+      alert("Please complete Service, Rate, and Effective From.");
       return;
     }
 
@@ -343,10 +383,18 @@ export default function BillingRateSetupCard() {
       return;
     }
 
+    if (form.effectiveTo && form.effectiveTo < form.effectiveFrom) {
+      alert("Effective To cannot be earlier than Effective From.");
+      return;
+    }
+
     const payload = {
       payer: "ODP" as BillingRatePayer,
       serviceId: form.serviceId,
       rate: rateNumber,
+      effectiveFrom: form.effectiveFrom,
+      effectiveTo: form.effectiveTo || undefined,
+      isActive: form.isActive,
       notes: form.notes.trim(),
     };
 
@@ -370,9 +418,7 @@ export default function BillingRateSetupCard() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok) {
-        throw new Error(
-          String(json?.message || "Failed to save service rate.")
-        );
+        throw new Error(String(json?.message || "Failed to save service rate."));
       }
 
       await loadRows();
@@ -401,9 +447,7 @@ export default function BillingRateSetupCard() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok) {
-        throw new Error(
-          String(json?.message || "Failed to delete service rate.")
-        );
+        throw new Error(String(json?.message || "Failed to delete service rate."));
       }
 
       await loadRows();
@@ -455,7 +499,7 @@ export default function BillingRateSetupCard() {
         </div>
 
         <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-12">
-          <div className="md:col-span-5">
+          <div className="md:col-span-4">
             <Field label="Service">
               <select
                 value={serviceFilter}
@@ -482,7 +526,7 @@ export default function BillingRateSetupCard() {
             </Field>
           </div>
 
-          <div className="md:col-span-2">
+          <div className="md:col-span-3">
             <Field label="Status">
               <select
                 value={statusFilter}
@@ -491,6 +535,9 @@ export default function BillingRateSetupCard() {
               >
                 <option value="ALL">All</option>
                 <option value="ACTIVE">Active</option>
+                <option value="FUTURE">Future</option>
+                <option value="EXPIRED">Expired</option>
+                <option value="INACTIVE">Inactive</option>
               </select>
             </Field>
           </div>
@@ -509,13 +556,15 @@ export default function BillingRateSetupCard() {
 
         <div className="overflow-hidden rounded-2xl border border-bac-border bg-bac-bg">
           <div className="overflow-x-auto">
-            <table className="min-w-[1100px] w-full text-left text-sm">
+            <table className="min-w-[1400px] w-full text-left text-sm">
               <thead className="border-b border-bac-border text-bac-muted">
                 <tr>
                   <th className="px-4 py-3">Service Code</th>
                   <th className="px-4 py-3">Service Name</th>
                   <th className="px-4 py-3">Payer</th>
                   <th className="px-4 py-3">Rate</th>
+                  <th className="px-4 py-3">Effective From</th>
+                  <th className="px-4 py-3">Effective To</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Notes</th>
                   <th className="px-4 py-3">Updated</th>
@@ -525,19 +574,19 @@ export default function BillingRateSetupCard() {
               <tbody className="divide-y divide-bac-border">
                 {rowsLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-bac-muted">
+                    <td colSpan={10} className="px-4 py-10 text-center text-bac-muted">
                       Loading rates...
                     </td>
                   </tr>
                 ) : filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-bac-muted">
+                    <td colSpan={10} className="px-4 py-10 text-center text-bac-muted">
                       No rate records found for the current filters.
                     </td>
                   </tr>
                 ) : (
                   filteredRows.map((row) => {
-                    const status: BillingRateStatus = "ACTIVE";
+                    const status = getRateStatus(row);
 
                     return (
                       <tr key={row.id} className="text-bac-text hover:bg-white/3">
@@ -547,6 +596,8 @@ export default function BillingRateSetupCard() {
                         <td className="px-4 py-3">{row.serviceName}</td>
                         <td className="px-4 py-3">{row.payer}</td>
                         <td className="px-4 py-3">${row.rate.toFixed(2)}</td>
+                        <td className="px-4 py-3">{row.effectiveFrom || "—"}</td>
+                        <td className="px-4 py-3">{row.effectiveTo || "—"}</td>
                         <td className="px-4 py-3">
                           <Badge status={status}>{status}</Badge>
                         </td>
@@ -642,19 +693,54 @@ export default function BillingRateSetupCard() {
             />
           </Field>
 
-          <Field label="Notes">
+          <Field label="Effective From">
             <input
-              value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+              type="date"
+              value={form.effectiveFrom}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, effectiveFrom: e.target.value }))
+              }
               disabled={saving}
               className="h-10 w-full rounded-xl border border-bac-border bg-bac-panel px-3 text-sm text-bac-text outline-none disabled:opacity-60"
             />
           </Field>
 
-          <div className="md:col-span-2 rounded-xl border border-dashed border-bac-border bg-bac-panel px-3 py-3 text-xs text-bac-muted">
-            This screen now saves directly into the real ServiceRate table used by Billing.
-            Effective From / Effective To / Active are not shown here because the current
-            backend schema does not store those fields yet.
+          <Field label="Effective To">
+            <input
+              type="date"
+              value={form.effectiveTo}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, effectiveTo: e.target.value }))
+              }
+              disabled={saving}
+              className="h-10 w-full rounded-xl border border-bac-border bg-bac-panel px-3 text-sm text-bac-text outline-none disabled:opacity-60"
+            />
+          </Field>
+
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2 text-sm text-bac-text">
+              <input
+                type="checkbox"
+                checked={form.isActive}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, isActive: e.target.checked }))
+                }
+                disabled={saving}
+                className="rounded border-bac-border"
+              />
+              <span>Active</span>
+            </label>
+          </div>
+
+          <div className="md:col-span-2">
+            <Field label="Notes">
+              <input
+                value={form.notes}
+                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                disabled={saving}
+                className="h-10 w-full rounded-xl border border-bac-border bg-bac-panel px-3 text-sm text-bac-text outline-none disabled:opacity-60"
+              />
+            </Field>
           </div>
         </div>
 
