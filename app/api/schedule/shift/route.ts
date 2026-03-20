@@ -1,4 +1,3 @@
-// app/api/schedule/shift/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -72,7 +71,7 @@ export async function POST(req: Request) {
     if (checkInAt || checkOutAt) {
       let visit = await prisma.visit.create({
         data: {
-          shiftId: created.id,
+          scheduleShiftId: created.id,
           checkInAt: checkInAt ? new Date(checkInAt) : new Date(plannedStart),
           checkOutAt: checkOutAt ? new Date(checkOutAt) : null,
           units: 0,
@@ -187,7 +186,7 @@ export async function PUT(req: Request) {
     // Nếu có update checkIn/checkOut thì update/create visit đầu tiên
     if (typeof checkInAt !== "undefined" || typeof checkOutAt !== "undefined") {
       const firstVisit = await prisma.visit.findFirst({
-        where: { shiftId: existing.id },
+        where: { scheduleShiftId: existing.id },
         orderBy: { checkInAt: "asc" },
       });
 
@@ -234,7 +233,7 @@ export async function PUT(req: Request) {
 
         await prisma.visit.create({
           data: {
-            shiftId: existing.id,
+            scheduleShiftId: existing.id,
             checkInAt: fallbackCheckIn,
             checkOutAt: nextCheckOut,
             units,
@@ -283,17 +282,59 @@ export async function DELETE(req: Request) {
 
     const existing = await prisma.scheduleShift.findUnique({
       where: { id: effectiveShiftId },
+      select: {
+        id: true,
+        status: true,
+      },
     });
 
     if (!existing) {
       return NextResponse.json({ error: "SHIFT_NOT_FOUND" }, { status: 404 });
     }
 
-    // Xóa visits trước rồi xóa shift
-    await prisma.$transaction([
-      prisma.visit.deleteMany({ where: { shiftId: existing.id } }),
-      prisma.scheduleShift.delete({ where: { id: existing.id } }),
-    ]);
+    // Không cho xóa ca đang diễn ra
+    if (existing.status === "IN_PROGRESS") {
+      return NextResponse.json(
+        {
+          error: "SHIFT_DELETE_BLOCKED",
+          detail:
+            "Cannot delete this shift because it is currently IN PROGRESS.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Không cho xóa ca đã hoàn tất
+    if (existing.status === "COMPLETED") {
+      return NextResponse.json(
+        {
+          error: "SHIFT_DELETE_BLOCKED",
+          detail:
+            "Cannot delete this shift because it is already COMPLETED.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Không cho xóa nếu đã có visit liên kết
+    const linkedVisitsCount = await prisma.visit.count({
+      where: { scheduleShiftId: existing.id },
+    });
+
+    if (linkedVisitsCount > 0) {
+      return NextResponse.json(
+        {
+          error: "SHIFT_DELETE_BLOCKED",
+          detail:
+            "Cannot delete this shift because one or more visit records are linked to it.",
+        },
+        { status: 400 }
+      );
+    }
+
+    await prisma.scheduleShift.delete({
+      where: { id: existing.id },
+    });
 
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (err: any) {

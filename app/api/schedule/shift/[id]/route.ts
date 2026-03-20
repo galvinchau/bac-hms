@@ -1,4 +1,3 @@
-// app/api/schedule/shift/[id]/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { VisitSource } from "@prisma/client";
@@ -34,7 +33,6 @@ export async function PUT(req: Request, context: any) {
 
     const {
       serviceId,
-      // FE đang gửi dspId, nhưng vẫn support cả plannedDspId cho tương thích
       dspId,
       plannedDspId,
       plannedStart,
@@ -70,8 +68,8 @@ export async function PUT(req: Request, context: any) {
     if (plannedEnd) data.plannedEnd = new Date(plannedEnd);
 
     // ===== AUTO STATUS ƯU TIÊN THEO CHECK IN / OUT =====
-    
     let autoStatus: string | undefined;
+
     if (checkInAt && checkOutAt) {
       autoStatus = "COMPLETED";
     } else if (checkInAt && !checkOutAt) {
@@ -199,6 +197,39 @@ export async function DELETE(req: Request, context: any) {
   }
 
   try {
+    const existingShift = await prisma.scheduleShift.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!existingShift) {
+      return NextResponse.json({
+        ok: true,
+        warning: "SHIFT_ALREADY_DELETED",
+      });
+    }
+
+    const linkedVisitsCount = await prisma.visit.count({
+      where: {
+        scheduleShiftId: id,
+      },
+    });
+
+    // Không cho xóa shift đã có visit để an toàn audit/payroll/billing
+    if (linkedVisitsCount > 0) {
+      return NextResponse.json(
+        {
+          error: "SHIFT_HAS_VISITS",
+          detail:
+            "Cannot delete this shift because one or more visits are already linked to it.",
+        },
+        { status: 400 }
+      );
+    }
+
     await prisma.scheduleShift.delete({
       where: { id },
     });
