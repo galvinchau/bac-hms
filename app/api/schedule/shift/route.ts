@@ -298,7 +298,7 @@ export async function DELETE(req: Request) {
         {
           error: "SHIFT_DELETE_BLOCKED",
           detail:
-            "Cannot delete this shift because it is currently IN PROGRESS.",
+            "Cannot delete this shift because it is currently IN PROGRESS. If for any reason you need to delete this shift, please contact Admin (Galvin) for assistance.",
         },
         { status: 400 }
       );
@@ -310,7 +310,7 @@ export async function DELETE(req: Request) {
         {
           error: "SHIFT_DELETE_BLOCKED",
           detail:
-            "Cannot delete this shift because it is already COMPLETED.",
+            "Cannot delete this shift because it is already COMPLETED. If for any reason you need to delete this shift, please contact Admin (Galvin) for assistance.",
         },
         { status: 400 }
       );
@@ -326,7 +326,7 @@ export async function DELETE(req: Request) {
         {
           error: "SHIFT_DELETE_BLOCKED",
           detail:
-            "Cannot delete this shift because one or more visit records are linked to it.",
+            "Cannot delete this shift because one or more visit records are linked to it. If for any reason you need to delete this shift, please contact Admin (Galvin) for assistance.",
         },
         { status: 400 }
       );
