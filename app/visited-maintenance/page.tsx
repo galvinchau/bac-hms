@@ -39,12 +39,74 @@ type VisitRow = {
   reviewed?: boolean;
 };
 
+type VisitGpsDetail = {
+  visitId: string;
+  date: string;
+  status: VisitStatus;
+  cancelReason?: string | null;
+  individual: {
+    id: string;
+    name: string;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
+    fullAddress?: string | null;
+    homeLat?: number | null;
+    homeLng?: number | null;
+  };
+  dsp: {
+    id: string;
+    name: string;
+  };
+  service: {
+    id?: string | null;
+    code?: string | null;
+    name?: string | null;
+  };
+  schedule: {
+    shiftId?: string | null;
+    plannedDate?: string | null;
+    plannedStart?: string | null;
+    plannedEnd?: string | null;
+  };
+  visit: {
+    checkIn?: string | null;
+    checkOut?: string | null;
+    gpsLatitude?: number | null;
+    gpsLongitude?: number | null;
+    source?: VisitSource | string | null;
+  };
+  gpsSummary: {
+    hasVisitGps: boolean;
+    hasHomeCoords: boolean;
+    distanceMiles?: number | null;
+    locationStatus: "ON_SITE" | "NEARBY" | "FAR" | "UNKNOWN";
+  };
+};
+
+type LeafletLib = {
+  map: (...args: any[]) => any;
+  tileLayer: (...args: any[]) => any;
+  marker: (...args: any[]) => any;
+  polyline: (...args: any[]) => any;
+  divIcon: (...args: any[]) => any;
+  latLngBounds: (...args: any[]) => any;
+};
+
+declare global {
+  interface Window {
+    L?: LeafletLib;
+  }
+}
+
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
 function toMinutes(hhmm: string | null | undefined) {
-  if (!hhmm) return null;
+  if (!hhmm || hhmm === "—") return null;
   const m = /^(\d{2}):(\d{2})$/.exec(hhmm);
   if (!m) return null;
   const hh = Number(m[1]);
@@ -53,7 +115,10 @@ function toMinutes(hhmm: string | null | undefined) {
   return hh * 60 + mm;
 }
 
-function diffMinutes(start: string | null | undefined, end: string | null | undefined) {
+function diffMinutes(
+  start: string | null | undefined,
+  end: string | null | undefined
+) {
   const s = toMinutes(start);
   const e = toMinutes(end);
   if (s == null || e == null) return null;
@@ -71,8 +136,351 @@ function formatMinutes(mins: number | null) {
 }
 
 function fmtDateLabel(iso: string) {
-  const [y, m, d] = iso.split("-");
+  if (!iso) return "—";
+  const parts = iso.split("-");
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts;
   return `${m}/${d}/${y}`;
+}
+
+function fmtLatLng(value?: number | null) {
+  return typeof value === "number" ? value.toFixed(6) : "—";
+}
+
+function fmtMiles(value?: number | null) {
+  return typeof value === "number" ? `${value.toFixed(2)} miles` : "—";
+}
+
+function gpsStatusTone(
+  status?: VisitGpsDetail["gpsSummary"]["locationStatus"]
+): "success" | "warning" | "danger" | "muted" {
+  if (status === "ON_SITE") return "success";
+  if (status === "NEARBY") return "warning";
+  if (status === "FAR") return "danger";
+  return "muted";
+}
+
+function gpsStatusLabel(
+  status?: VisitGpsDetail["gpsSummary"]["locationStatus"]
+) {
+  if (status === "ON_SITE") return "On Site";
+  if (status === "NEARBY") return "Nearby";
+  if (status === "FAR") return "Far";
+  return "Unknown";
+}
+
+function buildGoogleMapsDirectionsUrl(detail: VisitGpsDetail | null) {
+  if (!detail) return "";
+  const origin = detail.individual.fullAddress || "";
+  const lat = detail.visit.gpsLatitude;
+  const lng = detail.visit.gpsLongitude;
+  const destination =
+    typeof lat === "number" && typeof lng === "number" ? `${lat},${lng}` : "";
+
+  if (origin && destination) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+      origin
+    )}&destination=${encodeURIComponent(destination)}`;
+  }
+
+  if (destination) {
+    return `https://www.google.com/maps?q=${encodeURIComponent(destination)}`;
+  }
+
+  if (origin) {
+    return `https://www.google.com/maps?q=${encodeURIComponent(origin)}`;
+  }
+
+  return "";
+}
+
+function ensureLeafletCss() {
+  const existing = document.getElementById("leaflet-css-runtime");
+  if (existing) return;
+
+  const link = document.createElement("link");
+  link.id = "leaflet-css-runtime";
+  link.rel = "stylesheet";
+  link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+  document.head.appendChild(link);
+}
+
+function ensureLeafletJs(): Promise<LeafletLib> {
+  return new Promise((resolve, reject) => {
+    if (window.L) {
+      resolve(window.L);
+      return;
+    }
+
+    const existing = document.getElementById(
+      "leaflet-js-runtime"
+    ) as HTMLScriptElement | null;
+
+    if (existing) {
+      existing.addEventListener("load", () => {
+        if (window.L) resolve(window.L);
+        else reject(new Error("Leaflet loaded but window.L not found."));
+      });
+      existing.addEventListener("error", () => {
+        reject(new Error("Failed to load Leaflet script."));
+      });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "leaflet-js-runtime";
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.L) resolve(window.L);
+      else reject(new Error("Leaflet loaded but window.L not found."));
+    };
+    script.onerror = () => reject(new Error("Failed to load Leaflet script."));
+    document.body.appendChild(script);
+  });
+}
+
+function createPinHtml(color: "red" | "blue", label: string) {
+  const bg = color === "red" ? "#ef4444" : "#3b82f6";
+  const shadow = color === "red" ? "rgba(239,68,68,0.35)" : "rgba(59,130,246,0.35)";
+
+  return `
+    <div style="position:relative; width:24px; height:24px;">
+      <div style="
+        position:absolute;
+        left:0;
+        top:0;
+        width:24px;
+        height:24px;
+        border-radius:9999px;
+        background:${bg};
+        border:3px solid white;
+        box-shadow:0 0 0 6px ${shadow};
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:white;
+        font-weight:700;
+        font-size:11px;
+      ">${label}</div>
+    </div>
+  `;
+}
+
+function createLegendDistanceNote(detail: VisitGpsDetail) {
+  const miles = detail.gpsSummary.distanceMiles;
+  if (typeof miles !== "number") return "";
+  if (miles < 0.02) return "Markers are very close. Zoom in to separate them.";
+  return "";
+}
+
+function VisitGpsLeafletMap({
+  detail,
+}: {
+  detail: VisitGpsDetail;
+}) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const layersRef = useRef<any[]>([]);
+  const [mapError, setMapError] = useState("");
+
+  const homeLat = detail.individual.homeLat;
+  const homeLng = detail.individual.homeLng;
+  const visitLat = detail.visit.gpsLatitude;
+  const visitLng = detail.visit.gpsLongitude;
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function boot() {
+      if (!mapRef.current) return;
+
+      if (
+        typeof homeLat !== "number" &&
+        typeof visitLat !== "number"
+      ) {
+        return;
+      }
+
+      try {
+        setMapError("");
+        ensureLeafletCss();
+        const L = await ensureLeafletJs();
+        if (disposed || !mapRef.current) return;
+
+        if (!mapInstanceRef.current) {
+          mapInstanceRef.current = L.map(mapRef.current, {
+            zoomControl: true,
+            attributionControl: true,
+          });
+
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors',
+          }).addTo(mapInstanceRef.current);
+        }
+
+        const map = mapInstanceRef.current;
+
+        layersRef.current.forEach((layer) => {
+          try {
+            map.removeLayer(layer);
+          } catch {
+            // ignore
+          }
+        });
+        layersRef.current = [];
+
+        const points: Array<[number, number]> = [];
+
+        if (typeof homeLat === "number" && typeof homeLng === "number") {
+          const homeIcon = L.divIcon({
+            className: "",
+            html: createPinHtml("blue", "H"),
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+
+          const homeMarker = L.marker([homeLat, homeLng], {
+            icon: homeIcon,
+            title: "Patient Home",
+          }).bindPopup(
+            `
+              <div style="min-width:180px">
+                <div style="font-weight:700; margin-bottom:4px;">Patient Home</div>
+                <div>${detail.individual.name}</div>
+                <div style="margin-top:4px; color:#4b5563;">${
+                  detail.individual.fullAddress || "No address"
+                }</div>
+                <div style="margin-top:6px;">Lat ${homeLat.toFixed(6)}, Lng ${homeLng.toFixed(6)}</div>
+              </div>
+            `
+          );
+
+          homeMarker.addTo(map);
+          layersRef.current.push(homeMarker);
+          points.push([homeLat, homeLng]);
+        }
+
+        if (typeof visitLat === "number" && typeof visitLng === "number") {
+          const visitIcon = L.divIcon({
+            className: "",
+            html: createPinHtml("red", "D"),
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+
+          const visitMarker = L.marker([visitLat, visitLng], {
+            icon: visitIcon,
+            title: "DSP Visit GPS",
+          }).bindPopup(
+            `
+              <div style="min-width:180px">
+                <div style="font-weight:700; margin-bottom:4px;">DSP Visit GPS</div>
+                <div>${detail.dsp.name}</div>
+                <div style="margin-top:4px; color:#4b5563;">Check-in ${
+                  detail.visit.checkIn || "—"
+                } / Check-out ${detail.visit.checkOut || "—"}</div>
+                <div style="margin-top:6px;">Lat ${visitLat.toFixed(6)}, Lng ${visitLng.toFixed(6)}</div>
+              </div>
+            `
+          );
+
+          visitMarker.addTo(map);
+          layersRef.current.push(visitMarker);
+          points.push([visitLat, visitLng]);
+        }
+
+        if (
+          typeof homeLat === "number" &&
+          typeof homeLng === "number" &&
+          typeof visitLat === "number" &&
+          typeof visitLng === "number"
+        ) {
+          const line = L.polyline(
+            [
+              [homeLat, homeLng],
+              [visitLat, visitLng],
+            ],
+            {
+              color: "#f59e0b",
+              weight: 3,
+              opacity: 0.85,
+              dashArray: "8, 8",
+            }
+          );
+          line.addTo(map);
+          layersRef.current.push(line);
+        }
+
+        if (points.length >= 2) {
+          const bounds = L.latLngBounds(points);
+          map.fitBounds(bounds, { padding: [50, 50] });
+        } else if (points.length === 1) {
+          map.setView(points[0], 15);
+        }
+
+        setTimeout(() => {
+          try {
+            map.invalidateSize();
+          } catch {
+            // ignore
+          }
+        }, 120);
+      } catch (err: any) {
+        setMapError(err?.message || "Failed to load map.");
+      }
+    }
+
+    boot();
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    detail,
+    homeLat,
+    homeLng,
+    visitLat,
+    visitLng,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.remove();
+        } catch {
+          // ignore
+        }
+        mapInstanceRef.current = null;
+      }
+      layersRef.current = [];
+    };
+  }, []);
+
+  if (
+    typeof homeLat !== "number" &&
+    typeof visitLat !== "number"
+  ) {
+    return (
+      <div className="flex h-[560px] items-center justify-center rounded-2xl border border-dashed border-bac-border bg-bac-bg text-bac-muted">
+        No map data available for this visit.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-bac-border bg-bac-bg">
+      {mapError ? (
+        <div className="flex h-[560px] items-center justify-center px-6 text-center text-sm text-yellow-200">
+          {mapError}
+        </div>
+      ) : (
+        <div ref={mapRef} className="h-[560px] w-full" />
+      )}
+    </div>
+  );
 }
 
 function Badge({
@@ -88,14 +496,14 @@ function Badge({
     variant === "success"
       ? "bg-bac-green/15 text-bac-green border-bac-green/30"
       : variant === "warning"
-        ? "bg-yellow-500/15 text-yellow-200 border-yellow-500/30"
-        : variant === "danger"
-          ? "bg-bac-red/15 text-bac-red border-bac-red/30"
-          : variant === "info"
-            ? "bg-sky-500/15 text-sky-300 border-sky-500/30"
-            : variant === "muted"
-              ? "bg-white/5 text-bac-muted border-bac-border"
-              : "bg-white/10 text-bac-text border-bac-border";
+      ? "bg-yellow-500/15 text-yellow-200 border-yellow-500/30"
+      : variant === "danger"
+      ? "bg-bac-red/15 text-bac-red border-bac-red/30"
+      : variant === "info"
+      ? "bg-sky-500/15 text-sky-300 border-sky-500/30"
+      : variant === "muted"
+      ? "bg-white/5 text-bac-muted border-bac-border"
+      : "bg-white/10 text-bac-text border-bac-border";
 
   return (
     <span
@@ -204,12 +612,12 @@ function StatCard({
     tone === "success"
       ? "border-bac-green/30 bg-bac-green/8"
       : tone === "warning"
-        ? "border-yellow-500/30 bg-yellow-500/8"
-        : tone === "danger"
-          ? "border-bac-red/30 bg-bac-red/8"
-          : tone === "info"
-            ? "border-sky-500/30 bg-sky-500/8"
-            : "border-bac-border bg-bac-panel";
+      ? "border-yellow-500/30 bg-yellow-500/8"
+      : tone === "danger"
+      ? "border-bac-red/30 bg-bac-red/8"
+      : tone === "info"
+      ? "border-sky-500/30 bg-sky-500/8"
+      : "border-bac-border bg-bac-panel";
 
   return (
     <div className={cx("rounded-2xl border p-4", toneCls)}>
@@ -282,16 +690,23 @@ function Modal({
   title,
   children,
   onClose,
+  maxWidthClass = "max-w-5xl",
 }: {
   open: boolean;
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  maxWidthClass?: string;
 }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-bac-border bg-bac-bg shadow-xl">
+      <div
+        className={cx(
+          "max-h-[90vh] w-full overflow-hidden rounded-2xl border border-bac-border bg-bac-bg shadow-xl",
+          maxWidthClass
+        )}
+      >
         <div className="flex items-center justify-between border-b border-bac-border px-5 py-4">
           <div className="text-base font-semibold text-bac-text">{title}</div>
           <button
@@ -683,6 +1098,11 @@ export default function VisitedMaintenancePage() {
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [bulkReviewing, setBulkReviewing] = useState(false);
 
+  const [gpsOpen, setGpsOpen] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsError, setGpsError] = useState("");
+  const [gpsData, setGpsData] = useState<VisitGpsDetail | null>(null);
+
   const dspOptions = useMemo(() => {
     const arr = Array.from(new Set(rowsData.map((r) => r.dspName))).sort();
     return [{ value: "ALL", label: "All DSPs" }].concat(
@@ -835,7 +1255,7 @@ export default function VisitedMaintenancePage() {
 
   const allSummary = useMemo(() => {
     const base = rows;
-    
+
     return {
       all: base.length,
       needsReview: base.filter((r) => getVisitMeta(r).needsReview).length,
@@ -913,10 +1333,10 @@ export default function VisitedMaintenancePage() {
       prev.map((row) =>
         row.id === inlineFixId
           ? {
-            ...row,
-            checkIn: fixCheckIn || null,
-            checkOut: fixCheckOut || null,
-          }
+              ...row,
+              checkIn: fixCheckIn || null,
+              checkOut: fixCheckOut || null,
+            }
           : row
       )
     );
@@ -1014,6 +1434,35 @@ export default function VisitedMaintenancePage() {
       alert(err?.message || "Failed to mark visit as reviewed.");
     } finally {
       setReviewingId(null);
+    }
+  };
+
+  const handleViewGps = async (visitId: string) => {
+    if (!API_BASE) {
+      alert("GPS requires live API connection.");
+      return;
+    }
+
+    try {
+      setGpsOpen(true);
+      setGpsLoading(true);
+      setGpsError("");
+      setGpsData(null);
+
+      const res = await fetch(`${API_BASE}/visited-maintenance/visits/${visitId}/gps`, {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to load GPS detail (${res.status})`);
+      }
+
+      const data = await res.json();
+      setGpsData(data);
+    } catch (err: any) {
+      setGpsError(err?.message || "Failed to load GPS detail.");
+    } finally {
+      setGpsLoading(false);
     }
   };
 
@@ -1310,8 +1759,8 @@ export default function VisitedMaintenancePage() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-bac-border bg-bac-panel">
-        <div className="w-full">
-          <table className="w-full table-fixed text-left text-sm">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full table-fixed text-left text-sm min-w-[1450px]">
             <thead className="border-b border-bac-border text-bac-muted">
               <tr>
                 <th className="w-[44px] px-2 py-3 text-center">
@@ -1331,7 +1780,8 @@ export default function VisitedMaintenancePage() {
                 <th className="px-3 py-3 w-[11%]">Visited</th>
                 <th className="px-3 py-3 w-[12%]">Duration</th>
                 <th className="px-3 py-3 w-[10%]">Units</th>
-                <th className="px-3 py-3 w-[10%]">Status</th>
+                <th className="px-3 py-3 w-[9%]">Status</th>
+                <th className="px-3 py-3 w-[9%]">GPS</th>
                 <th className="px-3 py-3 w-[88px] text-right">Actions</th>
               </tr>
             </thead>
@@ -1339,7 +1789,7 @@ export default function VisitedMaintenancePage() {
             <tbody className="divide-y divide-bac-border">
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-bac-muted">
+                  <td colSpan={12} className="px-4 py-10 text-center text-bac-muted">
                     Loading visits...
                   </td>
                 </tr>
@@ -1480,18 +1930,18 @@ export default function VisitedMaintenancePage() {
                               meta.timeVariance == null
                                 ? "text-bac-muted"
                                 : meta.timeVariance === 0
-                                  ? "text-bac-muted"
-                                  : meta.timeVariance > 0
-                                    ? "text-bac-green"
-                                    : "text-bac-red"
+                                ? "text-bac-muted"
+                                : meta.timeVariance > 0
+                                ? "text-bac-green"
+                                : "text-bac-red"
                             )}
                           >
                             Δ{" "}
                             {meta.timeVariance == null
                               ? "—"
                               : meta.timeVariance > 0
-                                ? `+${meta.timeVariance}m`
-                                : `${meta.timeVariance}m`}
+                              ? `+${meta.timeVariance}m`
+                              : `${meta.timeVariance}m`}
                           </div>
                         </td>
 
@@ -1506,8 +1956,8 @@ export default function VisitedMaintenancePage() {
                               meta.unitVariance === 0
                                 ? "text-bac-muted"
                                 : meta.unitVariance > 0
-                                  ? "text-bac-green"
-                                  : "text-bac-red"
+                                ? "text-bac-green"
+                                : "text-bac-red"
                             )}
                           >
                             Δ {meta.unitVariance > 0 ? `+${meta.unitVariance}` : meta.unitVariance}
@@ -1527,6 +1977,16 @@ export default function VisitedMaintenancePage() {
                               ) : null}
                             </div>
                           )}
+                        </td>
+
+                        <td className="px-3 py-3 align-top">
+                          <button
+                            type="button"
+                            onClick={() => handleViewGps(r.id)}
+                            className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-medium text-sky-300 hover:bg-sky-500/15"
+                          >
+                            View GPS
+                          </button>
                         </td>
 
                         <td className="px-3 py-3 align-top text-right">
@@ -1565,7 +2025,7 @@ export default function VisitedMaintenancePage() {
 
                       {isExpanded ? (
                         <tr className="bg-white/[0.02]">
-                          <td colSpan={11} className="px-4 py-4">
+                          <td colSpan={12} className="px-4 py-4">
                             <div className="rounded-2xl border border-bac-border bg-bac-bg/70 p-4">
                               <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
                                 <div className="xl:col-span-4 rounded-2xl border border-bac-border bg-bac-panel p-4">
@@ -1759,7 +2219,7 @@ export default function VisitedMaintenancePage() {
               {!loading && rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={11}
+                    colSpan={12}
                     className="px-4 py-10 text-center text-bac-muted"
                   >
                     No records found for the current filters.
@@ -1798,6 +2258,215 @@ export default function VisitedMaintenancePage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={gpsOpen}
+        title={gpsData ? `GPS Verification — ${gpsData.individual.name}` : "GPS Verification"}
+        onClose={() => {
+          setGpsOpen(false);
+          setGpsData(null);
+          setGpsError("");
+        }}
+        maxWidthClass="max-w-7xl"
+      >
+        {gpsLoading ? (
+          <div className="py-14 text-center text-bac-muted">Loading GPS detail...</div>
+        ) : gpsError ? (
+          <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-4 text-sm text-yellow-200">
+            {gpsError}
+          </div>
+        ) : !gpsData ? (
+          <div className="py-14 text-center text-bac-muted">No GPS detail available.</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <div className="xl:col-span-4 space-y-4">
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="text-sm font-semibold text-bac-text">Visit Information</div>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div>
+                    <div className="text-xs text-bac-muted">Visit ID</div>
+                    <div className="mt-1 font-medium text-bac-text">{gpsData.visitId}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-bac-muted">Date</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {fmtDateLabel(gpsData.date)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-bac-muted">Individual</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.individual.name}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-bac-muted">DSP</div>
+                    <div className="mt-1 font-medium text-bac-text">{gpsData.dsp.name}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-bac-muted">Service</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.service.code || gpsData.service.name || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-bac-muted">Status</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      <Badge
+                        variant={
+                          gpsData.status === "COMPLETED"
+                            ? "success"
+                            : gpsData.status === "CANCELED"
+                            ? "danger"
+                            : "warning"
+                        }
+                      >
+                        {gpsData.status}
+                      </Badge>
+                      <Badge variant={gpsStatusTone(gpsData.gpsSummary.locationStatus)}>
+                        {gpsStatusLabel(gpsData.gpsSummary.locationStatus)}
+                      </Badge>
+                    </div>
+                  </div>
+                  {gpsData.cancelReason ? (
+                    <div>
+                      <div className="text-xs text-bac-muted">Cancel Reason</div>
+                      <div className="mt-1 text-bac-text">{gpsData.cancelReason}</div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="text-sm font-semibold text-bac-text">Home Address</div>
+                <div className="mt-3 text-sm text-bac-text">
+                  {gpsData.individual.fullAddress || "No address on file"}
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Home Lat</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {fmtLatLng(gpsData.individual.homeLat)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Home Lng</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {fmtLatLng(gpsData.individual.homeLng)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="text-sm font-semibold text-bac-text">Visit GPS</div>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Check-In</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.visit.checkIn || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Check-Out</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.visit.checkOut || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Visit Lat</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {fmtLatLng(gpsData.visit.gpsLatitude)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Visit Lng</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {fmtLatLng(gpsData.visit.gpsLongitude)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-bac-border bg-bac-bg p-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-bac-muted">Distance from home</span>
+                    <span className="font-medium text-bac-text">
+                      {fmtMiles(gpsData.gpsSummary.distanceMiles)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-bac-muted">GPS Source</span>
+                    <span className="font-medium text-bac-text">
+                      {gpsData.visit.source || "—"}
+                    </span>
+                  </div>
+                </div>
+
+                {buildGoogleMapsDirectionsUrl(gpsData) ? (
+                  <div className="mt-4">
+                    <a
+                      href={buildGoogleMapsDirectionsUrl(gpsData)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-500/15"
+                    >
+                      Open in Google Maps
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="xl:col-span-8">
+              <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-bac-text">Map View</div>
+                    <div className="mt-1 text-xs text-bac-muted">
+                      Two live markers are shown below: Home (blue) and DSP Visit GPS (red).
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="info">H = Home / Patient</Badge>
+                    <Badge variant="danger">D = DSP / Visit GPS</Badge>
+                  </div>
+                </div>
+
+                <VisitGpsLeafletMap detail={gpsData} />
+
+                {createLegendDistanceNote(gpsData) ? (
+                  <div className="mt-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-200">
+                    {createLegendDistanceNote(gpsData)}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Planned Time</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.schedule.plannedStart || "—"} -{" "}
+                      {gpsData.schedule.plannedEnd || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Has Home Coordinates</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.gpsSummary.hasHomeCoords ? "Yes" : "No"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-bac-border bg-bac-bg p-3">
+                    <div className="text-xs text-bac-muted">Has Visit GPS</div>
+                    <div className="mt-1 font-medium text-bac-text">
+                      {gpsData.gpsSummary.hasVisitGps ? "Yes" : "No"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={editOpen}
