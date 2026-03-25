@@ -91,8 +91,10 @@ type LeafletLib = {
   tileLayer: (...args: any[]) => any;
   marker: (...args: any[]) => any;
   polyline: (...args: any[]) => any;
+  circleMarker: (...args: any[]) => any;
   divIcon: (...args: any[]) => any;
   latLngBounds: (...args: any[]) => any;
+  featureGroup: (...args: any[]) => any;
 };
 
 declare global {
@@ -242,26 +244,34 @@ function ensureLeafletJs(): Promise<LeafletLib> {
 
 function createPinHtml(color: "red" | "blue", label: string) {
   const bg = color === "red" ? "#ef4444" : "#3b82f6";
-  const shadow = color === "red" ? "rgba(239,68,68,0.35)" : "rgba(59,130,246,0.35)";
+  const glow = color === "red" ? "rgba(239,68,68,0.45)" : "rgba(59,130,246,0.45)";
+  const outer = color === "red" ? "rgba(239,68,68,0.18)" : "rgba(59,130,246,0.18)";
 
   return `
-    <div style="position:relative; width:24px; height:24px;">
+    <div style="position:relative; width:34px; height:34px;">
       <div style="
         position:absolute;
-        left:0;
-        top:0;
-        width:24px;
-        height:24px;
+        inset:0;
+        border-radius:9999px;
+        background:${outer};
+        box-shadow:0 0 0 8px ${glow};
+      "></div>
+      <div style="
+        position:absolute;
+        left:3px;
+        top:3px;
+        width:28px;
+        height:28px;
         border-radius:9999px;
         background:${bg};
         border:3px solid white;
-        box-shadow:0 0 0 6px ${shadow};
         display:flex;
         align-items:center;
         justify-content:center;
         color:white;
-        font-weight:700;
-        font-size:11px;
+        font-weight:800;
+        font-size:12px;
+        box-shadow:0 4px 14px ${glow};
       ">${label}</div>
     </div>
   `;
@@ -270,8 +280,80 @@ function createPinHtml(color: "red" | "blue", label: string) {
 function createLegendDistanceNote(detail: VisitGpsDetail) {
   const miles = detail.gpsSummary.distanceMiles;
   if (typeof miles !== "number") return "";
-  if (miles < 0.02) return "Markers are very close. Zoom in to separate them.";
+  if (miles < 0.02) return "Markers are very close. The map may slightly offset them so both Home and DSP remain visible.";
   return "";
+}
+
+function haversineMiles(
+  aLat: number,
+  aLng: number,
+  bLat: number,
+  bLng: number
+) {
+  const toRad = (v: number) => (v * Math.PI) / 180;
+  const R = 3958.7613;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+
+  const sin1 = Math.sin(dLat / 2);
+  const sin2 = Math.sin(dLng / 2);
+
+  const h =
+    sin1 * sin1 +
+    Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2;
+
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function buildSeparatedDisplayPoints(params: {
+  homeLat?: number | null;
+  homeLng?: number | null;
+  visitLat?: number | null;
+  visitLng?: number | null;
+}) {
+  const { homeLat, homeLng, visitLat, visitLng } = params;
+
+  if (
+    typeof homeLat !== "number" ||
+    typeof homeLng !== "number" ||
+    typeof visitLat !== "number" ||
+    typeof visitLng !== "number"
+  ) {
+    return {
+      adjusted: false,
+      homeDisplay:
+        typeof homeLat === "number" && typeof homeLng === "number"
+          ? ([homeLat, homeLng] as [number, number])
+          : null,
+      visitDisplay:
+        typeof visitLat === "number" && typeof visitLng === "number"
+          ? ([visitLat, visitLng] as [number, number])
+          : null,
+    };
+  }
+
+  const miles = haversineMiles(homeLat, homeLng, visitLat, visitLng);
+
+  if (miles >= 0.03) {
+    return {
+      adjusted: false,
+      homeDisplay: [homeLat, homeLng] as [number, number],
+      visitDisplay: [visitLat, visitLng] as [number, number],
+    };
+  }
+
+  const latOffset = 0.00055;
+  const lngOffset = 0.00055;
+
+  return {
+    adjusted: true,
+    homeDisplay: [homeLat + latOffset, homeLng + lngOffset] as [number, number],
+    visitDisplay: [visitLat - latOffset, visitLng - lngOffset] as [number, number],
+  };
 }
 
 function VisitGpsLeafletMap({
@@ -282,12 +364,24 @@ function VisitGpsLeafletMap({
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const layersRef = useRef<any[]>([]);
+  const invalidateTimersRef = useRef<number[]>([]);
   const [mapError, setMapError] = useState("");
 
   const homeLat = detail.individual.homeLat;
   const homeLng = detail.individual.homeLng;
   const visitLat = detail.visit.gpsLatitude;
   const visitLng = detail.visit.gpsLongitude;
+
+  const separated = useMemo(
+    () =>
+      buildSeparatedDisplayPoints({
+        homeLat,
+        homeLng,
+        visitLat,
+        visitLng,
+      }),
+    [homeLat, homeLng, visitLat, visitLng]
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -308,100 +402,130 @@ function VisitGpsLeafletMap({
         const L = await ensureLeafletJs();
         if (disposed || !mapRef.current) return;
 
-        if (!mapInstanceRef.current) {
-          mapInstanceRef.current = L.map(mapRef.current, {
-            zoomControl: true,
-            attributionControl: true,
-          });
-
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors',
-          }).addTo(mapInstanceRef.current);
-        }
-
-        const map = mapInstanceRef.current;
-
-        layersRef.current.forEach((layer) => {
+        if (mapInstanceRef.current) {
           try {
-            map.removeLayer(layer);
+            mapInstanceRef.current.remove();
           } catch {
             // ignore
           }
-        });
+          mapInstanceRef.current = null;
+        }
+
         layersRef.current = [];
+
+        const map = L.map(mapRef.current, {
+          zoomControl: true,
+          attributionControl: true,
+        });
+
+        mapInstanceRef.current = map;
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors",
+        }).addTo(map);
 
         const points: Array<[number, number]> = [];
 
-        if (typeof homeLat === "number" && typeof homeLng === "number") {
+        if (separated.homeDisplay) {
+          const [displayLat, displayLng] = separated.homeDisplay;
+          const actualLat = homeLat as number;
+          const actualLng = homeLng as number;
+
           const homeIcon = L.divIcon({
             className: "",
             html: createPinHtml("blue", "H"),
-            iconSize: [24, 24],
-            iconAnchor: [12, 12],
+            iconSize: [34, 34],
+            iconAnchor: [17, 17],
           });
 
-          const homeMarker = L.marker([homeLat, homeLng], {
+          const homeMarker = L.marker([displayLat, displayLng], {
             icon: homeIcon,
             title: "Patient Home",
-          }).bindPopup(
-            `
-              <div style="min-width:180px">
-                <div style="font-weight:700; margin-bottom:4px;">Patient Home</div>
-                <div>${detail.individual.name}</div>
-                <div style="margin-top:4px; color:#4b5563;">${
-                  detail.individual.fullAddress || "No address"
-                }</div>
-                <div style="margin-top:6px;">Lat ${homeLat.toFixed(6)}, Lng ${homeLng.toFixed(6)}</div>
-              </div>
-            `
-          );
+          }).bindPopup(`
+            <div style="min-width:200px">
+              <div style="font-weight:700; margin-bottom:4px; color:#1d4ed8;">Patient Home</div>
+              <div>${detail.individual.name}</div>
+              <div style="margin-top:4px; color:#4b5563;">${
+                detail.individual.fullAddress || "No address"
+              }</div>
+              <div style="margin-top:6px;">Actual: Lat ${actualLat.toFixed(
+                6
+              )}, Lng ${actualLng.toFixed(6)}</div>
+              ${
+                separated.adjusted
+                  ? `<div style="margin-top:6px; color:#92400e;">Marker slightly offset for visibility.</div>`
+                  : ""
+              }
+            </div>
+          `);
 
+          const homeRing = L.circleMarker([displayLat, displayLng], {
+            radius: 20,
+            color: "#60a5fa",
+            weight: 2,
+            fillColor: "#60a5fa",
+            fillOpacity: 0.08,
+          });
+
+          homeRing.addTo(map);
           homeMarker.addTo(map);
-          layersRef.current.push(homeMarker);
-          points.push([homeLat, homeLng]);
+
+          layersRef.current.push(homeRing, homeMarker);
+          points.push([displayLat, displayLng]);
         }
 
-        if (typeof visitLat === "number" && typeof visitLng === "number") {
+        if (separated.visitDisplay) {
+          const [displayLat, displayLng] = separated.visitDisplay;
+          const actualLat = visitLat as number;
+          const actualLng = visitLng as number;
+
           const visitIcon = L.divIcon({
             className: "",
             html: createPinHtml("red", "D"),
-            iconSize: [24, 24],
-            iconAnchor: [12, 12],
+            iconSize: [34, 34],
+            iconAnchor: [17, 17],
           });
 
-          const visitMarker = L.marker([visitLat, visitLng], {
+          const visitMarker = L.marker([displayLat, displayLng], {
             icon: visitIcon,
             title: "DSP Visit GPS",
-          }).bindPopup(
-            `
-              <div style="min-width:180px">
-                <div style="font-weight:700; margin-bottom:4px;">DSP Visit GPS</div>
-                <div>${detail.dsp.name}</div>
-                <div style="margin-top:4px; color:#4b5563;">Check-in ${
-                  detail.visit.checkIn || "—"
-                } / Check-out ${detail.visit.checkOut || "—"}</div>
-                <div style="margin-top:6px;">Lat ${visitLat.toFixed(6)}, Lng ${visitLng.toFixed(6)}</div>
-              </div>
-            `
-          );
+          }).bindPopup(`
+            <div style="min-width:200px">
+              <div style="font-weight:700; margin-bottom:4px; color:#b91c1c;">DSP Visit GPS</div>
+              <div>${detail.dsp.name}</div>
+              <div style="margin-top:4px; color:#4b5563;">Check-in ${
+                detail.visit.checkIn || "—"
+              } / Check-out ${detail.visit.checkOut || "—"}</div>
+              <div style="margin-top:6px;">Actual: Lat ${actualLat.toFixed(
+                6
+              )}, Lng ${actualLng.toFixed(6)}</div>
+              ${
+                separated.adjusted
+                  ? `<div style="margin-top:6px; color:#92400e;">Marker slightly offset for visibility.</div>`
+                  : ""
+              }
+            </div>
+          `);
 
+          const visitRing = L.circleMarker([displayLat, displayLng], {
+            radius: 20,
+            color: "#f87171",
+            weight: 2,
+            fillColor: "#f87171",
+            fillOpacity: 0.08,
+          });
+
+          visitRing.addTo(map);
           visitMarker.addTo(map);
-          layersRef.current.push(visitMarker);
-          points.push([visitLat, visitLng]);
+
+          layersRef.current.push(visitRing, visitMarker);
+          points.push([displayLat, displayLng]);
         }
 
-        if (
-          typeof homeLat === "number" &&
-          typeof homeLng === "number" &&
-          typeof visitLat === "number" &&
-          typeof visitLng === "number"
-        ) {
+        if (separated.homeDisplay && separated.visitDisplay) {
           const line = L.polyline(
-            [
-              [homeLat, homeLng],
-              [visitLat, visitLng],
-            ],
+            [separated.homeDisplay, separated.visitDisplay],
             {
               color: "#f59e0b",
               weight: 3,
@@ -415,18 +539,32 @@ function VisitGpsLeafletMap({
 
         if (points.length >= 2) {
           const bounds = L.latLngBounds(points);
-          map.fitBounds(bounds, { padding: [50, 50] });
-        } else if (points.length === 1) {
-          map.setView(points[0], 15);
-        }
+          map.fitBounds(bounds, { padding: [70, 70] });
 
-        setTimeout(() => {
           try {
-            map.invalidateSize();
+            if (typeof map.getZoom === "function" && map.getZoom() > 16) {
+              map.setZoom(16);
+            }
           } catch {
             // ignore
           }
-        }, 120);
+        } else if (points.length === 1) {
+          map.setView(points[0], 15);
+        } else {
+          map.setView([40.5187, -78.3947], 12);
+        }
+
+        const timers = [120, 320, 700].map((delay) =>
+          window.setTimeout(() => {
+            try {
+              map.invalidateSize();
+            } catch {
+              // ignore
+            }
+          }, delay)
+        );
+
+        invalidateTimersRef.current = timers;
       } catch (err: any) {
         setMapError(err?.message || "Failed to load map.");
       }
@@ -436,17 +574,12 @@ function VisitGpsLeafletMap({
 
     return () => {
       disposed = true;
-    };
-  }, [
-    detail,
-    homeLat,
-    homeLng,
-    visitLat,
-    visitLng,
-  ]);
 
-  useEffect(() => {
-    return () => {
+      invalidateTimersRef.current.forEach((id) => {
+        window.clearTimeout(id);
+      });
+      invalidateTimersRef.current = [];
+
       if (mapInstanceRef.current) {
         try {
           mapInstanceRef.current.remove();
@@ -455,9 +588,17 @@ function VisitGpsLeafletMap({
         }
         mapInstanceRef.current = null;
       }
+
       layersRef.current = [];
     };
-  }, []);
+  }, [
+    detail,
+    homeLat,
+    homeLng,
+    visitLat,
+    visitLng,
+    separated,
+  ]);
 
   if (
     typeof homeLat !== "number" &&
