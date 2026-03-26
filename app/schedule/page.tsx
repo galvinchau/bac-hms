@@ -1,3 +1,4 @@
+// bac-hms/web/app/schedule/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
@@ -59,6 +60,7 @@ type ScheduleShift = {
   scheduleDate: string;
   plannedStart: string;
   plannedEnd: string;
+  awakeMonitoringRequired?: boolean;
   status: string;
   billable: boolean;
   notes: string | null;
@@ -238,13 +240,17 @@ export default function SchedulePage() {
   const [editShiftDspId, setEditShiftDspId] = useState<string>("");
   const [editShiftStart, setEditShiftStart] = useState<string>("07:00");
   const [editShiftEnd, setEditShiftEnd] = useState<string>("14:00");
+  const [editShiftAwakeRequired, setEditShiftAwakeRequired] =
+    useState<boolean>(false);
   const [editShiftStatus, setEditShiftStatus] = useState<string>("NOT_STARTED");
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
   const [editShiftDeleting, setEditShiftDeleting] = useState(false);
   const [editShiftCheckIn, setEditShiftCheckIn] = useState<string>("");
   const [editShiftCheckOut, setEditShiftCheckOut] = useState<string>("");
-  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(
+    null
+  );
 
   // Drag cho modal Edit shift
   const [isDraggingEditModal, setIsDraggingEditModal] = useState(false);
@@ -284,6 +290,8 @@ export default function SchedulePage() {
   const [createShiftDspId, setCreateShiftDspId] = useState<string>("");
   const [createShiftStart, setCreateShiftStart] = useState<string>("07:00");
   const [createShiftEnd, setCreateShiftEnd] = useState<string>("14:00");
+  const [createShiftAwakeRequired, setCreateShiftAwakeRequired] =
+    useState<boolean>(false);
   const [createShiftStatus, setCreateShiftStatus] =
     useState<string>("NOT_STARTED");
   const [createShiftNotes, setCreateShiftNotes] = useState<string>("");
@@ -637,7 +645,9 @@ export default function SchedulePage() {
     };
   }, [isDraggingEditModal]);
 
-  function handleEditModalHeaderMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+  function handleEditModalHeaderMouseDown(
+    e: React.MouseEvent<HTMLDivElement>
+  ) {
     e.preventDefault();
     editModalDragStart.current = {
       mouseX: e.clientX,
@@ -780,14 +790,14 @@ export default function SchedulePage() {
     const updatedShifts = masterDraft.shifts.map((s) =>
       s.id === editingMasterShift.id
         ? {
-          ...s,
-          serviceId: masterModalServiceId,
-          service: svc ?? undefined,
-          defaultDsp: dsp ?? null,
-          startMinutes: start,
-          endMinutes: end,
-          notes: masterModalNotes || null,
-        }
+            ...s,
+            serviceId: masterModalServiceId,
+            service: svc ?? undefined,
+            defaultDsp: dsp ?? null,
+            startMinutes: start,
+            endMinutes: end,
+            notes: masterModalNotes || null,
+          }
         : s
     );
 
@@ -1036,6 +1046,7 @@ export default function SchedulePage() {
     setEditShiftDspId(shift.actualDsp?.id ?? shift.plannedDsp?.id ?? "");
     setEditShiftStart(formatTime(shift.plannedStart));
     setEditShiftEnd(formatTime(shift.plannedEnd));
+    setEditShiftAwakeRequired(!!shift.awakeMonitoringRequired);
     setEditShiftStatus(shift.status);
     setEditShiftNotes(shift.notes ?? "");
     const firstVisit = shift.visits[0];
@@ -1053,6 +1064,7 @@ export default function SchedulePage() {
     setEditShiftDeleting(false);
     setEditShiftCheckIn("");
     setEditShiftCheckOut("");
+    setEditShiftAwakeRequired(false);
   }
 
   async function handleSaveShiftEdit() {
@@ -1119,6 +1131,7 @@ export default function SchedulePage() {
         serviceId: editShiftServiceId || editingShift.service.id,
         plannedStart: plannedStartIso,
         plannedEnd: plannedEndIso,
+        awakeMonitoringRequired: editShiftAwakeRequired,
         status: editShiftStatus,
         notes: editShiftNotes || null,
         dspId: editShiftDspId || null,
@@ -1150,11 +1163,11 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: prev.shifts.map((s) =>
-              s.id === updated.id ? updated : s
-            ),
-          }
+              ...prev,
+              shifts: prev.shifts.map((s) =>
+                s.id === updated.id ? updated : s
+              ),
+            }
           : prev
       );
 
@@ -1206,9 +1219,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
-          }
+              ...prev,
+              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+            }
           : prev
       );
 
@@ -1223,627 +1236,790 @@ export default function SchedulePage() {
 
   // ---------- Create new shift (modal) ----------
 
-function openCreateShiftModal() {
-  if (!currentWeek) {
-    setError("No weekly schedule. Please Generate first.");
-    return;
-  }
-  if (!services.length) {
-    setError("No services found. Please create at least one Service first.");
-    return;
-  }
-
-  setCreateShiftDayIndex(0);
-  setCreateShiftServiceId(services[0]?.id ?? "");
-  setCreateShiftDspId("");
-  setCreateShiftStart("07:00");
-  setCreateShiftEnd("14:00");
-  setCreateShiftStatus("NOT_STARTED");
-  setCreateShiftNotes("");
-  setShowCreateShiftModal(true);
-  setError(null);
-  setSuccess(null);
-}
-
-function closeCreateShiftModal() {
-  if (creatingShift) return;
-  setShowCreateShiftModal(false);
-}
-
-async function handleCreateShift() {
-  if (!currentWeek || !selectedIndividualId) return;
-
-  const startMinutes = parseTimeToMinutes(createShiftStart);
-  const endMinutes = parseTimeToMinutes(createShiftEnd);
-
-  if (startMinutes === null || endMinutes === null) {
-    setError("Time is not valid. Use HH:MM format (e.g. 07:00).");
-    return;
-  }
-
-  const baseWeekStart = currentWeek
-    ? new Date(currentWeek.weekStart)
-    : weekStart;
-  const baseDate = addDays(baseWeekStart, createShiftDayIndex);
-  baseDate.setHours(0, 0, 0, 0);
-  const scheduleDateIso = baseDate.toISOString();
-
-  const makeDate = (base: Date, minutes: number) => {
-    const d = new Date(base);
-    d.setMinutes(minutes);
-    return d.toISOString();
-  };
-
-  const plannedStartIso = makeDate(baseDate, startMinutes);
-  const endBase =
-    endMinutes >= startMinutes ? baseDate : addDays(baseDate, 1);
-  const plannedEndIso = makeDate(endBase, endMinutes);
-
-  try {
-    setCreatingShift(true);
-    setError(null);
-    setSuccess(null);
-
-    const res = await fetch("/api/schedule/shift", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        weekId: currentWeek.id,
-        individualId: selectedIndividualId,
-        scheduleDate: scheduleDateIso,
-        serviceId: createShiftServiceId,
-        plannedStart: plannedStartIso,
-        plannedEnd: plannedEndIso,
-        status: createShiftStatus,
-        notes: createShiftNotes || null,
-        dspId: createShiftDspId || null,
-      }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      throw new Error(data?.error || "Failed to create shift");
+  function openCreateShiftModal() {
+    if (!currentWeek) {
+      setError("No weekly schedule. Please Generate first.");
+      return;
+    }
+    if (!services.length) {
+      setError("No services found. Please create at least one Service first.");
+      return;
     }
 
-    const created = (await res.json()) as ScheduleShift;
+    setCreateShiftDayIndex(0);
+    setCreateShiftServiceId(services[0]?.id ?? "");
+    setCreateShiftDspId("");
+    setCreateShiftStart("07:00");
+    setCreateShiftEnd("14:00");
+    setCreateShiftAwakeRequired(false);
+    setCreateShiftStatus("NOT_STARTED");
+    setCreateShiftNotes("");
+    setShowCreateShiftModal(true);
+    setError(null);
+    setSuccess(null);
+  }
 
-    setCurrentWeek((prev) =>
-      prev
-        ? {
-          ...prev,
-          shifts: [...prev.shifts, created],
-        }
-        : prev
-    );
-
-    setSuccess("Shift created successfully.");
+  function closeCreateShiftModal() {
+    if (creatingShift) return;
     setShowCreateShiftModal(false);
-  } catch (e: any) {
-    console.error(e);
-    setError(e.message ?? "Failed to create shift");
-  } finally {
-    setCreatingShift(false);
+    setCreateShiftAwakeRequired(false);
   }
-}
 
-// ---------- render helpers ----------
+  async function handleCreateShift() {
+    if (!currentWeek || !selectedIndividualId) return;
 
-function renderMasterDayCard(dayIndex: number) {
-  const shifts =
-    masterDraft?.shifts
-      .filter((s) => s.dayOfWeek === dayIndex)
-      .sort((a, b) => a.startMinutes - b.startMinutes) ?? [];
+    const startMinutes = parseTimeToMinutes(createShiftStart);
+    const endMinutes = parseTimeToMinutes(createShiftEnd);
 
-  const isEditingThisDay = editingDay === dayIndex;
+    if (startMinutes === null || endMinutes === null) {
+      setError("Time is not valid. Use HH:MM format (e.g. 07:00).");
+      return;
+    }
 
-  return (
-    <div className="h-full flex flex-col rounded-2xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
-      <div className="font-semibold text-slate-100 flex items-center justify-between mb-2">
-        <span>{dayLabels[dayIndex]}</span>
-      </div>
+    const baseWeekStart = currentWeek
+      ? new Date(currentWeek.weekStart)
+      : weekStart;
+    const baseDate = addDays(baseWeekStart, createShiftDayIndex);
+    baseDate.setHours(0, 0, 0, 0);
+    const scheduleDateIso = baseDate.toISOString();
 
-      {shifts.length === 0 && !isEditingThisDay && (
-        <div className="text-xs italic text-slate-500 flex-1 flex items-center">
-          No master template
-        </div>
-      )}
+    const makeDate = (base: Date, minutes: number) => {
+      const d = new Date(base);
+      d.setMinutes(minutes);
+      return d.toISOString();
+    };
 
-      <div className="space-y-2">
-        {shifts.map((shift) => (
-          <div
-            key={shift.id}
-            className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs"
-          >
-            <div className="flex justify-between mb-1">
-              <span className="font-semibold text-emerald-300">
-                {shift.service?.serviceCode || "SVC"}
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-[2px] text-[10px] font-medium text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                Active
-              </span>
-            </div>
-            <div className="text-slate-300 mb-1">
-              {formatMinutesRange(shift.startMinutes, shift.endMinutes)}
-            </div>
-            {shift.defaultDsp && (
-              <div className="text-[11px] text-slate-400 mb-1">
-                DSP: {shift.defaultDsp.firstName} {shift.defaultDsp.lastName}
-              </div>
-            )}
-            <button
-              type="button"
-              className="mt-1 text-[11px] text-sky-300 hover:text-sky-100"
-              onClick={() => openEditMasterShift(shift)}
-            >
-              Edit event
-            </button>
-          </div>
-        ))}
+    const plannedStartIso = makeDate(baseDate, startMinutes);
+    const endBase =
+      endMinutes >= startMinutes ? baseDate : addDays(baseDate, 1);
+    const plannedEndIso = makeDate(endBase, endMinutes);
 
-        {isEditingThisDay && (
-          <div className="rounded-xl border border-dashed border-slate-600 bg-slate-950/60 px-3 py-2 text-xs space-y-2">
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-300">Service</span>
-              <select
-                value={editServiceId}
-                onChange={(e) => setEditServiceId(e.target.value)}
-                className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.serviceCode} — {s.serviceName}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <div className="flex-1 flex flex-col gap-1">
-                <span className="text-[11px] text-slate-300">Start</span>
-                <input
-                  type="time"
-                  value={editStart}
-                  onChange={(e) => setEditStart(e.target.value)}
-                  className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-              <div className="flex-1 flex flex-col gap-1">
-                <span className="text-[11px] text-slate-300">End</span>
-                <input
-                  type="time"
-                  value={editEnd}
-                  onChange={(e) => setEditEnd(e.target.value)}
-                  className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                className="text-[11px] text-slate-400 hover:text-slate-200"
-                onClick={handleCancelAddShift}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="text-[11px] rounded-full bg-emerald-500 px-3 py-1 font-semibold text-slate-950 hover:bg-emerald-400"
-                onClick={handleConfirmAddShift}
-              >
-                Save event
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+    try {
+      setCreatingShift(true);
+      setError(null);
+      setSuccess(null);
 
-      <div className="mt-auto pt-2">
-        {!isEditingThisDay && (
-          <button
-            type="button"
-            disabled={!selectedIndividualId}
-            onClick={() => handleStartAddShift(dayIndex)}
-            className="text-[11px] text-sky-300 hover:text-sky-200 disabled:opacity-40"
-          >
-            + Event
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+      const res = await fetch("/api/schedule/shift", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weekId: currentWeek.id,
+          individualId: selectedIndividualId,
+          scheduleDate: scheduleDateIso,
+          serviceId: createShiftServiceId,
+          plannedStart: plannedStartIso,
+          plannedEnd: plannedEndIso,
+          awakeMonitoringRequired: createShiftAwakeRequired,
+          status: createShiftStatus,
+          notes: createShiftNotes || null,
+          dspId: createShiftDspId || null,
+        }),
+      });
 
-function renderShiftCell(shift: ScheduleShift | null) {
-  if (!shift) {
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to create shift");
+      }
+
+      const created = (await res.json()) as ScheduleShift;
+
+      setCurrentWeek((prev) =>
+        prev
+          ? {
+              ...prev,
+              shifts: [...prev.shifts, created],
+            }
+          : prev
+      );
+
+      setSuccess("Shift created successfully.");
+      setShowCreateShiftModal(false);
+      setCreateShiftAwakeRequired(false);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "Failed to create shift");
+    } finally {
+      setCreatingShift(false);
+    }
+  }
+
+  // ---------- render helpers ----------
+
+  function renderMasterDayCard(dayIndex: number) {
+    const shifts =
+      masterDraft?.shifts
+        .filter((s) => s.dayOfWeek === dayIndex)
+        .sort((a, b) => a.startMinutes - b.startMinutes) ?? [];
+
+    const isEditingThisDay = editingDay === dayIndex;
+
     return (
-      <div className="h-full rounded-2xl border border-dashed border-slate-700/40 bg-slate-900/10 flex items-center justify-center text-xs text-slate-600">
-        No shift
-      </div>
-    );
-  }
-
-  const scheduledUnits = calcScheduledUnits(shift);
-  const visitedUnits = calcVisitedUnits(shift);
-  const deltaUnits = visitedUnits - scheduledUnits;
-
-  const dsp =
-    shift.actualDsp ?? shift.plannedDsp ?? (null as unknown as Employee);
-
-  const statusColor =
-    shift.status === "COMPLETED"
-      ? "text-emerald-400"
-      : shift.status === "IN_PROGRESS"
-        ? "text-amber-300"
-        : shift.status === "CANCELLED"
-          ? "text-rose-400"
-          : shift.status === "BACKUP_PLAN"
-            ? "text-sky-300"
-            : "text-slate-400";
-
-  return (
-    <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
-      <div className="flex items-center justify-between mb-1">
-        <div className="font-semibold text-emerald-300">
-          {shift.service.serviceCode}
-        </div>
-        <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
-          {shift.status.replace("_", " ")}
-        </div>
-      </div>
-
-      {dsp && (
-        <div className="text-[11px] text-slate-300 mb-1">
-          {dsp.firstName} {dsp.lastName}
-        </div>
-      )}
-
-      <div className="flex justify-between text-[11px] text-slate-300 mb-1">
-        <span className="whitespace-nowrap">
-          Sched: {formatTime(shift.plannedStart)}–
-          {formatTime(shift.plannedEnd)}
-        </span>
-        <span>{scheduledUnits}u</span>
-      </div>
-
-      <div className="flex justify-between text-[11px] text-slate-300 mb-1">
-        <span className="whitespace-nowrap">
-          Visit:{" "}
-          {shift.visits.length > 0
-            ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
-              ? formatTime(shift.visits[0].checkOutAt)
-              : "--:--"
-            }`
-            : "--:-- – --:--"}
-        </span>
-        <span>{visitedUnits}u</span>
-      </div>
-
-      <div className="mt-auto flex items-center justify-between pt-1 border-t border-slate-700/60 text-[11px] text-slate-400">
-        <span>Δ {deltaUnits}u</span>
-        <button
-          type="button"
-          className="text-[11px] underline decoration-dotted hover:text-sky-300"
-          onClick={() => openEditShift(shift)}
-        >
-          Edit
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const currentIndividual = Array.isArray(individuals)
-  ? individuals.find((i) => i.id === selectedIndividualId)
-  : undefined;
-
-// ===== Render =====
-
-return (
-  <div className="min-h-screen bg-slate-950 text-slate-100">
-    <div className="px-6 pb-10 pt-6 space-y-6 w-full max-w-none">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Schedule</h1>
-          <p className="text-sm text-slate-400">
-            Weekly master schedule, generated shifts, and summary for DSPs and
-            Individuals.
-          </p>
-        </div>
-      </div>
-
-      {/* Filters bar */}
-      <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-900/60 px-4 py-3 border border-slate-700/60">
-        <div className="flex flex-col gap-1">
-          <span className="text-xs text-slate-400">Individual</span>
-          <select
-            value={selectedIndividualId}
-            onChange={(e) => setSelectedIndividualId(e.target.value)}
-            className="h-9 rounded-lg bg-slate-900 border border-slate-700 px-3 text-sm"
-          >
-            {individuals.length === 0 && (
-              <option value="">No Individuals</option>
-            )}
-            {individuals.map((ind) => (
-              <option key={ind.id} value={ind.id}>
-                {ind.code} — {ind.lastName} {ind.firstName}
-              </option>
-            ))}
-          </select>
+      <div className="h-full flex flex-col rounded-2xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
+        <div className="font-semibold text-slate-100 flex items-center justify-between mb-2">
+          <span>{dayLabels[dayIndex]}</span>
         </div>
 
-        <div className="flex-1" />
-
-        <div className="flex flex-col gap-1 items-end">
-          <span className="text-xs text-slate-400">Generate schedule</span>
-          <button
-            type="button"
-            onClick={handleGenerateWeek}
-            disabled={!selectedIndividualId || generatingWeek}
-            className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-emerald-400 disabled:opacity-50"
-          >
-            {generatingWeek ? "Generating..." : "Generate"}
-          </button>
-        </div>
-      </div>
-
-      {/* Info + errors / success */}
-      {currentIndividual && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-xs text-slate-300 flex items-center justify-between">
-          <div>
-            <div className="font-semibold text-slate-100">
-              {currentIndividual.lastName} {currentIndividual.firstName}
-            </div>
-            <div className="text-[11px] text-slate-400">
-              ID: {currentIndividual.code}
-            </div>
+        {shifts.length === 0 && !isEditingThisDay && (
+          <div className="text-xs italic text-slate-500 flex-1 flex items-center">
+            No master template
           </div>
-          {selectedTemplate && (
-            <div className="text-right text-[11px] text-slate-400">
-              <div>
-                Active template:{" "}
-                <span className="font-medium text-emerald-300">
-                  {selectedTemplate.name || "Default week"}
+        )}
+
+        <div className="space-y-2">
+          {shifts.map((shift) => (
+            <div
+              key={shift.id}
+              className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs"
+            >
+              <div className="flex justify-between mb-1">
+                <span className="font-semibold text-emerald-300">
+                  {shift.service?.serviceCode || "SVC"}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-[2px] text-[10px] font-medium text-emerald-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Active
                 </span>
               </div>
-              <div>
-                Effective: {formatDateShort(selectedTemplate.effectiveFrom)} –{" "}
-                {selectedTemplate.effectiveTo
-                  ? formatDateShort(selectedTemplate.effectiveTo)
-                  : "open-ended"}
+              <div className="text-slate-300 mb-1">
+                {formatMinutesRange(shift.startMinutes, shift.endMinutes)}
+              </div>
+              {shift.defaultDsp && (
+                <div className="text-[11px] text-slate-400 mb-1">
+                  DSP: {shift.defaultDsp.firstName} {shift.defaultDsp.lastName}
+                </div>
+              )}
+              <button
+                type="button"
+                className="mt-1 text-[11px] text-sky-300 hover:text-sky-100"
+                onClick={() => openEditMasterShift(shift)}
+              >
+                Edit event
+              </button>
+            </div>
+          ))}
+
+          {isEditingThisDay && (
+            <div className="rounded-xl border border-dashed border-slate-600 bg-slate-950/60 px-3 py-2 text-xs space-y-2">
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-300">Service</span>
+                <select
+                  value={editServiceId}
+                  onChange={(e) => setEditServiceId(e.target.value)}
+                  className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.serviceCode} — {s.serviceName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1 flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-300">Start</span>
+                  <input
+                    type="time"
+                    value={editStart}
+                    onChange={(e) => setEditStart(e.target.value)}
+                    className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1 flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-300">End</span>
+                  <input
+                    type="time"
+                    value={editEnd}
+                    onChange={(e) => setEditEnd(e.target.value)}
+                    className="h-7 rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  className="text-[11px] text-slate-400 hover:text-slate-200"
+                  onClick={handleCancelAddShift}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="text-[11px] rounded-full bg-emerald-500 px-3 py-1 font-semibold text-slate-950 hover:bg-emerald-400"
+                  onClick={handleConfirmAddShift}
+                >
+                  Save event
+                </button>
               </div>
             </div>
           )}
         </div>
-      )}
 
-      {error && (
-        <div className="rounded-xl border border-rose-600/60 bg-rose-950/40 px-4 py-2 text-sm text-rose-200">
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div className="rounded-xl border border-emerald-600/60 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200">
-          {success}
-        </div>
-      )}
-
-      {/* Master Schedule section */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-100">
-            Master Schedule (Sunday–Saturday)
-          </h2>
-          <div className="flex items-center gap-3">
-            {loadingMaster && (
-              <span className="text-[11px] text-slate-400">
-                Loading master schedule...
-              </span>
-            )}
+        <div className="mt-auto pt-2">
+          {!isEditingThisDay && (
             <button
               type="button"
-              onClick={handleResetMasterDraft}
-              className="text-[11px] text-slate-400 hover:text-slate-100"
+              disabled={!selectedIndividualId}
+              onClick={() => handleStartAddShift(dayIndex)}
+              className="text-[11px] text-sky-300 hover:text-sky-200 disabled:opacity-40"
             >
-              Reset
+              + Event
             </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderShiftCell(shift: ScheduleShift | null) {
+    if (!shift) {
+      return (
+        <div className="h-full rounded-2xl border border-dashed border-slate-700/40 bg-slate-900/10 flex items-center justify-center text-xs text-slate-600">
+          No shift
+        </div>
+      );
+    }
+
+    const scheduledUnits = calcScheduledUnits(shift);
+    const visitedUnits = calcVisitedUnits(shift);
+    const deltaUnits = visitedUnits - scheduledUnits;
+
+    const dsp =
+      shift.actualDsp ?? shift.plannedDsp ?? (null as unknown as Employee);
+
+    const statusColor =
+      shift.status === "COMPLETED"
+        ? "text-emerald-400"
+        : shift.status === "IN_PROGRESS"
+          ? "text-amber-300"
+          : shift.status === "CANCELLED"
+            ? "text-rose-400"
+            : shift.status === "BACKUP_PLAN"
+              ? "text-sky-300"
+              : "text-slate-400";
+
+    return (
+      <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
+        <div className="flex items-center justify-between mb-1">
+          <div className="font-semibold text-emerald-300">
+            {shift.service.serviceCode}
+          </div>
+          <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
+            {shift.status.replace("_", " ")}
+          </div>
+        </div>
+
+        {dsp && (
+          <div className="text-[11px] text-slate-300 mb-1">
+            {dsp.firstName} {dsp.lastName}
+          </div>
+        )}
+
+        {shift.awakeMonitoringRequired && (
+          <div className="mb-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-[2px] text-[10px] font-medium text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              Awake Required
+            </span>
+          </div>
+        )}
+
+        <div className="flex justify-between text-[11px] text-slate-300 mb-1">
+          <span className="whitespace-nowrap">
+            Sched: {formatTime(shift.plannedStart)}–
+            {formatTime(shift.plannedEnd)}
+          </span>
+          <span>{scheduledUnits}u</span>
+        </div>
+
+        <div className="flex justify-between text-[11px] text-slate-300 mb-1">
+          <span className="whitespace-nowrap">
+            Visit:{" "}
+            {shift.visits.length > 0
+              ? `${formatTime(shift.visits[0].checkInAt)}–${
+                  shift.visits[0].checkOutAt
+                    ? formatTime(shift.visits[0].checkOutAt)
+                    : "--:--"
+                }`
+              : "--:-- – --:--"}
+          </span>
+          <span>{visitedUnits}u</span>
+        </div>
+
+        <div className="mt-auto flex items-center justify-between pt-1 border-t border-slate-700/60 text-[11px] text-slate-400">
+          <span>Δ {deltaUnits}u</span>
+          <button
+            type="button"
+            className="text-[11px] underline decoration-dotted hover:text-sky-300"
+            onClick={() => openEditShift(shift)}
+          >
+            Edit
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const currentIndividual = Array.isArray(individuals)
+    ? individuals.find((i) => i.id === selectedIndividualId)
+    : undefined;
+
+  // ===== Render =====
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="px-6 pb-10 pt-6 space-y-6 w-full max-w-none">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Schedule</h1>
+            <p className="text-sm text-slate-400">
+              Weekly master schedule, generated shifts, and summary for DSPs and
+              Individuals.
+            </p>
+          </div>
+        </div>
+
+        {/* Filters bar */}
+        <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-900/60 px-4 py-3 border border-slate-700/60">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-slate-400">Individual</span>
+            <select
+              value={selectedIndividualId}
+              onChange={(e) => setSelectedIndividualId(e.target.value)}
+              className="h-9 rounded-lg bg-slate-900 border border-slate-700 px-3 text-sm"
+            >
+              {individuals.length === 0 && (
+                <option value="">No Individuals</option>
+              )}
+              {individuals.map((ind) => (
+                <option key={ind.id} value={ind.id}>
+                  {ind.code} — {ind.lastName} {ind.firstName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex-1" />
+
+          <div className="flex flex-col gap-1 items-end">
+            <span className="text-xs text-slate-400">Generate schedule</span>
             <button
               type="button"
-              onClick={handleSaveMasterTemplate}
-              disabled={savingMaster || !selectedIndividualId}
-              className="inline-flex items-center gap-2 rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-sky-400 disabled:opacity-50"
+              onClick={handleGenerateWeek}
+              disabled={!selectedIndividualId || generatingWeek}
+              className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-emerald-400 disabled:opacity-50"
             >
-              {savingMaster ? "Saving..." : "Save Master schedule"}
+              {generatingWeek ? "Generating..." : "Generate"}
             </button>
           </div>
         </div>
 
-        {/* ✅ Make grid expand + horizontal scroll when needed */}
-        <div className="overflow-x-auto">
-          <div className="min-w-[1100px] grid grid-cols-7 gap-3">
-            {dayLabels.map((_, idx) => (
-              <div key={idx}>{renderMasterDayCard(idx)}</div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Weekly Detail + tabs */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <h2 className="text-sm font-semibold text-slate-100">
-              Weekly schedule (Sunday–Saturday)
-            </h2>
-
-            {/* Week navigation moved here */}
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-slate-400">Week</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePrevWeek}
-                  className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
-                >
-                  Prev
-                </button>
-                <span className="text-sm font-medium">{weekRangeLabel}</span>
-                <button
-                  type="button"
-                  onClick={handleNextWeek}
-                  className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
-                >
-                  Next
-                </button>
+        {/* Info + errors / success */}
+        {currentIndividual && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-xs text-slate-300 flex items-center justify-between">
+            <div>
+              <div className="font-semibold text-slate-100">
+                {currentIndividual.lastName} {currentIndividual.firstName}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                ID: {currentIndividual.code}
               </div>
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-900/60 px-1 py-1 text-sm font-semibold">
-              <button
-                type="button"
-                onClick={() => setActiveTab("weekly")}
-                className={`px-3 py-1 rounded-full ${activeTab === "weekly"
-                  ? "bg-slate-100 text-slate-950"
-                  : "text-slate-300 hover:text-slate-50"
-                  }`}
-              >
-                Weekly detail
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("summary")}
-                className={`px-3 py-1 rounded-full ${activeTab === "summary"
-                  ? "bg-slate-100 text-slate-950"
-                  : "text-slate-300 hover:text-slate-50"
-                  }`}
-              >
-                Summary & conflicts
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("payroll")}
-                className={`px-3 py-1 rounded-full ${activeTab === "payroll"
-                  ? "bg-slate-100 text-slate-950"
-                  : "text-slate-300 hover:text-slate-50"
-                  }`}
-              >
-                Payroll & ISP
-              </button>
-            </div>
-
-            {loadingWeek && (
-              <span className="text-[11px] text-slate-400">
-                Loading weekly schedule...
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Tab: Weekly */}
-        {activeTab === "weekly" && (
-          <>
-            {!currentWeek && !loadingWeek && (
-              <div className="rounded-2xl border border-dashed border-slate-700/60 bg-slate-900/40 px-4 py-6 text-sm text-slate-400 text-center">
-                No weekly schedule for this week yet. Click{" "}
-                <span className="font-semibold text-emerald-300">
-                  Generate
-                </span>{" "}
-                to create it from the Master schedule.
-              </div>
-            )}
-
-            {currentWeek && (
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 space-y-3">
-                {/* ✅ Keep header + grid together, expand & horizontal scroll */}
-                <div className="overflow-x-auto">
-                  <div className="min-w-[1100px] space-y-3">
-                    {/* Header row: days */}
-                    <div className="grid grid-cols-7 gap-3 text-xs text-slate-300 mb-2">
-                      {Array.from({ length: 7 }).map((_, day) => {
-                        const d = addDays(weekStart, day);
-                        return (
-                          <div key={day} className="text-center">
-                            <div className="font-semibold text-slate-100">
-                              {dayLabels[day]}
-                            </div>
-                            <div className="text-[11px] text-slate-400">
-                              {formatDateShort(d)}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Grid rows: each row of shifts */}
-                    <div className="space-y-3">
-                      {gridByDayAndSlot.maxSlots === 0 && (
-                        <div className="text-xs text-slate-500 text-center py-4">
-                          No shifts for this week. Use Master schedule to
-                          generate schedule.
-                        </div>
-                      )}
-
-                      {gridByDayAndSlot.slots.map((row, rowIndex) => (
-                        <div
-                          key={rowIndex}
-                          className="grid grid-cols-7 gap-3"
-                        >
-                          {row.map((shift, dayIndex) => (
-                            <div key={dayIndex}>
-                              {renderShiftCell(
-                                shift && shift.id ? shift : null
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+            {selectedTemplate && (
+              <div className="text-right text-[11px] text-slate-400">
+                <div>
+                  Active template:{" "}
+                  <span className="font-medium text-emerald-300">
+                    {selectedTemplate.name || "Default week"}
+                  </span>
                 </div>
+                <div>
+                  Effective: {formatDateShort(selectedTemplate.effectiveFrom)} –{" "}
+                  {selectedTemplate.effectiveTo
+                    ? formatDateShort(selectedTemplate.effectiveTo)
+                    : "open-ended"}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-                <div className="pt-3">
+        {error && (
+          <div className="rounded-xl border border-rose-600/60 bg-rose-950/40 px-4 py-2 text-sm text-rose-200">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="rounded-xl border border-emerald-600/60 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200">
+            {success}
+          </div>
+        )}
+
+        {/* Master Schedule section */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-100">
+              Master Schedule (Sunday–Saturday)
+            </h2>
+            <div className="flex items-center gap-3">
+              {loadingMaster && (
+                <span className="text-[11px] text-slate-400">
+                  Loading master schedule...
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleResetMasterDraft}
+                className="text-[11px] text-slate-400 hover:text-slate-100"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMasterTemplate}
+                disabled={savingMaster || !selectedIndividualId}
+                className="inline-flex items-center gap-2 rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-sky-400 disabled:opacity-50"
+              >
+                {savingMaster ? "Saving..." : "Save Master schedule"}
+              </button>
+            </div>
+          </div>
+
+          {/* ✅ Make grid expand + horizontal scroll when needed */}
+          <div className="overflow-x-auto">
+            <div className="min-w-[1100px] grid grid-cols-7 gap-3">
+              {dayLabels.map((_, idx) => (
+                <div key={idx}>{renderMasterDayCard(idx)}</div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Weekly Detail + tabs */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-6">
+              <h2 className="text-sm font-semibold text-slate-100">
+                Weekly schedule (Sunday–Saturday)
+              </h2>
+
+              {/* Week navigation moved here */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-400">Week</span>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    className="text-xs text-sky-300 hover:text-sky-100"
-                    onClick={openCreateShiftModal}
+                    onClick={handlePrevWeek}
+                    className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
                   >
-                    + Add shift
+                    Prev
+                  </button>
+                  <span className="text-sm font-medium">{weekRangeLabel}</span>
+                  <button
+                    type="button"
+                    onClick={handleNextWeek}
+                    className="h-8 rounded-full border border-slate-700 px-3 text-xs hover:bg-slate-800"
+                  >
+                    Next
                   </button>
                 </div>
               </div>
-            )}
-          </>
-        )}
+            </div>
 
-        {/* Tab: Summary & conflicts */}
-        {activeTab === "summary" && currentWeek && (
-          <div className="grid grid-cols-2 gap-4">
-            {/* Summary by Service */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <h3 className="text-xs font-semibold text-slate-100 mb-3">
-                Units by Service
-              </h3>
-              {summaryByService.length === 0 ? (
-                <div className="text-xs text-slate-500">
-                  No data for this week.
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-900/60 px-1 py-1 text-sm font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("weekly")}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "weekly"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  Weekly detail
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("summary")}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "summary"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  Summary & conflicts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("payroll")}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "payroll"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  Payroll & ISP
+                </button>
+              </div>
+
+              {loadingWeek && (
+                <span className="text-[11px] text-slate-400">
+                  Loading weekly schedule...
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Tab: Weekly */}
+          {activeTab === "weekly" && (
+            <>
+              {!currentWeek && !loadingWeek && (
+                <div className="rounded-2xl border border-dashed border-slate-700/60 bg-slate-900/40 px-4 py-6 text-sm text-slate-400 text-center">
+                  No weekly schedule for this week yet. Click{" "}
+                  <span className="font-semibold text-emerald-300">
+                    Generate
+                  </span>{" "}
+                  to create it from the Master schedule.
                 </div>
-              ) : (
-                <table className="w-full text-[11px] text-left">
-                  <thead className="text-slate-400 border-b border-slate-800">
-                    <tr>
-                      <th className="py-1 pr-2">Service</th>
-                      <th className="py-1 pr-2 text-right">Scheduled (u)</th>
-                      <th className="py-1 pr-2 text-right">Actual (u)</th>
-                      <th className="py-1 text-right">Δ (u)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryByService.map((row) => {
-                      const delta = row.visitedUnits - row.scheduledUnits;
-                      return (
+              )}
+
+              {currentWeek && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 space-y-3">
+                  {/* ✅ Keep header + grid together, expand & horizontal scroll */}
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[1100px] space-y-3">
+                      {/* Header row: days */}
+                      <div className="grid grid-cols-7 gap-3 text-xs text-slate-300 mb-2">
+                        {Array.from({ length: 7 }).map((_, day) => {
+                          const d = addDays(weekStart, day);
+                          return (
+                            <div key={day} className="text-center">
+                              <div className="font-semibold text-slate-100">
+                                {dayLabels[day]}
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                {formatDateShort(d)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Grid rows: each row of shifts */}
+                      <div className="space-y-3">
+                        {gridByDayAndSlot.maxSlots === 0 && (
+                          <div className="text-xs text-slate-500 text-center py-4">
+                            No shifts for this week. Use Master schedule to
+                            generate schedule.
+                          </div>
+                        )}
+
+                        {gridByDayAndSlot.slots.map((row, rowIndex) => (
+                          <div key={rowIndex} className="grid grid-cols-7 gap-3">
+                            {row.map((shift, dayIndex) => (
+                              <div key={dayIndex}>
+                                {renderShiftCell(
+                                  shift && shift.id ? shift : null
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3">
+                    <button
+                      type="button"
+                      className="text-xs text-sky-300 hover:text-sky-100"
+                      onClick={openCreateShiftModal}
+                    >
+                      + Add shift
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Tab: Summary & conflicts */}
+          {activeTab === "summary" && currentWeek && (
+            <div className="grid grid-cols-2 gap-4">
+              {/* Summary by Service */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <h3 className="text-xs font-semibold text-slate-100 mb-3">
+                  Units by Service
+                </h3>
+                {summaryByService.length === 0 ? (
+                  <div className="text-xs text-slate-500">
+                    No data for this week.
+                  </div>
+                ) : (
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="text-slate-400 border-b border-slate-800">
+                      <tr>
+                        <th className="py-1 pr-2">Service</th>
+                        <th className="py-1 pr-2 text-right">Scheduled (u)</th>
+                        <th className="py-1 pr-2 text-right">Actual (u)</th>
+                        <th className="py-1 text-right">Δ (u)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summaryByService.map((row) => {
+                        const delta = row.visitedUnits - row.scheduledUnits;
+                        return (
+                          <tr key={row.service.id}>
+                            <td className="py-1 pr-2">
+                              <div className="font-medium text-slate-100">
+                                {row.service.serviceCode}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {row.service.serviceName}
+                              </div>
+                            </td>
+                            <td className="py-1 pr-2 text-right">
+                              {row.scheduledUnits}
+                            </td>
+                            <td className="py-1 pr-2 text-right">
+                              {row.visitedUnits}
+                            </td>
+                            <td
+                              className={`py-1 text-right ${
+                                delta > 0
+                                  ? "text-emerald-300"
+                                  : delta < 0
+                                    ? "text-rose-300"
+                                    : "text-slate-300"
+                              }`}
+                            >
+                              {delta}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Conflicts */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <h3 className="text-xs font-semibold text-slate-100 mb-3">
+                  Overlap / conflicts
+                </h3>
+                {conflicts.length === 0 ? (
+                  <div className="text-xs text-emerald-300">
+                    No conflicts detected for this week.
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-[11px]">
+                    {conflicts.map((c, idx) => (
+                      <div
+                        key={idx}
+                        className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-3 py-2"
+                      >
+                        <div className="font-semibold text-amber-200 mb-1">
+                          {c.dspName} — {dayLabels[c.dayIndex]}{" "}
+                          {formatDateShort(c.date)}
+                        </div>
+                        {c.shifts.map((s) => (
+                          <div key={s.id} className="text-slate-100">
+                            {s.service.serviceCode} {formatTime(s.plannedStart)}
+                            –{formatTime(s.plannedEnd)}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Payroll & ISP */}
+          {activeTab === "payroll" && currentWeek && (
+            <div className="grid grid-cols-2 gap-4">
+              {/* Payroll by DSP */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <h3 className="text-xs font-semibold text-slate-100 mb-3">
+                  Payroll – Units by DSP
+                </h3>
+                {summaryByDsp.length === 0 ? (
+                  <div className="text-xs text-slate-500">
+                    No DSP assigned for this week.
+                  </div>
+                ) : (
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="text-slate-400 border-b border-slate-800">
+                      <tr>
+                        <th className="py-1 pr-2">DSP</th>
+                        <th className="py-1 pr-2 text-right">
+                          Scheduled (hrs)
+                        </th>
+                        <th className="py-1 pr-2 text-right">Actual (hrs)</th>
+                        <th className="py-1 text-right">Δ (hrs)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summaryByDsp.map((row) => {
+                        const schedHours = row.scheduledUnits / 4;
+                        const actualHours = row.visitedUnits / 4;
+                        const delta = actualHours - schedHours;
+                        return (
+                          <tr key={row.dspId}>
+                            <td className="py-1 pr-2">
+                              <div className="font-medium text-slate-100">
+                                {row.dspName}
+                              </div>
+                            </td>
+                            <td className="py-1 pr-2 text-right">
+                              {schedHours.toFixed(2)}
+                            </td>
+                            <td className="py-1 pr-2 text-right">
+                              {actualHours.toFixed(2)}
+                            </td>
+                            <td
+                              className={`py-1 text-right ${
+                                delta > 0
+                                  ? "text-emerald-300"
+                                  : delta < 0
+                                    ? "text-rose-300"
+                                    : "text-slate-300"
+                              }`}
+                            >
+                              {delta.toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* ISP summary by Service */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <h3 className="text-xs font-semibold text-slate-100 mb-3">
+                  ISP allocation – Actual units by Service
+                </h3>
+                {summaryByService.length === 0 ? (
+                  <div className="text-xs text-slate-500">
+                    No data for this week.
+                  </div>
+                ) : (
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="text-slate-400 border-b border-slate-800">
+                      <tr>
+                        <th className="py-1 pr-2">Service</th>
+                        <th className="py-1 pr-2 text-right">Actual (units)</th>
+                        <th className="py-1 text-right">ISP Plan (units)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summaryByService.map((row) => (
                         <tr key={row.service.id}>
                           <td className="py-1 pr-2">
                             <div className="font-medium text-slate-100">
@@ -1854,689 +2030,586 @@ return (
                             </div>
                           </td>
                           <td className="py-1 pr-2 text-right">
-                            {row.scheduledUnits}
-                          </td>
-                          <td className="py-1 pr-2 text-right">
                             {row.visitedUnits}
                           </td>
-                          <td
-                            className={`py-1 text-right ${delta > 0
-                              ? "text-emerald-300"
-                              : delta < 0
-                                ? "text-rose-300"
-                                : "text-slate-300"
-                              }`}
-                          >
-                            {delta}
-                          </td>
+                          <td className="py-1 text-right text-slate-500">—</td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Conflicts */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <h3 className="text-xs font-semibold text-slate-100 mb-3">
-                Overlap / conflicts
-              </h3>
-              {conflicts.length === 0 ? (
-                <div className="text-xs text-emerald-300">
-                  No conflicts detected for this week.
-                </div>
-              ) : (
-                <div className="space-y-2 text-[11px]">
-                  {conflicts.map((c, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-3 py-2"
-                    >
-                      <div className="font-semibold text-amber-200 mb-1">
-                        {c.dspName} — {dayLabels[c.dayIndex]}{" "}
-                        {formatDateShort(c.date)}
-                      </div>
-                      {c.shifts.map((s) => (
-                        <div key={s.id} className="text-slate-100">
-                          {s.service.serviceCode} {formatTime(s.plannedStart)}
-                          –{formatTime(s.plannedEnd)}
-                        </div>
                       ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tab: Payroll & ISP */}
-        {activeTab === "payroll" && currentWeek && (
-          <div className="grid grid-cols-2 gap-4">
-            {/* Payroll by DSP */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <h3 className="text-xs font-semibold text-slate-100 mb-3">
-                Payroll – Units by DSP
-              </h3>
-              {summaryByDsp.length === 0 ? (
-                <div className="text-xs text-slate-500">
-                  No DSP assigned for this week.
-                </div>
-              ) : (
-                <table className="w-full text-[11px] text-left">
-                  <thead className="text-slate-400 border-b border-slate-800">
-                    <tr>
-                      <th className="py-1 pr-2">DSP</th>
-                      <th className="py-1 pr-2 text-right">
-                        Scheduled (hrs)
-                      </th>
-                      <th className="py-1 pr-2 text-right">Actual (hrs)</th>
-                      <th className="py-1 text-right">Δ (hrs)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryByDsp.map((row) => {
-                      const schedHours = row.scheduledUnits / 4;
-                      const actualHours = row.visitedUnits / 4;
-                      const delta = actualHours - schedHours;
-                      return (
-                        <tr key={row.dspId}>
-                          <td className="py-1 pr-2">
-                            <div className="font-medium text-slate-100">
-                              {row.dspName}
-                            </div>
-                          </td>
-                          <td className="py-1 pr-2 text-right">
-                            {schedHours.toFixed(2)}
-                          </td>
-                          <td className="py-1 pr-2 text-right">
-                            {actualHours.toFixed(2)}
-                          </td>
-                          <td
-                            className={`py-1 text-right ${delta > 0
-                              ? "text-emerald-300"
-                              : delta < 0
-                                ? "text-rose-300"
-                                : "text-slate-300"
-                              }`}
-                          >
-                            {delta.toFixed(2)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* ISP summary by Service */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <h3 className="text-xs font-semibold text-slate-100 mb-3">
-                ISP allocation – Actual units by Service
-              </h3>
-              {summaryByService.length === 0 ? (
-                <div className="text-xs text-slate-500">
-                  No data for this week.
-                </div>
-              ) : (
-                <table className="w-full text-[11px] text-left">
-                  <thead className="text-slate-400 border-b border-slate-800">
-                    <tr>
-                      <th className="py-1 pr-2">Service</th>
-                      <th className="py-1 pr-2 text-right">Actual (units)</th>
-                      <th className="py-1 text-right">ISP Plan (units)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryByService.map((row) => (
-                      <tr key={row.service.id}>
-                        <td className="py-1 pr-2">
-                          <div className="font-medium text-slate-100">
-                            {row.service.serviceCode}
-                          </div>
-                          <div className="text-[10px] text-slate-400">
-                            {row.service.serviceName}
-                          </div>
-                        </td>
-                        <td className="py-1 pr-2 text-right">
-                          {row.visitedUnits}
-                        </td>
-                        <td className="py-1 text-right text-slate-500">—</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
-    </div>
-
-    {/* Modal edit weekly shift */}
-    {/* Modal edit weekly shift (draggable) */}
-    {editingShift && (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-        <div
-          className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl"
-          style={{
-            transform: `translate(${editModalOffset.x}px, ${editModalOffset.y}px)`,
-            cursor: isDraggingEditModal ? "grabbing" : "default",
-          }}
-        >
-          <div
-            className="flex items-center justify-between mb-3 cursor-move select-none"
-            onMouseDown={handleEditModalHeaderMouseDown}
-          >
-            <div>
-              <div className="text-xs text-slate-400 mb-1">
-                Edit shift –{" "}
-                {(() => {
-                  if (currentWeek) {
-                    const idx = getDayIndexInWeek(
-                      currentWeek.weekStart,
-                      editingShift.scheduleDate
-                    );
-                    const safeIdx = Math.max(0, Math.min(6, idx));
-                    const base = new Date(currentWeek.weekStart);
-                    const displayDate = addDays(base, safeIdx);
-                    return `${dayLabels[safeIdx]} ${formatDateShort(
-                      displayDate
-                    )}`;
-                  }
-                  const d = new Date(editingShift.scheduleDate);
-                  return `${dayLabels[d.getDay()]} ${formatDateShort(
-                    d.toISOString()
-                  )}`;
-                })()}
+                    </tbody>
+                  </table>
+                )}
               </div>
-              <div className="font-semibold text-slate-100">
-                {editingShift.service.serviceCode} –{" "}
-                {editingShift.service.serviceName}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-100"
-              onClick={closeEditShift}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Service</div>
-              <select
-                value={editShiftServiceId}
-                onChange={(e) => setEditShiftServiceId(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                <option value={editingShift.service.id}>
-                  {editingShift.service.serviceCode} —{" "}
-                  {editingShift.service.serviceName}
-                </option>
-                {services
-                  .filter((s) => s.id !== editingShift.service.id)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.serviceCode} — {s.serviceName}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">DSP</div>
-              <select
-                value={editShiftDspId}
-                onChange={(e) => setEditShiftDspId(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                <option value="">— No DSP —</option>
-                {dsps.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.firstName} {d.lastName} ({d.employeeId})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Schedule start
-                </div>
-                <input
-                  type="time"
-                  value={editShiftStart}
-                  onChange={(e) => setEditShiftStart(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Schedule end
-                </div>
-                <input
-                  type="time"
-                  value={editShiftEnd}
-                  onChange={(e) => setEditShiftEnd(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-            </div>
-
-            {/* NEW: Manual Check in / Check out */}
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Check in
-                </div>
-                <input
-                  type="time"
-                  value={editShiftCheckIn}
-                  onChange={(e) => setEditShiftCheckIn(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Check out
-                </div>
-                <input
-                  type="time"
-                  value={editShiftCheckOut}
-                  onChange={(e) => setEditShiftCheckOut(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Status</div>
-              <select
-                value={editShiftStatus}
-                onChange={(e) => setEditShiftStatus(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                {shiftStatusOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Notes</div>
-              <textarea
-                value={editShiftNotes}
-                onChange={(e) => setEditShiftNotes(e.target.value)}
-                rows={3}
-                className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
-              />
-            </div>
-          </div>
-
-          {deleteErrorMessage && (
-            <div className="mt-3 rounded-xl border border-rose-500 bg-rose-900/50 px-3 py-2 text-xs font-medium text-rose-100">
-              ⛔ {deleteErrorMessage}
             </div>
           )}
+        </section>
+      </div>
 
-          <div className="mt-4 flex justify-between items-center gap-2">
-            <button
-              type="button"
-              className="text-xs text-rose-300 hover:text-rose-200 disabled:opacity-50"
-              onClick={handleDeleteShiftFromModal}
-              disabled={editShiftSaving || editShiftDeleting}
+      {/* Modal edit weekly shift */}
+      {/* Modal edit weekly shift (draggable) */}
+      {editingShift && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl"
+            style={{
+              transform: `translate(${editModalOffset.x}px, ${editModalOffset.y}px)`,
+              cursor: isDraggingEditModal ? "grabbing" : "default",
+            }}
+          >
+            <div
+              className="flex items-center justify-between mb-3 cursor-move select-none"
+              onMouseDown={handleEditModalHeaderMouseDown}
             >
-              {editShiftDeleting ? "Deleting..." : "Delete shift"}
-            </button>
-            <div className="flex gap-2">
+              <div>
+                <div className="text-xs text-slate-400 mb-1">
+                  Edit shift –{" "}
+                  {(() => {
+                    if (currentWeek) {
+                      const idx = getDayIndexInWeek(
+                        currentWeek.weekStart,
+                        editingShift.scheduleDate
+                      );
+                      const safeIdx = Math.max(0, Math.min(6, idx));
+                      const base = new Date(currentWeek.weekStart);
+                      const displayDate = addDays(base, safeIdx);
+                      return `${dayLabels[safeIdx]} ${formatDateShort(
+                        displayDate
+                      )}`;
+                    }
+                    const d = new Date(editingShift.scheduleDate);
+                    return `${dayLabels[d.getDay()]} ${formatDateShort(
+                      d.toISOString()
+                    )}`;
+                  })()}
+                </div>
+                <div className="font-semibold text-slate-100">
+                  {editingShift.service.serviceCode} –{" "}
+                  {editingShift.service.serviceName}
+                </div>
+              </div>
               <button
                 type="button"
                 className="text-xs text-slate-400 hover:text-slate-100"
                 onClick={closeEditShift}
               >
-                Cancel
+                Close
               </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Service</div>
+                <select
+                  value={editShiftServiceId}
+                  onChange={(e) => setEditShiftServiceId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value={editingShift.service.id}>
+                    {editingShift.service.serviceCode} —{" "}
+                    {editingShift.service.serviceName}
+                  </option>
+                  {services
+                    .filter((s) => s.id !== editingShift.service.id)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.serviceCode} — {s.serviceName}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">DSP</div>
+                <select
+                  value={editShiftDspId}
+                  onChange={(e) => setEditShiftDspId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="">— No DSP —</option>
+                  {dsps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.firstName} {d.lastName} ({d.employeeId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Schedule start
+                  </div>
+                  <input
+                    type="time"
+                    value={editShiftStart}
+                    onChange={(e) => setEditShiftStart(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Schedule end
+                  </div>
+                  <input
+                    type="time"
+                    value={editShiftEnd}
+                    onChange={(e) => setEditShiftEnd(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editShiftAwakeRequired}
+                    onChange={(e) =>
+                      setEditShiftAwakeRequired(e.target.checked)
+                    }
+                    className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500"
+                  />
+                  <div>
+                    <div className="text-[12px] font-medium text-slate-100">
+                      Awake Monitoring Required
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      If enabled, this shift is marked by Office as a required
+                      awake shift.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* NEW: Manual Check in / Check out */}
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Check in
+                  </div>
+                  <input
+                    type="time"
+                    value={editShiftCheckIn}
+                    onChange={(e) => setEditShiftCheckIn(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Check out
+                  </div>
+                  <input
+                    type="time"
+                    value={editShiftCheckOut}
+                    onChange={(e) => setEditShiftCheckOut(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Status</div>
+                <select
+                  value={editShiftStatus}
+                  onChange={(e) => setEditShiftStatus(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {shiftStatusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Notes</div>
+                <textarea
+                  value={editShiftNotes}
+                  onChange={(e) => setEditShiftNotes(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
+                />
+              </div>
+            </div>
+
+            {deleteErrorMessage && (
+              <div className="mt-3 rounded-xl border border-rose-500 bg-rose-900/50 px-3 py-2 text-xs font-medium text-rose-100">
+                ⛔ {deleteErrorMessage}
+              </div>
+            )}
+
+            <div className="mt-4 flex justify-between items-center gap-2">
               <button
                 type="button"
+                className="text-xs text-rose-300 hover:text-rose-200 disabled:opacity-50"
+                onClick={handleDeleteShiftFromModal}
                 disabled={editShiftSaving || editShiftDeleting}
-                onClick={handleSaveShiftEdit}
-                className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
               >
-                {editShiftSaving ? "Saving..." : "Save changes"}
+                {editShiftDeleting ? "Deleting..." : "Delete shift"}
               </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-slate-400 hover:text-slate-100"
+                  onClick={closeEditShift}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={editShiftSaving || editShiftDeleting}
+                  onClick={handleSaveShiftEdit}
+                  className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {editShiftSaving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
 
-    {/* Modal edit master event */}
-    {editingMasterShift && (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-        <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="text-xs text-slate-400 mb-1">
-                Edit event – {dayLabels[editingMasterShift.dayOfWeek]}
-              </div>
-              <div className="font-semibold text-slate-100">
-                {editingMasterShift.service?.serviceCode ?? "Service"}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-100"
-              onClick={closeEditMasterShift}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Service</div>
-              <select
-                value={masterModalServiceId}
-                onChange={(e) => setMasterModalServiceId(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.serviceCode} — {s.serviceName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">DSP</div>
-              <select
-                value={masterModalDspId}
-                onChange={(e) => setMasterModalDspId(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                <option value="">— No default DSP —</option>
-                {dsps.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.firstName} {d.lastName} ({d.employeeId})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Start time
+      {/* Modal edit master event */}
+      {editingMasterShift && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-xs text-slate-400 mb-1">
+                  Edit event – {dayLabels[editingMasterShift.dayOfWeek]}
                 </div>
-                <input
-                  type="time"
-                  value={masterModalStart}
-                  onChange={(e) => setMasterModalStart(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  End time
+                <div className="font-semibold text-slate-100">
+                  {editingMasterShift.service?.serviceCode ?? "Service"}
                 </div>
-                <input
-                  type="time"
-                  value={masterModalEnd}
-                  onChange={(e) => setMasterModalEnd(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
               </div>
-            </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Notes</div>
-              <textarea
-                value={masterModalNotes}
-                onChange={(e) => setMasterModalNotes(e.target.value)}
-                rows={3}
-                className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 flex justify-between items-center gap-2">
-            <button
-              type="button"
-              className="text-xs text-rose-300 hover:text-rose-200"
-              onClick={handleDeleteMasterShiftFromModal}
-            >
-              Delete event
-            </button>
-            <div className="flex gap-2">
               <button
                 type="button"
                 className="text-xs text-slate-400 hover:text-slate-100"
                 onClick={closeEditMasterShift}
               >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Service</div>
+                <select
+                  value={masterModalServiceId}
+                  onChange={(e) => setMasterModalServiceId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.serviceCode} — {s.serviceName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">DSP</div>
+                <select
+                  value={masterModalDspId}
+                  onChange={(e) => setMasterModalDspId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="">— No default DSP —</option>
+                  {dsps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.firstName} {d.lastName} ({d.employeeId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Start time
+                  </div>
+                  <input
+                    type="time"
+                    value={masterModalStart}
+                    onChange={(e) => setMasterModalStart(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    End time
+                  </div>
+                  <input
+                    type="time"
+                    value={masterModalEnd}
+                    onChange={(e) => setMasterModalEnd(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Notes</div>
+                <textarea
+                  value={masterModalNotes}
+                  onChange={(e) => setMasterModalNotes(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-between items-center gap-2">
+              <button
+                type="button"
+                className="text-xs text-rose-300 hover:text-rose-200"
+                onClick={handleDeleteMasterShiftFromModal}
+              >
+                Delete event
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-slate-400 hover:text-slate-100"
+                  onClick={closeEditMasterShift}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={masterModalSaving}
+                  onClick={handleApplyMasterShiftEdit}
+                  className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {masterModalSaving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Generate range (đến ngày) */}
+      {showGenerateModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-sm rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-slate-100">
+                Generate schedule
+              </div>
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={() => setShowGenerateModal(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-xs text-slate-300">
+                Generate schedule starting from{" "}
+                <span className="font-medium">{weekRangeLabel}</span> until the
+                selected end date. Weeks before this range will be kept as-is.
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">End date</div>
+                <input
+                  type="date"
+                  value={generateToDate}
+                  onChange={(e) => setGenerateToDate(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={() => setShowGenerateModal(false)}
+              >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={masterModalSaving}
-                onClick={handleApplyMasterShiftEdit}
+                disabled={generatingWeek}
+                onClick={handleConfirmGenerateWeeks}
                 className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
               >
-                {masterModalSaving ? "Saving..." : "Save changes"}
+                {generatingWeek ? "Generating..." : "Generate"}
               </button>
             </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
 
-    {/* Modal Generate range (đến ngày) */}
-    {showGenerateModal && (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-        <div className="w-full max-w-sm rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold text-slate-100">
-              Generate schedule
-            </div>
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-100"
-              onClick={() => setShowGenerateModal(false)}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div className="text-xs text-slate-300">
-              Generate schedule starting from{" "}
-              <span className="font-medium">{weekRangeLabel}</span> until the
-              selected end date. Weeks before this range will be kept as-is.
-            </div>
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">End date</div>
-              <input
-                type="date"
-                value={generateToDate}
-                onChange={(e) => setGenerateToDate(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-100"
-              onClick={() => setShowGenerateModal(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={generatingWeek}
-              onClick={handleConfirmGenerateWeeks}
-              className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {generatingWeek ? "Generating..." : "Generate"}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Modal Create new shift */}
-    {showCreateShiftModal && (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-        <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold text-slate-100">
-              Create new shift
-            </div>
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-100"
-              onClick={closeCreateShiftModal}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Day</div>
-              <select
-                value={createShiftDayIndex}
-                onChange={(e) =>
-                  setCreateShiftDayIndex(Number(e.target.value) || 0)
-                }
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+      {/* Modal Create new shift */}
+      {showCreateShiftModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-slate-100">
+                Create new shift
+              </div>
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={closeCreateShiftModal}
               >
-                {dayLabels.map((label, idx) => {
-                  const base =
-                    currentWeek && currentWeek.weekStart
-                      ? new Date(currentWeek.weekStart)
-                      : weekStart;
-                  const d = addDays(base, idx);
-                  return (
-                    <option key={idx} value={idx}>
-                      {label} – {formatDateShort(d)}
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Day</div>
+                <select
+                  value={createShiftDayIndex}
+                  onChange={(e) =>
+                    setCreateShiftDayIndex(Number(e.target.value) || 0)
+                  }
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {dayLabels.map((label, idx) => {
+                    const base =
+                      currentWeek && currentWeek.weekStart
+                        ? new Date(currentWeek.weekStart)
+                        : weekStart;
+                    const d = addDays(base, idx);
+                    return (
+                      <option key={idx} value={idx}>
+                        {label} – {formatDateShort(d)}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Service</div>
+                <select
+                  value={createShiftServiceId}
+                  onChange={(e) => setCreateShiftServiceId(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.serviceCode} — {s.serviceName}
                     </option>
-                  );
-                })}
-              </select>
-            </div>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Service</div>
-              <select
-                value={createShiftServiceId}
-                onChange={(e) => setCreateShiftServiceId(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.serviceCode} — {s.serviceName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">DSP</div>
-              <select
-                value={createShiftDspId}
-                onChange={(e) => setCreateShiftDspId(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-              >
-                <option value="">— No DSP —</option>
-                {dsps.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.firstName} {d.lastName} ({d.employeeId})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Schedule start
-                </div>
-                <input
-                  type="time"
-                  value={createShiftStart}
-                  onChange={(e) => setCreateShiftStart(e.target.value)}
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">DSP</div>
+                <select
+                  value={createShiftDspId}
+                  onChange={(e) => setCreateShiftDspId(e.target.value)}
                   className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="">— No DSP —</option>
+                  {dsps.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.firstName} {d.lastName} ({d.employeeId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Schedule start
+                  </div>
+                  <input
+                    type="time"
+                    value={createShiftStart}
+                    onChange={(e) => setCreateShiftStart(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-300 mb-1">
+                    Schedule end
+                  </div>
+                  <input
+                    type="time"
+                    value={createShiftEnd}
+                    onChange={(e) => setCreateShiftEnd(e.target.value)}
+                    className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createShiftAwakeRequired}
+                    onChange={(e) =>
+                      setCreateShiftAwakeRequired(e.target.checked)
+                    }
+                    className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500"
+                  />
+                  <div>
+                    <div className="text-[12px] font-medium text-slate-100">
+                      Awake Monitoring Required
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      If enabled, this shift is marked by Office as a required
+                      awake shift.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Status</div>
+                <select
+                  value={createShiftStatus}
+                  onChange={(e) => setCreateShiftStatus(e.target.value)}
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  {shiftStatusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">Notes</div>
+                <textarea
+                  value={createShiftNotes}
+                  onChange={(e) => setCreateShiftNotes(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
                 />
               </div>
-              <div className="flex-1">
-                <div className="text-[11px] text-slate-300 mb-1">
-                  Schedule end
-                </div>
-                <input
-                  type="time"
-                  value={createShiftEnd}
-                  onChange={(e) => setCreateShiftEnd(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
-                />
-              </div>
             </div>
 
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Status</div>
-              <select
-                value={createShiftStatus}
-                onChange={(e) => setCreateShiftStatus(e.target.value)}
-                className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-100"
+                onClick={closeCreateShiftModal}
               >
-                {shiftStatusOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={creatingShift}
+                onClick={handleCreateShift}
+                className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {creatingShift ? "Creating..." : "Create shift"}
+              </button>
             </div>
-
-            <div>
-              <div className="text-[11px] text-slate-300 mb-1">Notes</div>
-              <textarea
-                value={createShiftNotes}
-                onChange={(e) => setCreateShiftNotes(e.target.value)}
-                rows={3}
-                className="w-full rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-xs resize-none"
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-100"
-              onClick={closeCreateShiftModal}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={creatingShift}
-              onClick={handleCreateShift}
-              className="text-xs rounded-full bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {creatingShift ? "Creating..." : "Create shift"}
-            </button>
           </div>
         </div>
-      </div>
-    )}
-  </div>
-);
+      )}
+    </div>
+  );
 }

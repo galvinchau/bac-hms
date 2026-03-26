@@ -1,3 +1,5 @@
+// bac-hms/web/app/api/schedule/shift/[id]/route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { VisitSource } from "@prisma/client";
@@ -41,6 +43,7 @@ export async function PUT(req: Request, context: any) {
       notes,
       checkInAt,
       checkOutAt,
+      awakeMonitoringRequired,
     } = body as {
       serviceId?: string;
       dspId?: string | null;
@@ -51,6 +54,7 @@ export async function PUT(req: Request, context: any) {
       notes?: string | null;
       checkInAt?: string | null;
       checkOutAt?: string | null;
+      awakeMonitoringRequired?: boolean;
     };
 
     const data: any = {};
@@ -66,6 +70,10 @@ export async function PUT(req: Request, context: any) {
 
     if (plannedStart) data.plannedStart = new Date(plannedStart);
     if (plannedEnd) data.plannedEnd = new Date(plannedEnd);
+
+    if ("awakeMonitoringRequired" in body) {
+      data.awakeMonitoringRequired = !!awakeMonitoringRequired;
+    }
 
     // ===== AUTO STATUS ƯU TIÊN THEO CHECK IN / OUT =====
     let autoStatus: string | undefined;

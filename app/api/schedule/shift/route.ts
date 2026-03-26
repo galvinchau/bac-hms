@@ -1,3 +1,5 @@
+// bac-hms/web/app/api/schedule/shift/route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -20,6 +22,7 @@ export async function POST(req: Request) {
       notes,
       checkInAt,
       checkOutAt,
+      awakeMonitoringRequired,
     } = body as {
       weekId?: string;
       individualId?: string;
@@ -33,6 +36,7 @@ export async function POST(req: Request) {
       notes?: string | null;
       checkInAt?: string | null;
       checkOutAt?: string | null;
+      awakeMonitoringRequired?: boolean;
     };
 
     // Validate các field bắt buộc (giống file gốc)
@@ -59,6 +63,7 @@ export async function POST(req: Request) {
         plannedDspId: effectiveDspId,
         plannedStart: new Date(plannedStart),
         plannedEnd: new Date(plannedEnd),
+        awakeMonitoringRequired: awakeMonitoringRequired ?? false,
         status: status ?? "NOT_STARTED",
         billable: true,
         notes: notes ?? null,
@@ -136,6 +141,7 @@ export async function PUT(req: Request) {
       notes,
       checkInAt,
       checkOutAt,
+      awakeMonitoringRequired,
     } = body as {
       shiftId?: string;
       id?: string;
@@ -148,6 +154,7 @@ export async function PUT(req: Request) {
       notes?: string | null;
       checkInAt?: string | null;
       checkOutAt?: string | null;
+      awakeMonitoringRequired?: boolean;
     };
 
     const effectiveShiftId = shiftId || id;
@@ -180,6 +187,9 @@ export async function PUT(req: Request) {
         ...(plannedEnd ? { plannedEnd: new Date(plannedEnd) } : {}),
         ...(status ? { status } : {}),
         ...(typeof notes !== "undefined" ? { notes: notes ?? null } : {}),
+        ...(typeof awakeMonitoringRequired !== "undefined"
+          ? { awakeMonitoringRequired: !!awakeMonitoringRequired }
+          : {}),
       },
     });
 
