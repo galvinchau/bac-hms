@@ -23,6 +23,7 @@ export async function POST(req: Request) {
       checkInAt,
       checkOutAt,
       awakeMonitoringRequired,
+      isBackupPlanShift,
     } = body as {
       weekId?: string;
       individualId?: string;
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
       checkInAt?: string | null;
       checkOutAt?: string | null;
       awakeMonitoringRequired?: boolean;
+      isBackupPlanShift?: boolean;
     };
 
     // Validate các field bắt buộc (giống file gốc)
@@ -64,6 +66,7 @@ export async function POST(req: Request) {
         plannedStart: new Date(plannedStart),
         plannedEnd: new Date(plannedEnd),
         awakeMonitoringRequired: awakeMonitoringRequired ?? false,
+        isBackupPlanShift: isBackupPlanShift ?? false,
         status: status ?? "NOT_STARTED",
         billable: true,
         notes: notes ?? null,
@@ -142,6 +145,7 @@ export async function PUT(req: Request) {
       checkInAt,
       checkOutAt,
       awakeMonitoringRequired,
+      isBackupPlanShift,
     } = body as {
       shiftId?: string;
       id?: string;
@@ -155,6 +159,7 @@ export async function PUT(req: Request) {
       checkInAt?: string | null;
       checkOutAt?: string | null;
       awakeMonitoringRequired?: boolean;
+      isBackupPlanShift?: boolean;
     };
 
     const effectiveShiftId = shiftId || id;
@@ -189,6 +194,9 @@ export async function PUT(req: Request) {
         ...(typeof notes !== "undefined" ? { notes: notes ?? null } : {}),
         ...(typeof awakeMonitoringRequired !== "undefined"
           ? { awakeMonitoringRequired: !!awakeMonitoringRequired }
+          : {}),
+        ...(typeof isBackupPlanShift !== "undefined"
+          ? { isBackupPlanShift: !!isBackupPlanShift }
           : {}),
       },
     });

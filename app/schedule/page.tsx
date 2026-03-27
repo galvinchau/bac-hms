@@ -61,6 +61,8 @@ type ScheduleShift = {
   plannedStart: string;
   plannedEnd: string;
   awakeMonitoringRequired?: boolean;
+  isBackupPlanShift?: boolean;
+  wasBackupPlanShift?: boolean;
   status: string;
   billable: boolean;
   notes: string | null;
@@ -87,8 +89,6 @@ type WeekApiResponse = {
 };
 
 type MasterApiResponse = MasterScheduleTemplate[];
-
-type IndividualsApiResponse = Individual[];
 
 const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -125,7 +125,7 @@ function formatDateShort(dateStr: string | Date): string {
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr);
-  const hours = d.getHours(); // 👈 quay về local time
+  const hours = d.getHours();
   const minutes = d.getMinutes();
   const hh = hours.toString().padStart(2, "0");
   const mm = minutes.toString().padStart(2, "0");
@@ -242,6 +242,8 @@ export default function SchedulePage() {
   const [editShiftEnd, setEditShiftEnd] = useState<string>("14:00");
   const [editShiftAwakeRequired, setEditShiftAwakeRequired] =
     useState<boolean>(false);
+  const [editShiftIsBackupPlan, setEditShiftIsBackupPlan] =
+    useState<boolean>(false);
   const [editShiftStatus, setEditShiftStatus] = useState<string>("NOT_STARTED");
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
@@ -292,6 +294,8 @@ export default function SchedulePage() {
   const [createShiftEnd, setCreateShiftEnd] = useState<string>("14:00");
   const [createShiftAwakeRequired, setCreateShiftAwakeRequired] =
     useState<boolean>(false);
+  const [createShiftIsBackupPlan, setCreateShiftIsBackupPlan] =
+    useState<boolean>(false);
   const [createShiftStatus, setCreateShiftStatus] =
     useState<string>("NOT_STARTED");
   const [createShiftNotes, setCreateShiftNotes] = useState<string>("");
@@ -309,27 +313,23 @@ export default function SchedulePage() {
   useEffect(() => {
     async function fetchIndividuals() {
       try {
-        // ✅ Only ACTIVE individuals
         const res = await fetch("/api/individuals?simple=true&status=ACTIVE");
         if (!res.ok) return;
 
         const data = await res.json();
 
-        // Support both shapes: [] OR { items: [] }
         const raw = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
             ? data.items
             : [];
 
-        // ✅ Safety: filter again on client (in case API returns mixed)
         const arr = (raw as Individual[]).filter(
           (x) => !x.status || String(x.status).toUpperCase() === "ACTIVE"
         );
 
         setIndividuals(arr);
 
-        // If selected individual is no longer in list, reset to first
         if (arr.length > 0) {
           const stillExists = selectedIndividualId
             ? arr.some((i) => i.id === selectedIndividualId)
@@ -491,7 +491,6 @@ export default function SchedulePage() {
 
   function handleGenerateWeek() {
     if (!selectedIndividualId || generatingWeek) return;
-    // default generate đến hết tuần đang xem
     const defaultEnd = addDays(
       currentWeek ? new Date(currentWeek.weekStart) : weekStart,
       6
@@ -619,7 +618,6 @@ export default function SchedulePage() {
     return { maxSlots, slots };
   }, [currentWeek]);
 
-  // Lắng nghe mousemove / mouseup khi đang kéo modal
   useEffect(() => {
     function handleMouseMove(e: MouseEvent) {
       if (!editModalDragStart.current) return;
@@ -844,7 +842,6 @@ export default function SchedulePage() {
       let savedTemplate: MasterScheduleTemplate;
 
       if (selectedTemplate && selectedTemplate.id !== "draft") {
-        // UPDATE existing
         res = await fetch(`/api/schedule/master/${selectedTemplate.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -859,7 +856,6 @@ export default function SchedulePage() {
         }
         savedTemplate = (await res.json()) as MasterScheduleTemplate;
       } else {
-        // CREATE new
         res = await fetch("/api/schedule/master", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -901,8 +897,6 @@ export default function SchedulePage() {
     }
     setEditingDay(null);
   }
-
-  // ---------- Summary & conflicts / payroll ----------
 
   const summaryByService = useMemo(() => {
     if (!currentWeek)
@@ -1047,6 +1041,7 @@ export default function SchedulePage() {
     setEditShiftStart(formatTime(shift.plannedStart));
     setEditShiftEnd(formatTime(shift.plannedEnd));
     setEditShiftAwakeRequired(!!shift.awakeMonitoringRequired);
+    setEditShiftIsBackupPlan(!!shift.isBackupPlanShift);
     setEditShiftStatus(shift.status);
     setEditShiftNotes(shift.notes ?? "");
     const firstVisit = shift.visits[0];
@@ -1065,6 +1060,7 @@ export default function SchedulePage() {
     setEditShiftCheckIn("");
     setEditShiftCheckOut("");
     setEditShiftAwakeRequired(false);
+    setEditShiftIsBackupPlan(false);
   }
 
   async function handleSaveShiftEdit() {
@@ -1092,7 +1088,6 @@ export default function SchedulePage() {
       endMinutes >= startMinutes ? baseDate : addDays(baseDate, 1);
     const plannedEndIso = makeDate(endBase, endMinutes);
 
-    // Xử lý giờ Check in / Check out (nếu admin nhập)
     let visitCheckInIso: string | null = null;
     let visitCheckOutIso: string | null = null;
     let ciMinutes: number | null = null;
@@ -1126,24 +1121,19 @@ export default function SchedulePage() {
       setSuccess(null);
 
       const payload: any = {
-        // gửi kèm shiftId cho thống nhất với backend
         shiftId: editingShift.id,
         serviceId: editShiftServiceId || editingShift.service.id,
         plannedStart: plannedStartIso,
         plannedEnd: plannedEndIso,
         awakeMonitoringRequired: editShiftAwakeRequired,
+        isBackupPlanShift: editShiftIsBackupPlan,
         status: editShiftStatus,
         notes: editShiftNotes || null,
         dspId: editShiftDspId || null,
       };
 
-      // Chỉ gửi lên nếu admin có nhập giờ Check in/Check out
-      if (visitCheckInIso) {
-        payload.checkInAt = visitCheckInIso;
-      }
-      if (visitCheckOutIso) {
-        payload.checkOutAt = visitCheckOutIso;
-      }
+      if (visitCheckInIso) payload.checkInAt = visitCheckInIso;
+      if (visitCheckOutIso) payload.checkOutAt = visitCheckOutIso;
 
       const res = await fetch(`/api/schedule/shift/${editingShift.id}`, {
         method: "PUT",
@@ -1252,6 +1242,7 @@ export default function SchedulePage() {
     setCreateShiftStart("07:00");
     setCreateShiftEnd("14:00");
     setCreateShiftAwakeRequired(false);
+    setCreateShiftIsBackupPlan(false);
     setCreateShiftStatus("NOT_STARTED");
     setCreateShiftNotes("");
     setShowCreateShiftModal(true);
@@ -1263,6 +1254,7 @@ export default function SchedulePage() {
     if (creatingShift) return;
     setShowCreateShiftModal(false);
     setCreateShiftAwakeRequired(false);
+    setCreateShiftIsBackupPlan(false);
   }
 
   async function handleCreateShift() {
@@ -1310,6 +1302,7 @@ export default function SchedulePage() {
           plannedStart: plannedStartIso,
           plannedEnd: plannedEndIso,
           awakeMonitoringRequired: createShiftAwakeRequired,
+          isBackupPlanShift: createShiftIsBackupPlan,
           status: createShiftStatus,
           notes: createShiftNotes || null,
           dspId: createShiftDspId || null,
@@ -1335,6 +1328,7 @@ export default function SchedulePage() {
       setSuccess("Shift created successfully.");
       setShowCreateShiftModal(false);
       setCreateShiftAwakeRequired(false);
+      setCreateShiftIsBackupPlan(false);
     } catch (e: any) {
       console.error(e);
       setError(e.message ?? "Failed to create shift");
@@ -1486,6 +1480,9 @@ export default function SchedulePage() {
     const dsp =
       shift.actualDsp ?? shift.plannedDsp ?? (null as unknown as Employee);
 
+    const isBackupOpen = !!shift.isBackupPlanShift;
+    const isBackupClaimed = !!shift.wasBackupPlanShift;
+
     const statusColor =
       shift.status === "COMPLETED"
         ? "text-emerald-400"
@@ -1497,14 +1494,36 @@ export default function SchedulePage() {
               ? "text-sky-300"
               : "text-slate-400";
 
+    const cardClass = isBackupOpen
+      ? "border border-rose-500 bg-rose-950/20"
+      : isBackupClaimed
+        ? "border border-emerald-500 bg-emerald-950/20 shadow-md shadow-emerald-900/20"
+        : "border border-slate-700 bg-slate-900/40";
+
     return (
-      <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-100 flex flex-col">
+      <div
+        className={`h-full rounded-2xl px-3 py-2 text-xs text-slate-100 flex flex-col ${cardClass}`}
+      >
         <div className="flex items-center justify-between mb-1">
           <div className="font-semibold text-emerald-300">
             {shift.service.serviceCode}
           </div>
-          <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
-            {shift.status.replace("_", " ")}
+          <div className="flex items-center gap-2">
+            {isBackupOpen && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2 py-[2px] text-[10px] font-medium text-rose-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+                BACKUP OPEN
+              </span>
+            )}
+            {!isBackupOpen && isBackupClaimed && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-[2px] text-[10px] font-medium text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                CLAIMED
+              </span>
+            )}
+            <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
+              {shift.status.replace("_", " ")}
+            </div>
           </div>
         </div>
 
@@ -1563,12 +1582,9 @@ export default function SchedulePage() {
     ? individuals.find((i) => i.id === selectedIndividualId)
     : undefined;
 
-  // ===== Render =====
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="px-6 pb-10 pt-6 space-y-6 w-full max-w-none">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Schedule</h1>
@@ -1579,7 +1595,6 @@ export default function SchedulePage() {
           </div>
         </div>
 
-        {/* Filters bar */}
         <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-900/60 px-4 py-3 border border-slate-700/60">
           <div className="flex flex-col gap-1">
             <span className="text-xs text-slate-400">Individual</span>
@@ -1614,7 +1629,6 @@ export default function SchedulePage() {
           </div>
         </div>
 
-        {/* Info + errors / success */}
         {currentIndividual && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-xs text-slate-300 flex items-center justify-between">
             <div>
@@ -1656,7 +1670,6 @@ export default function SchedulePage() {
           </div>
         )}
 
-        {/* Master Schedule section */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-100">
@@ -1686,7 +1699,6 @@ export default function SchedulePage() {
             </div>
           </div>
 
-          {/* ✅ Make grid expand + horizontal scroll when needed */}
           <div className="overflow-x-auto">
             <div className="min-w-[1100px] grid grid-cols-7 gap-3">
               {dayLabels.map((_, idx) => (
@@ -1696,7 +1708,6 @@ export default function SchedulePage() {
           </div>
         </section>
 
-        {/* Weekly Detail + tabs */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-6">
@@ -1704,7 +1715,6 @@ export default function SchedulePage() {
                 Weekly schedule (Sunday–Saturday)
               </h2>
 
-              {/* Week navigation moved here */}
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-slate-400">Week</span>
                 <div className="flex items-center gap-2">
@@ -1772,7 +1782,6 @@ export default function SchedulePage() {
             </div>
           </div>
 
-          {/* Tab: Weekly */}
           {activeTab === "weekly" && (
             <>
               {!currentWeek && !loadingWeek && (
@@ -1787,10 +1796,8 @@ export default function SchedulePage() {
 
               {currentWeek && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 space-y-3">
-                  {/* ✅ Keep header + grid together, expand & horizontal scroll */}
                   <div className="overflow-x-auto">
                     <div className="min-w-[1100px] space-y-3">
-                      {/* Header row: days */}
                       <div className="grid grid-cols-7 gap-3 text-xs text-slate-300 mb-2">
                         {Array.from({ length: 7 }).map((_, day) => {
                           const d = addDays(weekStart, day);
@@ -1807,7 +1814,6 @@ export default function SchedulePage() {
                         })}
                       </div>
 
-                      {/* Grid rows: each row of shifts */}
                       <div className="space-y-3">
                         {gridByDayAndSlot.maxSlots === 0 && (
                           <div className="text-xs text-slate-500 text-center py-4">
@@ -1845,10 +1851,8 @@ export default function SchedulePage() {
             </>
           )}
 
-          {/* Tab: Summary & conflicts */}
           {activeTab === "summary" && currentWeek && (
             <div className="grid grid-cols-2 gap-4">
-              {/* Summary by Service */}
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <h3 className="text-xs font-semibold text-slate-100 mb-3">
                   Units by Service
@@ -1905,7 +1909,6 @@ export default function SchedulePage() {
                 )}
               </div>
 
-              {/* Conflicts */}
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <h3 className="text-xs font-semibold text-slate-100 mb-3">
                   Overlap / conflicts
@@ -1939,10 +1942,8 @@ export default function SchedulePage() {
             </div>
           )}
 
-          {/* Tab: Payroll & ISP */}
           {activeTab === "payroll" && currentWeek && (
             <div className="grid grid-cols-2 gap-4">
-              {/* Payroll by DSP */}
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <h3 className="text-xs font-semibold text-slate-100 mb-3">
                   Payroll – Units by DSP
@@ -2000,7 +2001,6 @@ export default function SchedulePage() {
                 )}
               </div>
 
-              {/* ISP summary by Service */}
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <h3 className="text-xs font-semibold text-slate-100 mb-3">
                   ISP allocation – Actual units by Service
@@ -2044,8 +2044,6 @@ export default function SchedulePage() {
         </section>
       </div>
 
-      {/* Modal edit weekly shift */}
-      {/* Modal edit weekly shift (draggable) */}
       {editingShift && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
           <div
@@ -2121,8 +2119,9 @@ export default function SchedulePage() {
                 <div className="text-[11px] text-slate-300 mb-1">DSP</div>
                 <select
                   value={editShiftDspId}
+                  disabled={editShiftIsBackupPlan}
                   onChange={(e) => setEditShiftDspId(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <option value="">— No DSP —</option>
                   {dsps.map((d) => (
@@ -2131,6 +2130,11 @@ export default function SchedulePage() {
                     </option>
                   ))}
                 </select>
+                {editShiftIsBackupPlan && (
+                  <div className="text-[11px] text-amber-400 mt-1">
+                    Backup shift will not have a DSP assigned.
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3">
@@ -2180,7 +2184,31 @@ export default function SchedulePage() {
                 </label>
               </div>
 
-              {/* NEW: Manual Check in / Check out */}
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editShiftIsBackupPlan}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setEditShiftIsBackupPlan(checked);
+                      if (checked) {
+                        setEditShiftDspId("");
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 text-rose-500"
+                  />
+                  <div>
+                    <div className="text-[12px] font-medium text-slate-100">
+                      Backup plan shift
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Mark this shift as a backup plan shift for Office tracking.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
               <div className="flex gap-3">
                 <div className="flex-1">
                   <div className="text-[11px] text-slate-300 mb-1">
@@ -2269,7 +2297,6 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {/* Modal edit master event */}
       {editingMasterShift && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
@@ -2389,7 +2416,6 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {/* Modal Generate range (đến ngày) */}
       {showGenerateModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-sm rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
@@ -2444,7 +2470,6 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {/* Modal Create new shift */}
       {showCreateShiftModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-700 px-4 py-4 text-sm text-slate-100 shadow-xl">
@@ -2505,8 +2530,9 @@ export default function SchedulePage() {
                 <div className="text-[11px] text-slate-300 mb-1">DSP</div>
                 <select
                   value={createShiftDspId}
+                  disabled={createShiftIsBackupPlan}
                   onChange={(e) => setCreateShiftDspId(e.target.value)}
-                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <option value="">— No DSP —</option>
                   {dsps.map((d) => (
@@ -2515,6 +2541,11 @@ export default function SchedulePage() {
                     </option>
                   ))}
                 </select>
+                {createShiftIsBackupPlan && (
+                  <div className="text-[11px] text-amber-400 mt-1">
+                    Backup shift will not have a DSP assigned.
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3">
@@ -2559,6 +2590,31 @@ export default function SchedulePage() {
                     <div className="text-[11px] text-slate-400">
                       If enabled, this shift is marked by Office as a required
                       awake shift.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createShiftIsBackupPlan}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setCreateShiftIsBackupPlan(checked);
+                      if (checked) {
+                        setCreateShiftDspId("");
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 text-rose-500"
+                  />
+                  <div>
+                    <div className="text-[12px] font-medium text-slate-100">
+                      Backup plan shift
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Mark this shift as a backup plan shift for Office tracking.
                     </div>
                   </div>
                 </label>

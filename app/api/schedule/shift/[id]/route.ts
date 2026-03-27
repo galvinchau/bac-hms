@@ -44,6 +44,7 @@ export async function PUT(req: Request, context: any) {
       checkInAt,
       checkOutAt,
       awakeMonitoringRequired,
+      isBackupPlanShift,
     } = body as {
       serviceId?: string;
       dspId?: string | null;
@@ -55,6 +56,7 @@ export async function PUT(req: Request, context: any) {
       checkInAt?: string | null;
       checkOutAt?: string | null;
       awakeMonitoringRequired?: boolean;
+      isBackupPlanShift?: boolean;
     };
 
     const data: any = {};
@@ -73,6 +75,10 @@ export async function PUT(req: Request, context: any) {
 
     if ("awakeMonitoringRequired" in body) {
       data.awakeMonitoringRequired = !!awakeMonitoringRequired;
+    }
+
+    if ("isBackupPlanShift" in body) {
+      data.isBackupPlanShift = !!isBackupPlanShift;
     }
 
     // ===== AUTO STATUS ƯU TIÊN THEO CHECK IN / OUT =====
