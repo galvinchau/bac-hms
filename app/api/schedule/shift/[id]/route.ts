@@ -22,6 +22,54 @@ function getShiftId(req: Request, context?: any): string | null {
   }
 }
 
+function formatDateLabel(dateValue?: Date | string | null): string | null {
+  if (!dateValue) return null;
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${mm}/${dd}/${yyyy}`;
+}
+
+function formatTimeLabel(dateValue?: Date | string | null): string | null {
+  if (!dateValue) return null;
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function buildShiftTimeLabel(
+  start?: Date | string | null,
+  end?: Date | string | null
+): string | null {
+  const startLabel = formatTimeLabel(start);
+  const endLabel = formatTimeLabel(end);
+
+  if (startLabel && endLabel) return `${startLabel} - ${endLabel}`;
+  if (startLabel) return startLabel;
+  if (endLabel) return endLabel;
+  return null;
+}
+
+function buildIndividualName(individual: {
+  firstName?: string | null;
+  middleName?: string | null;
+  lastName?: string | null;
+} | null | undefined): string | null {
+  if (!individual) return null;
+  const parts = [
+    individual.firstName?.trim(),
+    individual.middleName?.trim(),
+    individual.lastName?.trim(),
+  ].filter(Boolean);
+  return parts.length ? parts.join(" ") : null;
+}
+
 export async function PUT(req: Request, context: any) {
   const id = getShiftId(req, context);
 
@@ -58,6 +106,21 @@ export async function PUT(req: Request, context: any) {
       awakeMonitoringRequired?: boolean;
       isBackupPlanShift?: boolean;
     };
+
+    // Đọc shift cũ trước khi update để detect status transition
+    const existingShift = await prisma.scheduleShift.findUnique({
+      where: { id },
+      include: {
+        service: true,
+        individual: true,
+        plannedDsp: true,
+        actualDsp: true,
+      },
+    });
+
+    if (!existingShift) {
+      return NextResponse.json({ error: "SHIFT_NOT_FOUND" }, { status: 404 });
+    }
 
     const data: any = {};
 
@@ -104,6 +167,75 @@ export async function PUT(req: Request, context: any) {
       where: { id },
       data,
     });
+
+    // ===== Direct alert when shift transitions into CANCELLED =====
+    const oldStatus = String(existingShift.status || "");
+    const newStatus = String(updatedShift.status || "");
+    const movedIntoCancelled =
+      oldStatus !== "CANCELLED" && newStatus === "CANCELLED";
+
+    if (movedIntoCancelled) {
+      // Ưu tiên actualDspId, fallback plannedDspId
+      const targetEmployeeId =
+        updatedShift.actualDspId ??
+        existingShift.actualDspId ??
+        updatedShift.plannedDspId ??
+        existingShift.plannedDspId;
+
+      if (targetEmployeeId) {
+        // Lấy service / individual / thời gian mới nhất để snapshot vào alert
+        const serviceForAlert =
+          serviceId && serviceId !== existingShift.serviceId
+            ? await prisma.service.findUnique({
+                where: { id: serviceId },
+                select: {
+                  serviceCode: true,
+                  serviceName: true,
+                },
+              })
+            : existingShift.service;
+
+        const individualName = buildIndividualName(existingShift.individual);
+
+        const dateLabel = formatDateLabel(
+          updatedShift.scheduleDate ?? existingShift.scheduleDate
+        );
+
+        const timeLabel = buildShiftTimeLabel(
+          updatedShift.plannedStart ?? existingShift.plannedStart,
+          updatedShift.plannedEnd ?? existingShift.plannedEnd
+        );
+
+        const serviceDisplayName =
+          serviceForAlert?.serviceCode && serviceForAlert?.serviceName
+            ? `${serviceForAlert.serviceCode} — ${serviceForAlert.serviceName}`
+            : serviceForAlert?.serviceName ||
+              serviceForAlert?.serviceCode ||
+              null;
+
+        await prisma.mobileAlert.create({
+          data: {
+            employeeId: targetEmployeeId,
+            shiftId: updatedShift.id,
+            type: "SHIFT_CANCELLED",
+            title: "Assigned Shift Cancelled",
+            message:
+              "Sorry, your assigned shift has been cancelled. The individual's schedule has changed unexpectedly. Please contact the office if you have any questions.",
+            note: updatedShift.notes ?? null,
+            individualName,
+            serviceName: serviceDisplayName,
+            shiftDateLabel: dateLabel,
+            shiftTimeLabel: timeLabel,
+            isRead: false,
+          },
+        });
+      } else {
+        console.warn(
+          "[SHIFT_CANCEL_ALERT] Skip alert because no assigned DSP found for shift",
+          updatedShift.id
+        );
+      }
+    }
 
     // ===== Handle Check-in / Check-out → Visit =====
     if (checkInAt || checkOutAt) {
