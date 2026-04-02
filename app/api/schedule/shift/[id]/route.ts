@@ -1,5 +1,3 @@
-// bac-hms/web/app/api/schedule/shift/[id]/route.ts
-
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { VisitSource } from "@prisma/client";
@@ -68,6 +66,51 @@ function buildIndividualName(individual: {
     individual.lastName?.trim(),
   ].filter(Boolean);
   return parts.length ? parts.join(" ") : null;
+}
+
+async function sendCancelledShiftPush(params: {
+  staffId: string;
+  shiftId: string;
+  individualName?: string | null;
+  serviceName?: string | null;
+  shiftDateLabel?: string | null;
+  shiftTimeLabel?: string | null;
+  note?: string | null;
+}) {
+  const baseUrl =
+    process.env.BAC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_BAC_API_BASE_URL ||
+    "https://blueangelscareapi.onrender.com";
+
+  try {
+    const res = await fetch(`${baseUrl}/mobile/push/shift-cancelled`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        staffId: params.staffId,
+        shiftId: params.shiftId,
+        individualName: params.individualName ?? null,
+        serviceName: params.serviceName ?? null,
+        shiftDateLabel: params.shiftDateLabel ?? null,
+        shiftTimeLabel: params.shiftTimeLabel ?? null,
+        note: params.note ?? null,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("[SHIFT_CANCEL_PUSH] API failed", {
+        status: res.status,
+        body: text,
+        shiftId: params.shiftId,
+        staffId: params.staffId,
+      });
+    }
+  } catch (err) {
+    console.error("[SHIFT_CANCEL_PUSH] request failed", err);
+  }
 }
 
 export async function PUT(req: Request, context: any) {
@@ -228,6 +271,17 @@ export async function PUT(req: Request, context: any) {
             shiftTimeLabel: timeLabel,
             isRead: false,
           },
+        });
+
+        // ✅ NEW: send real push notification via BAC API
+        await sendCancelledShiftPush({
+          staffId: targetEmployeeId,
+          shiftId: updatedShift.id,
+          individualName,
+          serviceName: serviceDisplayName,
+          shiftDateLabel: dateLabel,
+          shiftTimeLabel: timeLabel,
+          note: updatedShift.notes ?? null,
         });
       } else {
         console.warn(
