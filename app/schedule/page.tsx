@@ -788,14 +788,14 @@ export default function SchedulePage() {
     const updatedShifts = masterDraft.shifts.map((s) =>
       s.id === editingMasterShift.id
         ? {
-            ...s,
-            serviceId: masterModalServiceId,
-            service: svc ?? undefined,
-            defaultDsp: dsp ?? null,
-            startMinutes: start,
-            endMinutes: end,
-            notes: masterModalNotes || null,
-          }
+          ...s,
+          serviceId: masterModalServiceId,
+          service: svc ?? undefined,
+          defaultDsp: dsp ?? null,
+          startMinutes: start,
+          endMinutes: end,
+          notes: masterModalNotes || null,
+        }
         : s
     );
 
@@ -1153,11 +1153,11 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: prev.shifts.map((s) =>
-                s.id === updated.id ? updated : s
-              ),
-            }
+            ...prev,
+            shifts: prev.shifts.map((s) =>
+              s.id === updated.id ? updated : s
+            ),
+          }
           : prev
       );
 
@@ -1209,9 +1209,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
-            }
+            ...prev,
+            shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+          }
           : prev
       );
 
@@ -1319,9 +1319,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-              ...prev,
-              shifts: [...prev.shifts, created],
-            }
+            ...prev,
+            shifts: [...prev.shifts, created],
+          }
           : prev
       );
 
@@ -1483,6 +1483,9 @@ export default function SchedulePage() {
     const isBackupOpen = !!shift.isBackupPlanShift;
     const isBackupClaimed = !!shift.wasBackupPlanShift;
 
+    const isFailAwake =
+      (shift.notes ?? "").toLowerCase().includes("fail confirm awake");
+
     const statusColor =
       shift.status === "COMPLETED"
         ? "text-emerald-400"
@@ -1492,13 +1495,19 @@ export default function SchedulePage() {
             ? "text-rose-400"
             : shift.status === "BACKUP_PLAN"
               ? "text-sky-300"
-              : "text-slate-400";
+              : shift.status === "NOT_COMPLETED"
+                ? "text-rose-400"
+                : "text-slate-400";
 
-    const cardClass = isBackupOpen
-      ? "border border-rose-500 bg-rose-950/20"
-      : isBackupClaimed
-        ? "border border-emerald-500 bg-emerald-950/20 shadow-md shadow-emerald-900/20"
-        : "border border-slate-700 bg-slate-900/40";
+    const cardClass = isFailAwake
+      ? "border border-red-500 bg-red-950/30 shadow-md shadow-red-900/30"
+      : shift.status === "NOT_COMPLETED"
+        ? "border border-rose-500 bg-rose-950/20"
+        : isBackupOpen
+          ? "border border-rose-500 bg-rose-950/20"
+          : isBackupClaimed
+            ? "border border-emerald-500 bg-emerald-950/20 shadow-md shadow-emerald-900/20"
+            : "border border-slate-700 bg-slate-900/40";
 
     return (
       <div
@@ -1519,6 +1528,13 @@ export default function SchedulePage() {
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-[2px] text-[10px] font-medium text-emerald-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 CLAIMED
+              </span>
+            )}
+            {/* 🔴 FAIL AWAKE */}
+            {isFailAwake && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-[2px] text-[10px] font-semibold text-white">
+                <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                FAIL AWAKE
               </span>
             )}
             <div className={`text-[10px] uppercase tracking-wide ${statusColor}`}>
@@ -1554,11 +1570,10 @@ export default function SchedulePage() {
           <span className="whitespace-nowrap">
             Visit:{" "}
             {shift.visits.length > 0
-              ? `${formatTime(shift.visits[0].checkInAt)}–${
-                  shift.visits[0].checkOutAt
-                    ? formatTime(shift.visits[0].checkOutAt)
-                    : "--:--"
-                }`
+              ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
+                ? formatTime(shift.visits[0].checkOutAt)
+                : "--:--"
+              }`
               : "--:-- – --:--"}
           </span>
           <span>{visitedUnits}u</span>
@@ -1742,33 +1757,30 @@ export default function SchedulePage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("weekly")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "weekly"
-                      ? "bg-slate-100 text-slate-950"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
+                  className={`px-3 py-1 rounded-full ${activeTab === "weekly"
+                    ? "bg-slate-100 text-slate-950"
+                    : "text-slate-300 hover:text-slate-50"
+                    }`}
                 >
                   Weekly detail
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("summary")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "summary"
-                      ? "bg-slate-100 text-slate-950"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
+                  className={`px-3 py-1 rounded-full ${activeTab === "summary"
+                    ? "bg-slate-100 text-slate-950"
+                    : "text-slate-300 hover:text-slate-50"
+                    }`}
                 >
                   Summary & conflicts
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("payroll")}
-                  className={`px-3 py-1 rounded-full ${
-                    activeTab === "payroll"
-                      ? "bg-slate-100 text-slate-950"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
+                  className={`px-3 py-1 rounded-full ${activeTab === "payroll"
+                    ? "bg-slate-100 text-slate-950"
+                    : "text-slate-300 hover:text-slate-50"
+                    }`}
                 >
                   Payroll & ISP
                 </button>
@@ -1891,13 +1903,12 @@ export default function SchedulePage() {
                               {row.visitedUnits}
                             </td>
                             <td
-                              className={`py-1 text-right ${
-                                delta > 0
-                                  ? "text-emerald-300"
-                                  : delta < 0
-                                    ? "text-rose-300"
-                                    : "text-slate-300"
-                              }`}
+                              className={`py-1 text-right ${delta > 0
+                                ? "text-emerald-300"
+                                : delta < 0
+                                  ? "text-rose-300"
+                                  : "text-slate-300"
+                                }`}
                             >
                               {delta}
                             </td>
@@ -1983,13 +1994,12 @@ export default function SchedulePage() {
                               {actualHours.toFixed(2)}
                             </td>
                             <td
-                              className={`py-1 text-right ${
-                                delta > 0
-                                  ? "text-emerald-300"
-                                  : delta < 0
-                                    ? "text-rose-300"
-                                    : "text-slate-300"
-                              }`}
+                              className={`py-1 text-right ${delta > 0
+                                ? "text-emerald-300"
+                                : delta < 0
+                                  ? "text-rose-300"
+                                  : "text-slate-300"
+                                }`}
                             >
                               {delta.toFixed(2)}
                             </td>
