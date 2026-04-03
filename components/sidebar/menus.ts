@@ -82,9 +82,8 @@ export const MAIN_ITEMS: MenuItem[] = [
     label: "Reports",
     children: [
       { label: "Daily Notes", href: "/reports/daily-notes" },
-
-      // ✅ NEW: Health & Incident
       { label: "Health & Incident", href: "/reports/health-incident" },
+      { label: "Awake Report", href: "/reports/awake" },
     ],
   },
 ];
