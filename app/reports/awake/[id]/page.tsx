@@ -96,6 +96,14 @@ export default function AwakeReportDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [timelineError, setTimelineError] = useState<string | null>(null);
 
+  const DOWNLOAD_BASE =
+    process.env.NEXT_PUBLIC_BAC_API_BASE_URL || "http://127.0.0.1:3333";
+
+  function downloadUrl(type: "staff-doc" | "staff-pdf") {
+    if (!id) return "#";
+    return `${DOWNLOAD_BASE}/reports/awake/${id}/download/${type}`;
+  }
+
   const SAMPLE_DETAIL: AwakeDetail = useMemo(
     () => ({
       id: "sample",
@@ -218,6 +226,11 @@ export default function AwakeReportDetailPage() {
       : "bg-red-600/90 text-white";
   }
 
+  const certificationNote =
+    "This document contains accurate BAC-HMS system data extracted from actual shift activity, including check-in/check-out records, awake alert events, and DSP awake confirmations when applicable. This report serves as detailed supporting documentation for an Awake shift that Blue Angels Care monitors to support BAC service quality management standards and applicable regulatory requirements.";
+
+  const serviceTypeText = data.serviceName || "—";
+
   return (
     <div className="px-6 py-6">
       <div className="mb-4 flex items-start justify-between gap-4 print:hidden">
@@ -245,6 +258,18 @@ export default function AwakeReportDetailPage() {
         </div>
 
         <div className="flex items-center gap-3">
+        
+          <a
+            href={downloadUrl("staff-pdf")}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-violet-600 px-4 text-sm font-medium text-white shadow hover:bg-violet-500"
+            title="Save as PDF"
+            onClick={(e) => {
+              if (!id) e.preventDefault();
+            }}
+          >
+            Save as PDF
+          </a>
+
           <button
             onClick={onPrint}
             className="inline-flex h-10 items-center justify-center rounded-lg bg-violet-600 px-4 text-sm font-medium text-white shadow hover:bg-violet-500"
@@ -262,9 +287,43 @@ export default function AwakeReportDetailPage() {
       </div>
 
       <div className="awake-print-root">
-        <div className="mx-auto max-w-[1100px] space-y-6">
-          <div className="awake-page rounded-2xl border border-violet-700/30 bg-slate-950/95 p-6 shadow-xl shadow-black/40 text-slate-100">
-            <div className="flex flex-col gap-2 border-b border-violet-700/30 pb-4">
+        <div className="mx-auto max-w-[1100px] space-y-4">
+          <div className="awake-page rounded-2xl border border-violet-700/30 bg-slate-950/95 p-5 shadow-xl shadow-black/40 text-slate-100">
+            {/* PRINT HEADER */}
+            <div className="hidden print:flex items-start justify-between gap-4 border-b border-black pb-2 mb-3">
+              <div className="flex items-start gap-3">
+                <div className="h-12 w-12 shrink-0">
+                  <img
+                    src="/Logo.png"
+                    alt="BAC"
+                    className="h-12 w-12 object-contain"
+                  />
+                </div>
+
+                <div className="text-[10px] leading-[16px]">
+                  <div className="font-bold text-[12px]">
+                    Blue Angels Care, LLC
+                  </div>
+                  <div>MPI #: 104322079</div>
+                  <div>3107 Beale Avenue, Altoona, PA 16601</div>
+                  <div>Phone: (814) 600-2313</div>
+                  <div>Email: blueangelscarellc@gmail.com</div>
+                  <div>Website: blueangelscare.org</div>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <div className="text-[22px] font-extrabold tracking-wide">
+                  AWAKE REPORT
+                </div>
+                <div className="mt-1 text-[12px]">
+                  Service Type: <span className="font-bold">{serviceTypeText}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* SCREEN HEADER */}
+            <div className="flex flex-col gap-2 border-b border-violet-700/30 pb-3 print:hidden">
               <div className="flex items-center gap-3">
                 <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600/20 text-xl text-amber-300">
                   🌙
@@ -278,87 +337,88 @@ export default function AwakeReportDetailPage() {
               </div>
             </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-violet-300">
+            {/* PAGE 1 COMPACT 2-COLUMN PRINT LAYOUT */}
+            <div className="mt-4 grid grid-cols-1 gap-3 print:mt-2 print:grid-cols-2 print:gap-2">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-violet-300 print:text-[9px]">
                   Individual
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {data.individualName || "—"}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-violet-300">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-violet-300 print:text-[9px]">
                   DSP / Staff
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {data.staffName || "—"}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-violet-300">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-violet-300 print:text-[9px]">
                   Service
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {data.serviceName || "—"}
                 </div>
-                <div className="text-xs text-slate-400">{data.serviceCode}</div>
+                <div className="text-xs text-slate-400 print:text-[10px]">
+                  {data.serviceCode}
+                </div>
               </div>
 
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-violet-300">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-violet-300 print:text-[9px]">
                   Shift Date
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {safeStr(data.dateLocal || data.date).slice(0, 10) || "—"}
                 </div>
               </div>
-            </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-amber-300">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-amber-300 print:text-[9px]">
                   Schedule
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {data.scheduleStart && data.scheduleEnd
                     ? `${data.scheduleStart} – ${data.scheduleEnd}`
                     : "—"}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-sky-300">
+              <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-sky-300 print:text-[9px]">
                   Visit
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {data.visitStart
                     ? `${data.visitStart} – ${data.visitEnd || "—"}`
                     : "—"}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-amber-300">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-amber-300 print:text-[9px]">
                   Reminders / Confirms
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white">
+                <div className="mt-1 text-sm font-semibold text-white print:text-[12px]">
                   {data.reminderCount} / {data.confirmCount}
                 </div>
-                <div className="mt-1 text-[11px] text-slate-400">
+                <div className="mt-0.5 text-[10px] text-slate-400 print:text-[9px]">
                   Real timeline events found: {items.length}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-[11px] uppercase tracking-wide text-violet-300">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2">
+                <div className="text-[10px] uppercase tracking-wide text-violet-300 print:text-[9px]">
                   Final Status
                 </div>
-                <div className="mt-2">
+                <div className="mt-1">
                   <span
-                    className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${finalStatusBadgeClass(
+                    className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold print:px-2 print:py-0.5 print:text-[10px] ${finalStatusBadgeClass(
                       data.status
                     )}`}
                   >
@@ -366,46 +426,44 @@ export default function AwakeReportDetailPage() {
                   </span>
                 </div>
               </div>
-            </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-sm font-semibold text-violet-200">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2 print:col-span-1">
+                <div className="text-sm font-semibold text-violet-200 print:text-[11px]">
                   Auto Checkout Reason
                 </div>
-                <div className="mt-2 text-sm text-slate-200">
+                <div className="mt-1 text-sm text-slate-200 print:text-[11px] break-words">
                   {data.autoCheckoutReason || "—"}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-4">
-                <div className="text-sm font-semibold text-violet-200">
+              <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2 print:col-span-1">
+                <div className="text-sm font-semibold text-violet-200 print:text-[11px]">
                   Auto Checked Out At
                 </div>
-                <div className="mt-2 text-sm text-slate-200">
+                <div className="mt-1 text-sm text-slate-200 print:text-[11px] break-words">
                   {data.autoCheckedOutAt || "—"}
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 rounded-2xl border border-violet-700/30 bg-slate-900/70 p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="text-lg font-semibold text-violet-200">
+            <div className="mt-4 rounded-2xl border border-violet-700/30 bg-slate-900/70 p-3 print:mt-3 print:p-2">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-base font-semibold text-violet-200 print:text-[12px]">
                   Timeline
                 </div>
-                <div className="text-xs text-slate-400">
+                <div className="text-[10px] text-slate-400 print:text-[9px]">
                   Awake Monitoring event history
                 </div>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse text-xs">
+                <table className="min-w-full border-collapse text-xs print:text-[10px]">
                   <thead>
-                    <tr className="bg-slate-900/95 text-[11px] uppercase tracking-wide text-amber-300">
-                      <th className="px-3 py-2 text-left">#</th>
-                      <th className="px-3 py-2 text-left">Event</th>
-                      <th className="px-3 py-2 text-left">Time</th>
-                      <th className="px-3 py-2 text-left">Note</th>
+                    <tr className="bg-slate-900/95 text-[11px] uppercase tracking-wide text-amber-300 print:text-[9px]">
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">#</th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">Event</th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">Time</th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">Note</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -413,7 +471,7 @@ export default function AwakeReportDetailPage() {
                       <tr>
                         <td
                           colSpan={4}
-                          className="px-3 py-4 text-center text-slate-400"
+                          className="px-2 py-3 text-center text-slate-400 print:px-1.5 print:py-2 print:text-[10px]"
                         >
                           No real timeline data found for this visit.
                         </td>
@@ -425,11 +483,13 @@ export default function AwakeReportDetailPage() {
                         key={item.id}
                         className="border-t border-slate-800 odd:bg-slate-950 even:bg-slate-900/60"
                       >
-                        <td className="px-3 py-2 text-slate-300">{idx + 1}</td>
+                        <td className="px-2 py-1.5 text-slate-300 print:px-1.5 print:py-1">
+                          {idx + 1}
+                        </td>
 
-                        <td className="px-3 py-2">
+                        <td className="px-2 py-1.5 print:px-1.5 print:py-1">
                           <span
-                            className={`inline-flex rounded-full px-3 py-1 text-[11px] font-medium ${eventBadgeClass(
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-medium print:px-2 print:py-0 print:text-[9px] ${eventBadgeClass(
                               item.eventType
                             )}`}
                           >
@@ -437,11 +497,11 @@ export default function AwakeReportDetailPage() {
                           </span>
                         </td>
 
-                        <td className="px-3 py-2 whitespace-nowrap text-slate-100">
+                        <td className="px-2 py-1.5 whitespace-nowrap text-slate-100 print:px-1.5 print:py-1">
                           {item.eventTimeLocal || item.createdAtLocal || "—"}
                         </td>
 
-                        <td className="px-3 py-2 text-slate-200">
+                        <td className="px-2 py-1.5 text-slate-200 print:px-1.5 print:py-1">
                           {item.note || "—"}
                         </td>
                       </tr>
@@ -451,16 +511,27 @@ export default function AwakeReportDetailPage() {
               </div>
 
               {items.length > 0 && (
-                <div className="mt-3 text-[11px] text-slate-400">
+                <div className="mt-2 text-[10px] text-slate-400 print:text-[9px]">
                   Showing real timeline events from database only.
                 </div>
               )}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-violet-700/30 bg-slate-900/60 p-3 print:mt-3 print:border print:border-[#cfcfcf] print:bg-white print:p-2">
+              <div className="text-[11px] leading-[16px] text-slate-400 print:text-[9px] print:leading-[13px]">
+                {certificationNote}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <style jsx global>{`
+        @page {
+          size: Letter portrait;
+          margin: 0.4in;
+        }
+
         @media print {
           body.awake-printing * {
             visibility: hidden !important;
@@ -476,13 +547,63 @@ export default function AwakeReportDetailPage() {
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            background: white !important;
           }
 
           body.awake-printing .awake-page {
-            box-shadow: none !important;
-            border-radius: 0 !important;
             background: white !important;
             color: black !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            border: none !important;
+            padding: 10px !important;
+          }
+
+          body.awake-printing .awake-page * {
+            color: black !important;
+            opacity: 1 !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+          }
+
+          body.awake-printing .awake-page .rounded-xl,
+          body.awake-printing .awake-page .rounded-2xl {
+            background: white !important;
+            border: 1px solid #cfcfcf !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          body.awake-printing table {
+            width: 100% !important;
+            border: 1px solid #000 !important;
+            table-layout: fixed !important;
+          }
+
+          body.awake-printing th {
+            background: #eeeeee !important;
+            color: black !important;
+            font-weight: 700 !important;
+          }
+
+          body.awake-printing td {
+            color: black !important;
+            vertical-align: top !important;
+          }
+
+          body.awake-printing span {
+            background: none !important;
+            border: 1px solid #000 !important;
+            color: black !important;
+          }
+
+          body.awake-printing img {
+            filter: none !important;
+          }
+
+          body.awake-printing a {
+            color: black !important;
+            text-decoration: none !important;
           }
         }
       `}</style>
