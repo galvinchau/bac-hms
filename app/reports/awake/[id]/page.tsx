@@ -99,7 +99,7 @@ export default function AwakeReportDetailPage() {
   const DOWNLOAD_BASE =
     process.env.NEXT_PUBLIC_BAC_API_BASE_URL || "http://127.0.0.1:3333";
 
-  function downloadUrl(type: "staff-doc" | "staff-pdf") {
+  function downloadUrl(type: "staff-pdf") {
     if (!id) return "#";
     return `${DOWNLOAD_BASE}/reports/awake/${id}/download/${type}`;
   }
@@ -258,18 +258,7 @@ export default function AwakeReportDetailPage() {
         </div>
 
         <div className="flex items-center gap-3">
-        
-          <a
-            href={downloadUrl("staff-pdf")}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-violet-600 px-4 text-sm font-medium text-white shadow hover:bg-violet-500"
-            title="Save as PDF"
-            onClick={(e) => {
-              if (!id) e.preventDefault();
-            }}
-          >
-            Save as PDF
-          </a>
-
+          
           <button
             onClick={onPrint}
             className="inline-flex h-10 items-center justify-center rounded-lg bg-violet-600 px-4 text-sm font-medium text-white shadow hover:bg-violet-500"
@@ -289,7 +278,6 @@ export default function AwakeReportDetailPage() {
       <div className="awake-print-root">
         <div className="mx-auto max-w-[1100px] space-y-4">
           <div className="awake-page rounded-2xl border border-violet-700/30 bg-slate-950/95 p-5 shadow-xl shadow-black/40 text-slate-100">
-            {/* PRINT HEADER */}
             <div className="hidden print:flex items-start justify-between gap-4 border-b border-black pb-2 mb-3">
               <div className="flex items-start gap-3">
                 <div className="h-12 w-12 shrink-0">
@@ -317,12 +305,12 @@ export default function AwakeReportDetailPage() {
                   AWAKE REPORT
                 </div>
                 <div className="mt-1 text-[12px]">
-                  Service Type: <span className="font-bold">{serviceTypeText}</span>
+                  Service Type:{" "}
+                  <span className="font-bold">{serviceTypeText}</span>
                 </div>
               </div>
             </div>
 
-            {/* SCREEN HEADER */}
             <div className="flex flex-col gap-2 border-b border-violet-700/30 pb-3 print:hidden">
               <div className="flex items-center gap-3">
                 <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600/20 text-xl text-amber-300">
@@ -337,7 +325,6 @@ export default function AwakeReportDetailPage() {
               </div>
             </div>
 
-            {/* PAGE 1 COMPACT 2-COLUMN PRINT LAYOUT */}
             <div className="mt-4 grid grid-cols-1 gap-3 print:mt-2 print:grid-cols-2 print:gap-2">
               <div className="rounded-xl border border-violet-700/30 bg-slate-900/80 p-3 print:p-2">
                 <div className="text-[10px] uppercase tracking-wide text-violet-300 print:text-[9px]">
@@ -460,10 +447,18 @@ export default function AwakeReportDetailPage() {
                 <table className="min-w-full border-collapse text-xs print:text-[10px]">
                   <thead>
                     <tr className="bg-slate-900/95 text-[11px] uppercase tracking-wide text-amber-300 print:text-[9px]">
-                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">#</th>
-                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">Event</th>
-                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">Time</th>
-                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">Note</th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">
+                        #
+                      </th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">
+                        Event
+                      </th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">
+                        Time
+                      </th>
+                      <th className="px-2 py-1.5 text-left print:px-1.5 print:py-1">
+                        Note
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -527,83 +522,89 @@ export default function AwakeReportDetailPage() {
       </div>
 
       <style jsx global>{`
-        @page {
-          size: Letter portrait;
-          margin: 0.4in;
-        }
+  @page {
+    size: Letter portrait;
+    margin: 0.4in;
+  }
 
-        @media print {
-          body.awake-printing * {
-            visibility: hidden !important;
-          }
+  @media print {
+    html,
+    body {
+      background: #ffffff !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
 
-          body.awake-printing .awake-print-root,
-          body.awake-printing .awake-print-root * {
-            visibility: visible !important;
-          }
+    /* Ẩn hết */
+    body.awake-printing * {
+      visibility: hidden !important;
+    }
 
-          body.awake-printing .awake-print-root {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            background: white !important;
-          }
+    /* Chỉ hiện vùng in */
+    body.awake-printing .awake-print-root,
+    body.awake-printing .awake-print-root * {
+      visibility: visible !important;
+    }
 
-          body.awake-printing .awake-page {
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
-            border: none !important;
-            padding: 10px !important;
-          }
+    body.awake-printing .awake-print-root {
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      background: #ffffff !important;
+    }
 
-          body.awake-printing .awake-page * {
-            color: black !important;
-            opacity: 1 !important;
-            box-shadow: none !important;
-            text-shadow: none !important;
-          }
+    /* 🔥 QUAN TRỌNG NHẤT: kill dark mode */
+    body.awake-printing .awake-page,
+    body.awake-printing .awake-page * {
+      background: #ffffff !important;
+      color: #000000 !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+      filter: none !important;
+    }
 
-          body.awake-printing .awake-page .rounded-xl,
-          body.awake-printing .awake-page .rounded-2xl {
-            background: white !important;
-            border: 1px solid #cfcfcf !important;
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-          }
+    /* Card */
+    body.awake-printing .awake-page .rounded-xl,
+    body.awake-printing .awake-page .rounded-2xl {
+      border: 1px solid #cccccc !important;
+      background: #ffffff !important;
+      break-inside: avoid !important;
+    }
 
-          body.awake-printing table {
-            width: 100% !important;
-            border: 1px solid #000 !important;
-            table-layout: fixed !important;
-          }
+    /* Table */
+    body.awake-printing table {
+      border-collapse: collapse !important;
+      width: 100% !important;
+    }
 
-          body.awake-printing th {
-            background: #eeeeee !important;
-            color: black !important;
-            font-weight: 700 !important;
-          }
+    body.awake-printing th,
+    body.awake-printing td {
+      border: 1px solid #000000 !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
 
-          body.awake-printing td {
-            color: black !important;
-            vertical-align: top !important;
-          }
+    body.awake-printing th {
+      font-weight: bold !important;
+    }
 
-          body.awake-printing span {
-            background: none !important;
-            border: 1px solid #000 !important;
-            color: black !important;
-          }
+    /* Badge */
+    body.awake-printing span {
+      background: #ffffff !important;
+      color: #000000 !important;
+      border: 1px solid #000000 !important;
+    }
 
-          body.awake-printing img {
-            filter: none !important;
-          }
+    /* Image */
+    body.awake-printing img {
+      filter: none !important;
+    }
 
-          body.awake-printing a {
-            color: black !important;
-            text-decoration: none !important;
+    /* Link */
+    body.awake-printing a {
+      color: #000000 !important;
+      text-decoration: none !important;
           }
         }
       `}</style>
