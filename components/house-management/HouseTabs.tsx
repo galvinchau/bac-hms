@@ -11,9 +11,9 @@ export default function HouseTabs({
   onChange: (tab: HouseTabKey) => void;
 }) {
   const tabs: Array<{ key: HouseTabKey; label: string }> = [
-    { key: "HOUSES", label: "Houses" },
     { key: "DASHBOARD", label: "Dashboard" },
-    { key: "RESIDENTS", label: "Residents" },
+    { key: "HOUSES", label: "Houses" },
+        { key: "RESIDENTS", label: "Residents" },
     { key: "STAFFING", label: "Staffing" },
     { key: "COMPLIANCE", label: "Compliance" },
     { key: "OPERATIONS", label: "Daily Operations" },
