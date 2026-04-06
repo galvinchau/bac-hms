@@ -103,7 +103,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       "/authorizations",
       "/billing",
       "/individual",
-      "/firedrill",
+      "/house-management",
     
     ];
 

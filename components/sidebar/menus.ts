@@ -67,7 +67,7 @@ export const MAIN_ITEMS: MenuItem[] = [
   },
 
   // ✅ RENAME
-  { label: "House Management", href: "/firedrill" },
+  { label: "House Management", href: "/house-management" },
 
   // 🔒 ADMIN only (menu visibility)
   { label: "Billing", href: "/billing" },

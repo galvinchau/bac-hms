@@ -90,7 +90,7 @@ const MENU: MenuItem[] = [
       { label: "Incidents & Reports", href: "/medication/incidents" },
     ],
   },
-  { label: "House Management", href: "/firedrill" },
+  { label: "House Management", href: "/house-management" },
   { label: "Billing", href: "/billing" },
   { label: "Payroll", href: "/payroll" },
   { label: "Time Keeping", href: "/time-keeping" },
