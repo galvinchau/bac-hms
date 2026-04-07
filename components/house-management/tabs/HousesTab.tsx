@@ -1,7 +1,16 @@
 "use client";
 
 import React from "react";
-import { HouseSummary, renderRiskBadge, SectionCard, Select, StatCard, TextInput, ProgressBar, Badge } from "../shared";
+import {
+  HouseSummary,
+  renderRiskBadge,
+  SectionCard,
+  Select,
+  StatCard,
+  TextInput,
+  ProgressBar,
+  Badge,
+} from "../shared";
 
 export default function HousesTab({
   houses,
@@ -14,6 +23,7 @@ export default function HousesTab({
   riskFilter,
   setRiskFilter,
   onViewDashboard,
+  onEditHouse,
 }: {
   houses: HouseSummary[];
   search: string;
@@ -25,6 +35,7 @@ export default function HousesTab({
   riskFilter: string;
   setRiskFilter: (v: string) => void;
   onViewDashboard: (houseId: string) => void;
+  onEditHouse: (houseId: string) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -118,7 +129,7 @@ export default function HousesTab({
                   View Dashboard
                 </button>
                 <button
-                  onClick={() => alert("UI only. Wire edit later.")}
+                  onClick={() => onEditHouse(house.id)}
                   className="rounded-xl border border-bac-border bg-bac-bg px-4 py-2 text-sm text-bac-text hover:bg-white/5"
                 >
                   Edit
