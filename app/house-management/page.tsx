@@ -1164,13 +1164,7 @@ export default function HouseManagementPage() {
               + New House
             </button>
 
-            <button
-              onClick={() => alert("UI only. Wire export later.")}
-              className="rounded-xl border border-bac-border bg-bac-panel px-4 py-2 text-sm text-bac-text hover:bg-white/5"
-            >
-              Export
-            </button>
-
+            
             <Link
               href="/reports"
               className="rounded-xl bg-bac-primary px-4 py-2 text-sm font-medium text-white hover:opacity-95"
