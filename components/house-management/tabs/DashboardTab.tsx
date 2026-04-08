@@ -18,6 +18,11 @@ import {
 } from "../shared";
 
 type OccupancyStatus = "AVAILABLE" | "NEAR_FULL" | "FULL";
+type AlertAction =
+  | "VIEW_RESIDENTS"
+  | "VIEW_STAFFING"
+  | "VIEW_COVERAGE"
+  | "VIEW_DASHBOARD";
 
 type ResidentSnapshotItem = {
   id: string;
@@ -38,6 +43,10 @@ type ResidentSnapshotItem = {
     missingHousingCoverage?: boolean;
     missingHomeVisitSchedule?: boolean;
   };
+};
+
+type DashboardAlertItem = AlertItem & {
+  action?: AlertAction;
 };
 
 export default function DashboardTab({
@@ -67,7 +76,7 @@ export default function DashboardTab({
   highNeedCount: number;
   multiDspShiftCount: number;
   coverage: CoverageShift[];
-  alerts: AlertItem[];
+  alerts: DashboardAlertItem[];
   compliance: ComplianceItem[];
   timeline: TimelineItem[];
   onGoResidents: () => void;
@@ -125,8 +134,37 @@ export default function DashboardTab({
     return <Badge variant="muted">—</Badge>;
   }
 
+  function handleAlertAction(action?: AlertAction) {
+    if (!action) return;
+
+    if (action === "VIEW_RESIDENTS") {
+      onGoResidents();
+      return;
+    }
+
+    if (action === "VIEW_STAFFING") {
+      onGoStaffing();
+      return;
+    }
+
+    if (action === "VIEW_COVERAGE") {
+      const el = document.getElementById("today-coverage");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+
+    if (action === "VIEW_DASHBOARD") {
+      const el = document.getElementById("dashboard-top");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" id="dashboard-top">
       <SectionCard
         title={`${selectedHouse.name} Dashboard`}
         subtitle={`${selectedHouse.programType} • ${selectedHouse.address}`}
@@ -233,7 +271,7 @@ export default function DashboardTab({
           subtitle="Current and upcoming house shifts, including multi-DSP support and behavioral needs."
           className="xl:col-span-8"
         >
-          <div className="overflow-x-auto">
+          <div id="today-coverage" className="overflow-x-auto">
             <table className="min-w-[1100px] w-full text-left text-sm">
               <thead className="border-b border-bac-border text-bac-muted">
                 <tr>
@@ -322,7 +360,10 @@ export default function DashboardTab({
                     <div className="mt-2 text-sm text-bac-muted">{a.detail}</div>
                   </div>
 
-                  <button className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-white/5">
+                  <button
+                    onClick={() => handleAlertAction(a.action)}
+                    className="rounded-xl border border-bac-border bg-bac-panel px-3 py-2 text-sm text-bac-text hover:bg-white/5"
+                  >
                     {a.actionLabel}
                   </button>
                 </div>
@@ -353,8 +394,8 @@ export default function DashboardTab({
                     {item.status === "GOOD"
                       ? "Good"
                       : item.status === "WARNING"
-                      ? "Warning"
-                      : "Critical"}
+                        ? "Warning"
+                        : "Critical"}
                   </span>
                 </div>
               </div>

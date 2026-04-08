@@ -34,6 +34,11 @@ import OperationsTab from "@/components/house-management/tabs/OperationsTab";
 
 type HouseRisk = "GOOD" | "WARNING" | "CRITICAL";
 type OccupancyStatus = "AVAILABLE" | "NEAR_FULL" | "FULL";
+type AlertAction =
+  | "VIEW_RESIDENTS"
+  | "VIEW_STAFFING"
+  | "VIEW_COVERAGE"
+  | "VIEW_DASHBOARD";
 
 type HouseItem = {
   id: string;
@@ -130,6 +135,7 @@ type DashboardResponse = {
     title: string;
     detail: string;
     actionLabel: string;
+    action?: AlertAction;
   }>;
   compliance: Array<{
     key: string;
@@ -194,6 +200,7 @@ type StaffingResponse = {
     id: string;
     name: string;
     role: string;
+    isPrimaryStaff?: boolean;
     shiftToday: string;
     trainingStatus: "CURRENT" | "DUE_SOON" | "OVERDUE" | string;
     medCertified: boolean;
@@ -209,6 +216,18 @@ type AvailableIndividualsResponse = {
   total: number;
 };
 
+type AvailableEmployeeOption = {
+  id: string;
+  name: string;
+  role?: string;
+  status?: string;
+};
+
+type AvailableEmployeesResponse = {
+  items: AvailableEmployeeOption[];
+  total: number;
+};
+
 type HouseFormPayload = {
   name: string;
   code: string;
@@ -220,6 +239,18 @@ type HouseFormPayload = {
   address1: string;
   billingNote: string;
   careComplexityNote: string;
+};
+
+type AssignStaffPayload = {
+  employeeId: string;
+  houseRole: string;
+  isPrimaryStaff: boolean;
+};
+
+type UpdateStaffRolePayload = {
+  employeeId: string;
+  houseRole?: string;
+  isPrimaryStaff?: boolean;
 };
 
 const API_BASE =
@@ -319,7 +350,7 @@ function emptyHouseForm(): HouseFormPayload {
 }
 
 export default function HouseManagementPage() {
-  const [tab, setTab] = useState<HouseTabKey>("HOUSES");
+  const [tab, setTab] = useState<HouseTabKey>("DASHBOARD");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [countyFilter, setCountyFilter] = useState("ALL");
@@ -336,6 +367,9 @@ export default function HouseManagementPage() {
   const [availableIndividuals, setAvailableIndividuals] = useState<
     AvailableIndividualOption[]
   >([]);
+  const [availableEmployees, setAvailableEmployees] = useState<
+    AvailableEmployeeOption[]
+  >([]);
 
   const [housesLoading, setHousesLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
@@ -343,12 +377,15 @@ export default function HouseManagementPage() {
   const [staffingLoading, setStaffingLoading] = useState(false);
   const [availableIndividualsLoading, setAvailableIndividualsLoading] =
     useState(false);
+  const [availableEmployeesLoading, setAvailableEmployeesLoading] =
+    useState(false);
 
   const [housesError, setHousesError] = useState("");
   const [dashboardError, setDashboardError] = useState("");
   const [residentsError, setResidentsError] = useState("");
   const [staffingError, setStaffingError] = useState("");
   const [availableIndividualsError, setAvailableIndividualsError] = useState("");
+  const [availableEmployeesError, setAvailableEmployeesError] = useState("");
 
   const [saveHouseLoading, setSaveHouseLoading] = useState(false);
   const [saveHouseError, setSaveHouseError] = useState("");
@@ -359,6 +396,12 @@ export default function HouseManagementPage() {
   const [removeResidentLoadingId, setRemoveResidentLoadingId] = useState<
     string | null
   >(null);
+
+  const [assignStaffLoading, setAssignStaffLoading] = useState(false);
+  const [updateStaffRoleLoading, setUpdateStaffRoleLoading] = useState(false);
+  const [removeStaffLoadingId, setRemoveStaffLoadingId] = useState<string | null>(
+    null
+  );
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingHouseId, setEditingHouseId] = useState<string>("");
@@ -489,12 +532,47 @@ export default function HouseManagementPage() {
     }
   }
 
+  async function loadAvailableEmployees(houseId: string) {
+    try {
+      setAvailableEmployeesLoading(true);
+      setAvailableEmployeesError("");
+
+      const params = new URLSearchParams();
+      params.set("houseId", houseId);
+      params.set("status", "ACTIVE");
+
+      const data = await fetchJson<AvailableEmployeesResponse>(
+        `${API_BASE}/house-management/available-employees?${params.toString()}`
+      );
+
+      setAvailableEmployees(data.items || []);
+    } catch (error) {
+      setAvailableEmployees([]);
+      setAvailableEmployeesError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load available employees."
+      );
+    } finally {
+      setAvailableEmployeesLoading(false);
+    }
+  }
+
   async function refreshHouseResidentsViews(houseId: string) {
     await Promise.all([
       loadHouses(houseId),
       loadDashboardData(houseId),
       loadResidentsData(houseId),
       loadAvailableIndividuals(),
+    ]);
+  }
+
+  async function refreshHouseStaffingViews(houseId: string) {
+    await Promise.all([
+      loadHouses(houseId),
+      loadDashboardData(houseId),
+      loadStaffingData(houseId),
+      loadAvailableEmployees(houseId),
     ]);
   }
 
@@ -509,6 +587,7 @@ export default function HouseManagementPage() {
       setResidentsData(null);
       setStaffingData(null);
       setAvailableIndividuals([]);
+      setAvailableEmployees([]);
       return;
     }
 
@@ -637,6 +716,46 @@ export default function HouseManagementPage() {
         );
       } finally {
         if (!cancelled) setStaffingLoading(false);
+      }
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHouseId, tab]);
+
+  useEffect(() => {
+    if (!selectedHouseId || tab !== "STAFFING") return;
+
+    let cancelled = false;
+
+    async function run() {
+      try {
+        setAvailableEmployeesLoading(true);
+        setAvailableEmployeesError("");
+
+        const params = new URLSearchParams();
+        params.set("houseId", selectedHouseId);
+        params.set("status", "ACTIVE");
+
+        const data = await fetchJson<AvailableEmployeesResponse>(
+          `${API_BASE}/house-management/available-employees?${params.toString()}`
+        );
+
+        if (cancelled) return;
+        setAvailableEmployees(data.items || []);
+      } catch (error) {
+        if (cancelled) return;
+        setAvailableEmployees([]);
+        setAvailableEmployeesError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load available employees."
+        );
+      } finally {
+        if (!cancelled) setAvailableEmployeesLoading(false);
       }
     }
 
@@ -904,6 +1023,102 @@ export default function HouseManagementPage() {
     }
   }
 
+  async function handleOpenAssignStaff() {
+    if (!selectedHouseId) return;
+    await loadAvailableEmployees(selectedHouseId);
+  }
+
+  async function handleAssignStaff(payload: AssignStaffPayload) {
+    if (!selectedHouseId) {
+      throw new Error("Please select a house first.");
+    }
+
+    try {
+      setAssignStaffLoading(true);
+      setStaffingError("");
+      setDashboardError("");
+      setAvailableEmployeesError("");
+
+      await patchJson(
+        `${API_BASE}/house-management/staff/${payload.employeeId}/assign-house`,
+        {
+          houseId: selectedHouseId,
+          houseRole: payload.houseRole,
+          isPrimaryStaff: payload.isPrimaryStaff,
+        }
+      );
+
+      await refreshHouseStaffingViews(selectedHouseId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to assign staff.";
+      setStaffingError(message);
+      throw error;
+    } finally {
+      setAssignStaffLoading(false);
+    }
+  }
+
+  async function handleRemoveStaff(employeeId: string) {
+    try {
+      setRemoveStaffLoadingId(employeeId);
+      setStaffingError("");
+      setDashboardError("");
+      setAvailableEmployeesError("");
+
+      await patchJson(
+        `${API_BASE}/house-management/staff/${employeeId}/remove-house`,
+        {}
+      );
+
+      if (selectedHouseId) {
+        await refreshHouseStaffingViews(selectedHouseId);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to remove staff.";
+      setStaffingError(message);
+      throw error;
+    } finally {
+      setRemoveStaffLoadingId(null);
+    }
+  }
+
+  async function handleUpdateStaffRole(payload: UpdateStaffRolePayload) {
+    try {
+      setUpdateStaffRoleLoading(true);
+      setStaffingError("");
+      setDashboardError("");
+
+      await patchJson(
+        `${API_BASE}/house-management/staff/${payload.employeeId}/house-role`,
+        {
+          houseRole: payload.houseRole,
+          isPrimaryStaff: payload.isPrimaryStaff,
+        }
+      );
+
+      if (selectedHouseId) {
+        await Promise.all([
+          loadStaffingData(selectedHouseId),
+          loadDashboardData(selectedHouseId),
+          loadHouses(selectedHouseId),
+          loadAvailableEmployees(selectedHouseId),
+        ]);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update staff role.";
+      setStaffingError(message);
+      throw error;
+    } finally {
+      setUpdateStaffRoleLoading(false);
+    }
+  }
+
+  const staffingSaving =
+    assignStaffLoading || updateStaffRoleLoading || removeStaffLoadingId !== null;
+
   return (
     <div className="min-h-[calc(100vh-60px)] bg-bac-bg p-6">
       <div className="mb-6 rounded-3xl border border-violet-500/20 bg-gradient-to-r from-violet-950/40 via-bac-panel to-amber-950/20 p-5">
@@ -970,7 +1185,8 @@ export default function HouseManagementPage() {
         dashboardError ||
         residentsError ||
         staffingError ||
-        availableIndividualsError) && (
+        availableIndividualsError ||
+        availableEmployeesError) && (
         <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {[
             housesError,
@@ -978,6 +1194,7 @@ export default function HouseManagementPage() {
             residentsError,
             staffingError,
             availableIndividualsError,
+            availableEmployeesError,
           ]
             .filter(Boolean)
             .join(" | ")}
@@ -1078,6 +1295,13 @@ export default function HouseManagementPage() {
           staff={staffingData.items}
           specialistsCount={staffingData.summary.behaviorSpecialistVisits}
           multiDspShiftCount={staffingData.summary.multiDspShifts}
+          availableEmployees={availableEmployees}
+          availableEmployeesLoading={availableEmployeesLoading}
+          staffingSaving={staffingSaving}
+          onOpenAssignStaff={handleOpenAssignStaff}
+          onAssignStaff={handleAssignStaff}
+          onRemoveStaff={handleRemoveStaff}
+          onUpdateStaffRole={handleUpdateStaffRole}
         />
       )}
 
