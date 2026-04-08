@@ -105,6 +105,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       "/individual",
       "/house-management",
       "/employees",
+      "/reports",
     
     ];
 
