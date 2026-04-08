@@ -1626,7 +1626,7 @@ export default function EditEmployeePage() {
                         <th className="px-3 py-3 w-[220px]">Assigned As</th>
                         <th className="px-3 py-3 w-[150px]">Status</th>
                         <th className="px-3 py-3 w-[140px]">Flags</th>
-                        <th className="px-3 py-3 min-w-[200px]">Notes</th>
+                        <th className="px-3 py-3 min-w-[100px]">Notes</th>
                         <th className="px-3 py-3 w-[260px]">Daily Note Report</th>
                         
                       </tr>
