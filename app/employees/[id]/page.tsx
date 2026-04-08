@@ -9,6 +9,7 @@ import React, {
   FormEvent,
   useMemo,
 } from "react";
+import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 
 type EmploymentStatus = "Active" | "Inactive" | "On Leave";
@@ -89,6 +90,8 @@ interface EmployeeScheduleRow {
   notes: string | null;
   assignmentType: string;
   plannedHours: number;
+  dailyNoteId: string | null;
+  hasDailyNote: boolean;
   individual: {
     id: string;
     code: string;
@@ -274,10 +277,10 @@ function getDefaultScheduleRange() {
   const currentWeekStart = startOfWeekSunday(today);
 
   const from = new Date(currentWeekStart);
-  from.setDate(currentWeekStart.getDate() - 7); // previous week Sunday
+  from.setDate(currentWeekStart.getDate() - 7);
 
   const to = new Date(currentWeekStart);
-  to.setDate(currentWeekStart.getDate() + 27); // Saturday of 2 weeks in future
+  to.setDate(currentWeekStart.getDate() + 27);
 
   return {
     from: toDateInputValue(from),
@@ -1612,18 +1615,20 @@ export default function EditEmployeePage() {
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="min-w-[1500px] w-full text-left text-sm">
+                  <table className="min-w-[1580px] w-full text-left text-sm">
                     <thead className="sticky top-0 z-10 bg-bac-panel">
                       <tr className="border-b border-bac-border/60 text-xs uppercase tracking-wide text-bac-muted">
                         <th className="px-3 py-3 w-[150px]">Date</th>
                         <th className="px-3 py-3 w-[220px]">Time</th>
                         <th className="px-3 py-3 w-[260px]">Individual</th>
-                        <th className="px-3 py-3 w-[260px]">Service</th>
-                        <th className="px-3 py-3 w-[100px]">Hours</th>
+                        <th className="px-3 py-3 w-[300px]">Service</th>
+                        <th className="px-3 py-3 w-[120px]">Hours</th>
                         <th className="px-3 py-3 w-[220px]">Assigned As</th>
                         <th className="px-3 py-3 w-[150px]">Status</th>
                         <th className="px-3 py-3 w-[140px]">Flags</th>
-                        <th className="px-3 py-3 min-w-[260px]">Notes</th>
+                        <th className="px-3 py-3 min-w-[200px]">Notes</th>
+                        <th className="px-3 py-3 w-[260px]">Daily Note Report</th>
+                        
                       </tr>
                     </thead>
                     <tbody>
@@ -1642,7 +1647,7 @@ export default function EditEmployeePage() {
                             </div>
                           </td>
 
-                          <td className="px-3 py-3">
+                          <td className="px-3 py-3 min-w-[220px]">
                             <div className="font-medium whitespace-nowrap">
                               {formatTime(row.plannedStart)} -{" "}
                               {formatTime(row.plannedEnd)}
@@ -1771,6 +1776,19 @@ export default function EditEmployeePage() {
                                 <span className="text-bac-muted/70">No notes</span>
                               )}
                             </div>
+                          </td>
+
+                          <td className="px-3 py-3">
+                            {row.hasDailyNote && row.dailyNoteId ? (
+                              <Link
+                                href={`/reports/daily-notes/${row.dailyNoteId}`}
+                                className="inline-flex items-center rounded-lg border border-bac-primary/40 bg-bac-primary/10 px-3 py-1.5 text-xs font-semibold text-bac-primary hover:bg-bac-primary/20"
+                              >
+                                Open Report
+                              </Link>
+                            ) : (
+                              <span className="text-xs text-bac-muted/70">No Report</span>
+                            )}
                           </td>
                         </tr>
                       ))}

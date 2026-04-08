@@ -1039,3 +1039,45 @@ model PocDailyTaskLog {
   @@index([pocDutyId])
   @@map("poc_daily_task_log")
 }
+
+model DailyNote {
+  id String @id @default(cuid())
+
+  shiftId      String
+  visitId      String?
+  individualId String
+  staffId      String
+  serviceId    String?
+
+  date DateTime
+
+  individualName String
+  staffName      String?
+  serviceCode    String
+  serviceName    String
+  scheduleStart  String
+  scheduleEnd    String
+  visitStart     String?
+  visitEnd       String?
+
+  mileage      Float?
+  isCanceled   Boolean @default(false)
+  cancelReason String?
+
+  payload Json
+
+  staffReportFileId      String?
+  individualReportFileId String?
+
+  staffReportDocPath      String?
+  staffReportPdfPath      String?
+  individualReportDocPath String?
+  individualReportPdfPath String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([individualId, date])
+  @@index([staffId, date])
+}

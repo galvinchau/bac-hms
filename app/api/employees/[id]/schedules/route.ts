@@ -129,6 +129,39 @@ export async function GET(
       take: 500,
     });
 
+    const shiftIds = shifts.map((s) => s.id);
+
+    // SAFE fallback:
+    // If prisma.dailyNote is unavailable in current generated client,
+    // do not crash Schedule page. Just skip Daily Note enrichment.
+    const dailyNoteDelegate = (prisma as any).dailyNote;
+
+    const dailyNotes =
+      shiftIds.length > 0 && dailyNoteDelegate?.findMany
+        ? await dailyNoteDelegate.findMany({
+            where: {
+              shiftId: {
+                in: shiftIds,
+              },
+            },
+            select: {
+              id: true,
+              shiftId: true,
+              createdAt: true,
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+          })
+        : [];
+
+    const dailyNoteByShiftId = new Map<string, { id: string }>();
+    for (const note of dailyNotes) {
+      if (note.shiftId && !dailyNoteByShiftId.has(note.shiftId)) {
+        dailyNoteByShiftId.set(note.shiftId, { id: note.id });
+      }
+    }
+
     const rows = shifts.map((shift) => {
       const individualName = [
         shift.individual.firstName,
@@ -178,6 +211,8 @@ export async function GET(
             )
           : 0;
 
+      const dailyNote = dailyNoteByShiftId.get(shift.id);
+
       return {
         id: shift.id,
         scheduleDate: shift.scheduleDate,
@@ -192,6 +227,8 @@ export async function GET(
         notes: shift.notes,
         assignmentType,
         plannedHours,
+        dailyNoteId: dailyNote?.id || null,
+        hasDailyNote: !!dailyNote,
 
         individual: {
           id: shift.individual.id,
@@ -235,12 +272,10 @@ export async function GET(
         rows.reduce((sum, row) => sum + row.plannedHours, 0).toFixed(2)
       ),
       cancelledShifts: rows.filter((row) => row.status === "CANCELLED").length,
-      backupPlanShifts: rows.filter((row) => row.status === "BACKUP_PLAN")
-        .length,
+      backupPlanShifts: rows.filter((row) => row.status === "BACKUP_PLAN").length,
       awakeShifts: rows.filter((row) => row.awakeMonitoringRequired).length,
       completedShifts: rows.filter((row) => row.status === "COMPLETED").length,
-      inProgressShifts: rows.filter((row) => row.status === "IN_PROGRESS")
-        .length,
+      inProgressShifts: rows.filter((row) => row.status === "IN_PROGRESS").length,
       upcomingShifts: rows.filter(
         (row) =>
           new Date(row.plannedStart).getTime() >= Date.now() &&
