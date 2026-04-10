@@ -15,8 +15,6 @@ import {
 import {
   DEMO_APPOINTMENTS,
   DEMO_CHORES,
-  DEMO_COMPLIANCE,
-  DEMO_DRILLS,
   DEMO_MEALS,
   DEMO_MEDS,
   DEMO_SPECIALISTS,
@@ -211,6 +209,49 @@ type StaffingResponse = {
   }>;
 };
 
+type ComplianceResponse = {
+  houseId: string;
+  houseName: string;
+  house?: {
+    id: string;
+    code: string;
+    name: string;
+    address: string;
+    county: string;
+    phone: string;
+    programType: string;
+  };
+  summary: {
+    overallComplianceScore: number;
+    warningItems: number;
+    criticalItems: number;
+    lastReviewDate: string;
+  };
+  items: Array<{
+    key: string;
+    label: string;
+    score: number;
+    status: "GOOD" | "WARNING" | "CRITICAL";
+    lastReviewed: string;
+  }>;
+  drills: Array<{
+    id: string;
+    date: string;
+    type: string;
+    conductedBy: string;
+    result: "PASS" | "FAIL" | "PARTIAL" | "NA" | string;
+    notes: string;
+  }>;
+  incidents: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    status: "GOOD" | "WARNING" | "CRITICAL";
+    actionLabel?: string;
+    action?: string;
+  }>;
+};
+
 type AvailableIndividualsResponse = {
   items: AvailableIndividualOption[];
   total: number;
@@ -363,6 +404,7 @@ export default function HouseManagementPage() {
   const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [residentsData, setResidentsData] = useState<ResidentsResponse | null>(null);
   const [staffingData, setStaffingData] = useState<StaffingResponse | null>(null);
+  const [complianceData, setComplianceData] = useState<ComplianceResponse | null>(null);
 
   const [availableIndividuals, setAvailableIndividuals] = useState<
     AvailableIndividualOption[]
@@ -375,6 +417,7 @@ export default function HouseManagementPage() {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [residentsLoading, setResidentsLoading] = useState(false);
   const [staffingLoading, setStaffingLoading] = useState(false);
+  const [complianceLoading, setComplianceLoading] = useState(false);
   const [availableIndividualsLoading, setAvailableIndividualsLoading] =
     useState(false);
   const [availableEmployeesLoading, setAvailableEmployeesLoading] =
@@ -384,6 +427,7 @@ export default function HouseManagementPage() {
   const [dashboardError, setDashboardError] = useState("");
   const [residentsError, setResidentsError] = useState("");
   const [staffingError, setStaffingError] = useState("");
+  const [complianceError, setComplianceError] = useState("");
   const [availableIndividualsError, setAvailableIndividualsError] = useState("");
   const [availableEmployeesError, setAvailableEmployeesError] = useState("");
 
@@ -510,6 +554,26 @@ export default function HouseManagementPage() {
     }
   }
 
+  async function loadComplianceData(houseId: string) {
+    try {
+      setComplianceLoading(true);
+      setComplianceError("");
+
+      const data = await fetchJson<ComplianceResponse>(
+        `${API_BASE}/house-management/compliance/${houseId}`
+      );
+
+      setComplianceData(data);
+    } catch (error) {
+      setComplianceData(null);
+      setComplianceError(
+        error instanceof Error ? error.message : "Failed to load compliance."
+      );
+    } finally {
+      setComplianceLoading(false);
+    }
+  }
+
   async function loadAvailableIndividuals() {
     try {
       setAvailableIndividualsLoading(true);
@@ -586,6 +650,7 @@ export default function HouseManagementPage() {
       setDashboardData(null);
       setResidentsData(null);
       setStaffingData(null);
+      setComplianceData(null);
       setAvailableIndividuals([]);
       setAvailableEmployees([]);
       return;
@@ -766,6 +831,40 @@ export default function HouseManagementPage() {
     };
   }, [selectedHouseId, tab]);
 
+  useEffect(() => {
+    if (!selectedHouseId || tab !== "COMPLIANCE") return;
+
+    let cancelled = false;
+
+    async function run() {
+      try {
+        setComplianceLoading(true);
+        setComplianceError("");
+
+        const data = await fetchJson<ComplianceResponse>(
+          `${API_BASE}/house-management/compliance/${selectedHouseId}`
+        );
+
+        if (cancelled) return;
+        setComplianceData(data);
+      } catch (error) {
+        if (cancelled) return;
+        setComplianceData(null);
+        setComplianceError(
+          error instanceof Error ? error.message : "Failed to load compliance."
+        );
+      } finally {
+        if (!cancelled) setComplianceLoading(false);
+      }
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHouseId, tab]);
+
   const selectedHouse =
     houses.find((h) => h.id === selectedHouseId) ??
     houses[0] ?? {
@@ -792,6 +891,7 @@ export default function HouseManagementPage() {
     dashboardData?.house?.name ||
     residentsData?.houseName ||
     staffingData?.houseName ||
+    complianceData?.houseName ||
     selectedHouse.name ||
     "House";
 
@@ -1136,7 +1236,7 @@ export default function HouseManagementPage() {
               <Badge variant="violet">Residential 6400</Badge>
               <Badge variant="amber">24 / 7 Housing & Care</Badge>
               <Badge variant="sky">Home-Visit Split Supported</Badge>
-              <Badge variant="muted">Live Data + Preview Mix</Badge>
+              <Badge variant="muted">Compliance Live Data Ready</Badge>
             </div>
           </div>
 
@@ -1164,7 +1264,6 @@ export default function HouseManagementPage() {
               + New House
             </button>
 
-            
             <Link
               href="/reports"
               className="rounded-xl bg-bac-primary px-4 py-2 text-sm font-medium text-white hover:opacity-95"
@@ -1179,6 +1278,7 @@ export default function HouseManagementPage() {
         dashboardError ||
         residentsError ||
         staffingError ||
+        complianceError ||
         availableIndividualsError ||
         availableEmployeesError) && (
         <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -1187,6 +1287,7 @@ export default function HouseManagementPage() {
             dashboardError,
             residentsError,
             staffingError,
+            complianceError,
             availableIndividualsError,
             availableEmployeesError,
           ]
@@ -1305,12 +1406,17 @@ export default function HouseManagementPage() {
         </div>
       )}
 
-      {tab === "COMPLIANCE" && (
+      {tab === "COMPLIANCE" && complianceData && (
         <ComplianceTab
-          selectedHouseName={selectedHouseName}
-          compliance={DEMO_COMPLIANCE}
-          drills={DEMO_DRILLS}
+          selectedHouseName={complianceData.houseName || selectedHouseName}
+          complianceData={complianceData}
         />
+      )}
+
+      {tab === "COMPLIANCE" && !complianceData && (
+        <div className="rounded-2xl border border-bac-border bg-bac-panel p-6 text-bac-muted">
+          {complianceLoading ? "Loading compliance..." : "No compliance data available."}
+        </div>
       )}
 
       {tab === "OPERATIONS" && (
