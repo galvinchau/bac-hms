@@ -135,6 +135,18 @@ export default function OperationsTab({
     (item) => String(item.status || "").trim().toUpperCase() === "IN_PROGRESS"
   ).length;
 
+  const completedShifts = data.coverage.filter(
+    (item) => String(item.status || "").trim().toUpperCase() === "COMPLETED"
+  ).length;
+
+  const notCompletedShifts = data.coverage.filter(
+    (item) => String(item.status || "").trim().toUpperCase() === "NOT_COMPLETED"
+  ).length;
+
+  const cancelledShifts = data.coverage.filter(
+    (item) => String(item.status || "").trim().toUpperCase() === "CANCELLED"
+  ).length;
+
   const shiftsWithAssignedStaff = data.coverage.filter(
     (item) => item.staff.length > 0
   ).length;
@@ -188,7 +200,7 @@ export default function OperationsTab({
           <div className="space-y-3">
             {data.coverage.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-4 text-sm text-bac-muted">
-                No shifts found for today.
+                No shifts found for this date.
               </div>
             ) : (
               data.coverage.map((item) => (
@@ -240,7 +252,7 @@ export default function OperationsTab({
             <div className="space-y-3">
               {data.awakeMonitoring.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-4 text-sm text-bac-muted">
-                  No awake monitoring shifts found for today.
+                  No awake monitoring shifts found for this date.
                 </div>
               ) : (
                 data.awakeMonitoring.map((item) => (
@@ -342,10 +354,10 @@ export default function OperationsTab({
             />
 
             <WatchItem
-              label="Upcoming shifts today"
+              label="Upcoming / Not Started shifts"
               value={upcomingShifts}
               tone={upcomingShifts > 0 ? "violet" : "muted"}
-              hint="Shifts scheduled later today."
+              hint="Shifts scheduled later and not yet started."
             />
 
             <WatchItem
@@ -353,6 +365,27 @@ export default function OperationsTab({
               value={inProgressShifts}
               tone={inProgressShifts > 0 ? "success" : "muted"}
               hint="Active residential operations happening now."
+            />
+
+            <WatchItem
+              label="Completed shifts"
+              value={completedShifts}
+              tone={completedShifts > 0 ? "success" : "muted"}
+              hint="Shifts finished successfully."
+            />
+
+            <WatchItem
+              label="Not completed shifts"
+              value={notCompletedShifts}
+              tone={notCompletedShifts > 0 ? "warning" : "muted"}
+              hint="Shifts closed without full completion."
+            />
+
+            <WatchItem
+              label="Cancelled shifts"
+              value={cancelledShifts}
+              tone={cancelledShifts > 0 ? "danger" : "muted"}
+              hint="Cancelled residential operations."
             />
 
             <WatchItem

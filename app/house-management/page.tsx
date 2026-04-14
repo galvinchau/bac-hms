@@ -340,6 +340,23 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:3333";
 
+function toYmdLocal(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayYmd() {
+  return toYmdLocal(new Date());
+}
+
+function getYesterdayYmd() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return toYmdLocal(d);
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     method: "GET",
@@ -448,6 +465,8 @@ export default function HouseManagementPage() {
   const [staffingData, setStaffingData] = useState<StaffingResponse | null>(null);
   const [complianceData, setComplianceData] = useState<ComplianceResponse | null>(null);
   const [operationsData, setOperationsData] = useState<OperationsResponse | null>(null);
+
+  const [operationsDate, setOperationsDate] = useState<string>(getTodayYmd());
 
   const [availableIndividuals, setAvailableIndividuals] = useState<
     AvailableIndividualOption[]
@@ -619,13 +638,16 @@ export default function HouseManagementPage() {
     }
   }
 
-  async function loadOperationsData(houseId: string) {
+  async function loadOperationsData(houseId: string, date: string) {
     try {
       setOperationsLoading(true);
       setOperationsError("");
 
+      const params = new URLSearchParams();
+      if (date) params.set("date", date);
+
       const data = await fetchJson<OperationsResponse>(
-        `${API_BASE}/house-management/operations/${houseId}`
+        `${API_BASE}/house-management/operations/${houseId}?${params.toString()}`
       );
 
       setOperationsData(data);
@@ -941,8 +963,11 @@ export default function HouseManagementPage() {
         setOperationsLoading(true);
         setOperationsError("");
 
+        const params = new URLSearchParams();
+        if (operationsDate) params.set("date", operationsDate);
+
         const data = await fetchJson<OperationsResponse>(
-          `${API_BASE}/house-management/operations/${selectedHouseId}`
+          `${API_BASE}/house-management/operations/${selectedHouseId}?${params.toString()}`
         );
 
         if (cancelled) return;
@@ -963,7 +988,7 @@ export default function HouseManagementPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedHouseId, tab]);
+  }, [selectedHouseId, tab, operationsDate]);
 
   const selectedHouse =
     houses.find((h) => h.id === selectedHouseId) ??
@@ -1320,6 +1345,9 @@ export default function HouseManagementPage() {
   const staffingSaving =
     assignStaffLoading || updateStaffRoleLoading || removeStaffLoadingId !== null;
 
+  const isTodaySelected = operationsDate === getTodayYmd();
+  const isYesterdaySelected = operationsDate === getYesterdayYmd();
+
   return (
     <div className="min-h-[calc(100vh-60px)] bg-bac-bg p-6">
       <div className="mb-6 rounded-3xl border border-violet-500/20 bg-gradient-to-r from-violet-950/40 via-bac-panel to-amber-950/20 p-5">
@@ -1522,15 +1550,66 @@ export default function HouseManagementPage() {
         </div>
       )}
 
-      {tab === "OPERATIONS" && operationsData && (
-        <OperationsTab data={operationsData} selectedHouseName={selectedHouseName} />
-      )}
+      {tab === "OPERATIONS" && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-bac-border bg-bac-panel p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-sm font-medium text-bac-text">
+                  Daily Operations Date Filter
+                </div>
+                <div className="mt-1 text-xs text-bac-muted">
+                  Review operations for today, yesterday, or a custom date.
+                </div>
+              </div>
 
-      {tab === "OPERATIONS" && !operationsData && (
-        <div className="rounded-2xl border border-bac-border bg-bac-panel p-6 text-bac-muted">
-          {operationsLoading
-            ? "Loading daily operations..."
-            : "No daily operations data available."}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setOperationsDate(getTodayYmd())}
+                  className={`rounded-xl border px-3 py-2 text-sm ${
+                    isTodaySelected
+                      ? "border-violet-500/40 bg-violet-500/15 text-violet-200"
+                      : "border-bac-border bg-bac-bg text-bac-text hover:bg-white/5"
+                  }`}
+                >
+                  Today
+                </button>
+
+                <button
+                  onClick={() => setOperationsDate(getYesterdayYmd())}
+                  className={`rounded-xl border px-3 py-2 text-sm ${
+                    isYesterdaySelected
+                      ? "border-violet-500/40 bg-violet-500/15 text-violet-200"
+                      : "border-bac-border bg-bac-bg text-bac-text hover:bg-white/5"
+                  }`}
+                >
+                  Yesterday
+                </button>
+
+                <input
+                  type="date"
+                  value={operationsDate}
+                  onChange={(e) => setOperationsDate(e.target.value)}
+                  className="h-10 rounded-xl border border-bac-border bg-bac-bg px-3 text-sm text-bac-text outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {operationsData && (
+            <OperationsTab
+              data={operationsData}
+              selectedHouseName={selectedHouseName}
+            />
+          )}
+
+          {!operationsData && (
+            <div className="rounded-2xl border border-bac-border bg-bac-panel p-6 text-bac-muted">
+              {operationsLoading
+                ? "Loading daily operations..."
+                : "No daily operations data available."}
+            </div>
+          )}
         </div>
       )}
 
