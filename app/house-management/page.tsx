@@ -1,4 +1,5 @@
 // bac-hms/web/app/house-management/page.tsx
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,13 +13,6 @@ import {
   Modal,
   Select,
 } from "@/components/house-management/shared";
-import {
-  DEMO_APPOINTMENTS,
-  DEMO_CHORES,
-  DEMO_MEALS,
-  DEMO_MEDS,
-  DEMO_SPECIALISTS,
-} from "@/components/house-management/demo-data";
 
 import HousesTab from "@/components/house-management/tabs/HousesTab";
 import DashboardTab from "@/components/house-management/tabs/DashboardTab";
@@ -252,6 +246,54 @@ type ComplianceResponse = {
   }>;
 };
 
+type OperationsResponse = {
+  houseId: string;
+  houseName: string;
+  summary: {
+    todayShifts: number;
+    awakeShifts: number;
+    onDutyStaff: number;
+    intensiveResidents: number;
+    openIncidents: number;
+    unstaffedShifts: number;
+  };
+  coverage: Array<{
+    id: string;
+    time: string;
+    service: string;
+    resident: string;
+    staff: string[];
+    status: string;
+    awake: boolean;
+    note?: string | null;
+  }>;
+  awakeMonitoring: Array<{
+    id: string;
+    resident: string;
+    time: string;
+    staff: string[];
+    note?: string | null;
+  }>;
+  notes: Array<{
+    id: string;
+    time: string;
+    title: string;
+    detail: string;
+    level: "INFO" | "WARNING";
+  }>;
+  incidents: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    status: "GOOD" | "WARNING" | "CRITICAL";
+  }>;
+  phase2: Array<{
+    key: string;
+    label: string;
+    description: string;
+  }>;
+};
+
 type AvailableIndividualsResponse = {
   items: AvailableIndividualOption[];
   total: number;
@@ -405,6 +447,7 @@ export default function HouseManagementPage() {
   const [residentsData, setResidentsData] = useState<ResidentsResponse | null>(null);
   const [staffingData, setStaffingData] = useState<StaffingResponse | null>(null);
   const [complianceData, setComplianceData] = useState<ComplianceResponse | null>(null);
+  const [operationsData, setOperationsData] = useState<OperationsResponse | null>(null);
 
   const [availableIndividuals, setAvailableIndividuals] = useState<
     AvailableIndividualOption[]
@@ -418,6 +461,7 @@ export default function HouseManagementPage() {
   const [residentsLoading, setResidentsLoading] = useState(false);
   const [staffingLoading, setStaffingLoading] = useState(false);
   const [complianceLoading, setComplianceLoading] = useState(false);
+  const [operationsLoading, setOperationsLoading] = useState(false);
   const [availableIndividualsLoading, setAvailableIndividualsLoading] =
     useState(false);
   const [availableEmployeesLoading, setAvailableEmployeesLoading] =
@@ -428,6 +472,7 @@ export default function HouseManagementPage() {
   const [residentsError, setResidentsError] = useState("");
   const [staffingError, setStaffingError] = useState("");
   const [complianceError, setComplianceError] = useState("");
+  const [operationsError, setOperationsError] = useState("");
   const [availableIndividualsError, setAvailableIndividualsError] = useState("");
   const [availableEmployeesError, setAvailableEmployeesError] = useState("");
 
@@ -574,6 +619,26 @@ export default function HouseManagementPage() {
     }
   }
 
+  async function loadOperationsData(houseId: string) {
+    try {
+      setOperationsLoading(true);
+      setOperationsError("");
+
+      const data = await fetchJson<OperationsResponse>(
+        `${API_BASE}/house-management/operations/${houseId}`
+      );
+
+      setOperationsData(data);
+    } catch (error) {
+      setOperationsData(null);
+      setOperationsError(
+        error instanceof Error ? error.message : "Failed to load daily operations."
+      );
+    } finally {
+      setOperationsLoading(false);
+    }
+  }
+
   async function loadAvailableIndividuals() {
     try {
       setAvailableIndividualsLoading(true);
@@ -651,6 +716,7 @@ export default function HouseManagementPage() {
       setResidentsData(null);
       setStaffingData(null);
       setComplianceData(null);
+      setOperationsData(null);
       setAvailableIndividuals([]);
       setAvailableEmployees([]);
       return;
@@ -865,6 +931,40 @@ export default function HouseManagementPage() {
     };
   }, [selectedHouseId, tab]);
 
+  useEffect(() => {
+    if (!selectedHouseId || tab !== "OPERATIONS") return;
+
+    let cancelled = false;
+
+    async function run() {
+      try {
+        setOperationsLoading(true);
+        setOperationsError("");
+
+        const data = await fetchJson<OperationsResponse>(
+          `${API_BASE}/house-management/operations/${selectedHouseId}`
+        );
+
+        if (cancelled) return;
+        setOperationsData(data);
+      } catch (error) {
+        if (cancelled) return;
+        setOperationsData(null);
+        setOperationsError(
+          error instanceof Error ? error.message : "Failed to load daily operations."
+        );
+      } finally {
+        if (!cancelled) setOperationsLoading(false);
+      }
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHouseId, tab]);
+
   const selectedHouse =
     houses.find((h) => h.id === selectedHouseId) ??
     houses[0] ?? {
@@ -888,6 +988,7 @@ export default function HouseManagementPage() {
     };
 
   const selectedHouseName =
+    operationsData?.houseName ||
     dashboardData?.house?.name ||
     residentsData?.houseName ||
     staffingData?.houseName ||
@@ -1279,6 +1380,7 @@ export default function HouseManagementPage() {
         residentsError ||
         staffingError ||
         complianceError ||
+        operationsError ||
         availableIndividualsError ||
         availableEmployeesError) && (
         <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -1288,6 +1390,7 @@ export default function HouseManagementPage() {
             residentsError,
             staffingError,
             complianceError,
+            operationsError,
             availableIndividualsError,
             availableEmployeesError,
           ]
@@ -1419,15 +1522,16 @@ export default function HouseManagementPage() {
         </div>
       )}
 
-      {tab === "OPERATIONS" && (
-        <OperationsTab
-          selectedHouseName={selectedHouseName}
-          meals={DEMO_MEALS}
-          meds={DEMO_MEDS}
-          chores={DEMO_CHORES}
-          appointments={DEMO_APPOINTMENTS}
-          specialists={DEMO_SPECIALISTS}
-        />
+      {tab === "OPERATIONS" && operationsData && (
+        <OperationsTab data={operationsData} selectedHouseName={selectedHouseName} />
+      )}
+
+      {tab === "OPERATIONS" && !operationsData && (
+        <div className="rounded-2xl border border-bac-border bg-bac-panel p-6 text-bac-muted">
+          {operationsLoading
+            ? "Loading daily operations..."
+            : "No daily operations data available."}
+        </div>
       )}
 
       <Modal

@@ -1,3 +1,5 @@
+// bac-hms/web/components/house-management/demo-data.ts
+
 import type {
   AlertItem,
   AppointmentRow,

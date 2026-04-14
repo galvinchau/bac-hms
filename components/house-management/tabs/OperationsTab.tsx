@@ -1,197 +1,383 @@
+// bac-hms/web/components/house-management/tabs/OperationsTab.tsx
+
 "use client";
 
 import React from "react";
 import {
-  AppointmentRow,
-  MealRow,
-  MedTaskRow,
-  ChoreRow,
-  SpecialistVisitRow,
+  Badge,
+  IncidentBox,
+  NoteBox,
   SectionCard,
   StatCard,
-  Badge,
-  NoteBox,
 } from "../shared";
 
-export default function OperationsTab({
-  selectedHouseName,
-  meals,
-  meds,
-  chores,
-  appointments,
-  specialists,
+type OperationsResponse = {
+  houseId: string;
+  houseName: string;
+  summary: {
+    todayShifts: number;
+    awakeShifts: number;
+    onDutyStaff: number;
+    intensiveResidents: number;
+    openIncidents: number;
+    unstaffedShifts: number;
+  };
+  coverage: Array<{
+    id: string;
+    time: string;
+    service: string;
+    resident: string;
+    staff: string[];
+    status: string;
+    awake: boolean;
+    note?: string | null;
+  }>;
+  awakeMonitoring: Array<{
+    id: string;
+    resident: string;
+    time: string;
+    staff: string[];
+    note?: string | null;
+  }>;
+  notes: Array<{
+    id: string;
+    time: string;
+    title: string;
+    detail: string;
+    level: "INFO" | "WARNING";
+  }>;
+  incidents: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    status: "GOOD" | "WARNING" | "CRITICAL";
+  }>;
+  phase2: Array<{
+    key: string;
+    label: string;
+    description: string;
+  }>;
+};
+
+function renderShiftStatus(status: string) {
+  const normalized = String(status || "").trim().toUpperCase();
+
+  if (normalized === "IN_PROGRESS") {
+    return <Badge variant="success">In Progress</Badge>;
+  }
+
+  if (normalized === "COMPLETED") {
+    return <Badge variant="muted">Completed</Badge>;
+  }
+
+  if (normalized === "NOT_STARTED" || normalized === "UPCOMING") {
+    return <Badge variant="default">Not Started</Badge>;
+  }
+
+  if (normalized === "NOT_COMPLETED") {
+    return <Badge variant="warning">Not Completed</Badge>;
+  }
+
+  if (normalized === "CANCELLED") {
+    return <Badge variant="danger">Cancelled</Badge>;
+  }
+
+  if (normalized === "BACKUP_PLAN") {
+    return <Badge variant="amber">Backup Plan</Badge>;
+  }
+
+  return <Badge variant="muted">{status || "Unknown"}</Badge>;
+}
+
+function WatchItem({
+  label,
+  value,
+  tone,
+  hint,
 }: {
-  selectedHouseName: string;
-  meals: MealRow[];
-  meds: MedTaskRow[];
-  chores: ChoreRow[];
-  appointments: AppointmentRow[];
-  specialists: SpecialistVisitRow[];
+  label: string;
+  value: string | number;
+  tone: "success" | "warning" | "danger" | "muted" | "violet" | "sky";
+  hint?: string;
 }) {
+  return (
+    <div className="rounded-2xl border border-bac-border bg-bac-bg p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-bac-text">{label}</div>
+          {hint ? <div className="mt-1 text-xs text-bac-muted">{hint}</div> : null}
+        </div>
+        <Badge variant={tone}>{value}</Badge>
+      </div>
+    </div>
+  );
+}
+
+export default function OperationsTab({
+  data,
+  selectedHouseName,
+}: {
+  data: OperationsResponse;
+  selectedHouseName: string;
+}) {
+  const resolvedHouseName = data?.houseName || selectedHouseName || "House";
+
+  const shiftsMissingNotes = data.coverage.filter(
+    (item) => !String(item.note || "").trim()
+  ).length;
+
+  const upcomingShifts = data.coverage.filter((item) => {
+    const normalized = String(item.status || "").trim().toUpperCase();
+    return normalized === "UPCOMING" || normalized === "NOT_STARTED";
+  }).length;
+
+  const inProgressShifts = data.coverage.filter(
+    (item) => String(item.status || "").trim().toUpperCase() === "IN_PROGRESS"
+  ).length;
+
+  const shiftsWithAssignedStaff = data.coverage.filter(
+    (item) => item.staff.length > 0
+  ).length;
+
   return (
     <div className="space-y-4">
       <SectionCard
-        title={`Daily Operations — ${selectedHouseName}`}
-        subtitle="Meals, medication, laundry, appointments, specialist visits, behavior support, and daily residential care."
+        title={`Daily Operations — ${resolvedHouseName}`}
+        subtitle="Real-time residential operations using today’s coverage, awake monitoring, staffing activity, incidents, and shift notes."
       >
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-          <StatCard label="Meals Logged" value="1 / 4" tone="warning" />
-          <StatCard label="Medication Tasks" value={meds.length} tone="success" />
-          <StatCard label="House Chores" value={chores.length} tone="sky" />
-          <StatCard label="Appointments" value={appointments.length} tone="violet" />
-          <StatCard label="Specialist Visits" value={specialists.length} tone="warning" />
-          <StatCard label="Open Incidents" value={1} tone="danger" />
+          <StatCard
+            label="Today Shifts"
+            value={data.summary.todayShifts}
+            tone="violet"
+          />
+          <StatCard
+            label="Awake Shifts"
+            value={data.summary.awakeShifts}
+            tone="warning"
+          />
+          <StatCard
+            label="On-Duty Staff"
+            value={data.summary.onDutyStaff}
+            tone="success"
+          />
+          <StatCard
+            label="Intensive Residents"
+            value={data.summary.intensiveResidents}
+            tone="sky"
+          />
+          <StatCard
+            label="Open Incidents"
+            value={data.summary.openIncidents}
+            tone={data.summary.openIncidents > 0 ? "danger" : "success"}
+          />
+          <StatCard
+            label="Unstaffed Shifts"
+            value={data.summary.unstaffedShifts}
+            tone={data.summary.unstaffedShifts > 0 ? "warning" : "success"}
+          />
         </div>
       </SectionCard>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         <SectionCard
-          title="Meals"
-          subtitle="Meal service, feeding support, and kitchen coordination."
-          className="xl:col-span-4"
+          title="Today Coverage"
+          subtitle="Shift-by-shift view of residential support activity for this house."
+          className="xl:col-span-7"
         >
           <div className="space-y-3">
-            {meals.map((m) => (
-              <div key={m.meal} className="rounded-2xl border border-bac-border bg-bac-bg p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-bac-text">{m.meal}</div>
-                  <Badge variant="muted">{m.completion}</Badge>
-                </div>
-                <div className="mt-2 text-sm text-bac-muted">Served by: {m.servedBy}</div>
-                <div className="mt-2 text-sm text-bac-muted">{m.notes}</div>
+            {data.coverage.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-4 text-sm text-bac-muted">
+                No shifts found for today.
               </div>
-            ))}
+            ) : (
+              data.coverage.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-bac-border bg-bac-bg p-4"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="text-base font-medium text-bac-text">
+                        {item.service}
+                      </div>
+                      <div className="mt-1 text-sm text-bac-muted">
+                        {item.time} • Resident: {item.resident}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {renderShiftStatus(item.status)}
+                      {item.awake ? (
+                        <Badge variant="warning">Awake Required</Badge>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-sm text-bac-muted">
+                    Staff:{" "}
+                    {item.staff.length > 0 ? item.staff.join(", ") : "No staff assigned"}
+                  </div>
+
+                  {item.note ? (
+                    <div className="mt-2 text-sm text-bac-muted">{item.note}</div>
+                  ) : (
+                    <div className="mt-2 text-sm text-bac-muted italic">
+                      No shift note added yet.
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="Medication"
-          subtitle="Most residential individuals use medication daily, often multiple times."
-          className="xl:col-span-4"
-        >
-          <div className="space-y-3">
-            {meds.map((m, index) => (
-              <div
-                key={`${m.resident}-${index}`}
-                className="rounded-2xl border border-bac-border bg-bac-bg p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-bac-text">{m.resident}</div>
-                  {m.status === "DONE" ? (
-                    <Badge variant="success">Done</Badge>
-                  ) : m.status === "PENDING" ? (
-                    <Badge variant="warning">Pending</Badge>
-                  ) : (
-                    <Badge variant="danger">Refused</Badge>
-                  )}
+        <div className="space-y-4 xl:col-span-5">
+          <SectionCard
+            title="Awake Monitoring"
+            subtitle="Shifts that currently require awake monitoring."
+          >
+            <div className="space-y-3">
+              {data.awakeMonitoring.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-4 text-sm text-bac-muted">
+                  No awake monitoring shifts found for today.
                 </div>
-                <div className="mt-2 text-sm text-bac-muted">Schedule: {m.schedule}</div>
-                <div className="mt-2 text-sm text-bac-muted">{m.notes}</div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
+              ) : (
+                data.awakeMonitoring.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-bac-border bg-bac-bg p-4"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium text-bac-text">{item.resident}</div>
+                      <Badge variant="warning">Awake</Badge>
+                    </div>
+                    <div className="mt-2 text-sm text-bac-muted">{item.time}</div>
+                    <div className="mt-2 text-sm text-bac-muted">
+                      Staff:{" "}
+                      {item.staff.length > 0 ? item.staff.join(", ") : "No staff assigned"}
+                    </div>
+                    {item.note ? (
+                      <div className="mt-2 text-sm text-bac-muted">{item.note}</div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </SectionCard>
 
-        <SectionCard
-          title="Laundry / Housekeeping"
-          subtitle="Daily living support including laundry and home tasks."
-          className="xl:col-span-4"
-        >
-          <div className="space-y-3">
-            {chores.map((c, index) => (
-              <div
-                key={`${c.task}-${index}`}
-                className="rounded-2xl border border-bac-border bg-bac-bg p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-bac-text">{c.task}</div>
-                  {c.status === "DONE" ? (
-                    <Badge variant="success">Done</Badge>
-                  ) : (
-                    <Badge variant="warning">Pending</Badge>
-                  )}
+          <SectionCard
+            title="Open Incidents"
+            subtitle="Unresolved house compliance or operational incidents."
+          >
+            <div className="space-y-3">
+              {data.incidents.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-4 text-sm text-bac-muted">
+                  No open incidents for this house.
                 </div>
-                <div className="mt-2 text-sm text-bac-muted">Assigned to: {c.assignedTo}</div>
-                <div className="mt-2 text-sm text-bac-muted">{c.notes}</div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
+              ) : (
+                data.incidents.map((incident) => (
+                  <IncidentBox
+                    key={incident.id}
+                    title={incident.title}
+                    detail={incident.detail}
+                    status={incident.status}
+                  />
+                ))
+              )}
+            </div>
+          </SectionCard>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         <SectionCard
-          title="Appointments"
-          subtitle="Ongoing doctor visits and follow-up coordination."
+          title="Shift Notes / Behavior Support"
+          subtitle="Recent shift notes and notable support updates from live operations."
+          className="xl:col-span-7"
+        >
+          <div className="space-y-3">
+            {data.notes.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-bac-border bg-bac-bg p-4 text-sm text-bac-muted">
+                No shift notes available yet.
+              </div>
+            ) : (
+              data.notes.map((note) => (
+                <NoteBox
+                  key={note.id}
+                  title={note.title}
+                  meta={`${note.level} • ${note.time}`}
+                  body={note.detail}
+                />
+              ))
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Operational Watchlist"
+          subtitle="Live risk signals and operational indicators based on current house data."
           className="xl:col-span-5"
         >
           <div className="space-y-3">
-            {appointments.map((a, index) => (
-              <div
-                key={`${a.resident}-${index}`}
-                className="rounded-2xl border border-bac-border bg-bac-bg p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-bac-text">{a.resident}</div>
-                  {a.status === "SCHEDULED" ? (
-                    <Badge variant="warning">Scheduled</Badge>
-                  ) : a.status === "COMPLETED" ? (
-                    <Badge variant="success">Completed</Badge>
-                  ) : (
-                    <Badge variant="violet">Follow-up</Badge>
-                  )}
-                </div>
-                <div className="mt-2 text-sm text-bac-muted">
-                  {a.appointmentType} • {a.when}
-                </div>
-                <div className="mt-2 text-sm text-bac-muted">Escort: {a.escort}</div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="Behavior Specialist Visits"
-          subtitle="In-home specialist support for behavior management and staff coaching."
-          className="xl:col-span-3"
-        >
-          <div className="space-y-3">
-            {specialists.map((s, index) => (
-              <div
-                key={`${s.resident}-${index}`}
-                className="rounded-2xl border border-bac-border bg-bac-bg p-4"
-              >
-                <div className="text-sm font-medium text-bac-text">{s.resident}</div>
-                <div className="mt-1 text-sm text-bac-muted">{s.specialist}</div>
-                <div className="mt-2 text-sm text-bac-muted">{s.focus}</div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-bac-muted">{s.when}</span>
-                  {s.status === "DONE" ? (
-                    <Badge variant="success">Done</Badge>
-                  ) : (
-                    <Badge variant="warning">Upcoming</Badge>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="Daily Notes / Behavior"
-          subtitle="Shift notes, behavior observations, and care summary."
-          className="xl:col-span-4"
-        >
-          <div className="space-y-3">
-            <NoteBox
-              title="Morning shift note"
-              meta="Anna Smith • 09:45 AM"
-              body="Residents completed breakfast and medication with moderate prompts. Laundry started. One resident prepared for specialist behavior visit."
+            <WatchItem
+              label="Shifts missing assigned staff"
+              value={data.summary.unstaffedShifts}
+              tone={data.summary.unstaffedShifts > 0 ? "warning" : "success"}
+              hint="Coverage gaps that may need staffing action."
             />
-            <NoteBox
-              title="Behavior support note"
-              meta="Behavior Specialist • 11:50 AM"
-              body="Observed transition difficulty before medication. Staff coaching provided on de-escalation and cueing."
+
+            <WatchItem
+              label="Shifts requiring awake monitoring"
+              value={data.summary.awakeShifts}
+              tone={data.summary.awakeShifts > 0 ? "warning" : "muted"}
+              hint="Residential shifts that require awake status support."
+            />
+
+            <WatchItem
+              label="Intensive-support residents"
+              value={data.summary.intensiveResidents}
+              tone={data.summary.intensiveResidents > 0 ? "danger" : "muted"}
+              hint="Residents marked with intensive behavior support needs."
+            />
+
+            <WatchItem
+              label="Upcoming shifts today"
+              value={upcomingShifts}
+              tone={upcomingShifts > 0 ? "violet" : "muted"}
+              hint="Shifts scheduled later today."
+            />
+
+            <WatchItem
+              label="Shifts currently in progress"
+              value={inProgressShifts}
+              tone={inProgressShifts > 0 ? "success" : "muted"}
+              hint="Active residential operations happening now."
+            />
+
+            <WatchItem
+              label="Shifts missing notes"
+              value={shiftsMissingNotes}
+              tone={shiftsMissingNotes > 0 ? "warning" : "success"}
+              hint="Shifts without notes or backup notes entered."
+            />
+
+            <WatchItem
+              label="Shifts with staff assigned"
+              value={`${shiftsWithAssignedStaff} / ${data.coverage.length}`}
+              tone={
+                data.coverage.length > 0 && shiftsWithAssignedStaff === data.coverage.length
+                  ? "success"
+                  : "sky"
+              }
+              hint="Assigned coverage compared to total scheduled shifts."
+            />
+
+            <WatchItem
+              label="Open incidents"
+              value={data.summary.openIncidents}
+              tone={data.summary.openIncidents > 0 ? "danger" : "success"}
+              hint="Unresolved compliance or operational issues."
             />
           </div>
         </SectionCard>

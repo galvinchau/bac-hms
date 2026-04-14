@@ -1,3 +1,5 @@
+// bac-hms/web/components/house-management/shared.tsx
+
 "use client";
 
 import React from "react";
