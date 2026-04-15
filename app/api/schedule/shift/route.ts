@@ -1,5 +1,3 @@
-// bac-hms/web/app/api/schedule/shift/route.ts
-
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -24,6 +22,7 @@ export async function POST(req: Request) {
       checkOutAt,
       awakeMonitoringRequired,
       isBackupPlanShift,
+      serviceAddressType,
     } = body as {
       weekId?: string;
       individualId?: string;
@@ -39,6 +38,7 @@ export async function POST(req: Request) {
       checkOutAt?: string | null;
       awakeMonitoringRequired?: boolean;
       isBackupPlanShift?: boolean;
+      serviceAddressType?: "PRIMARY" | "SECONDARY";
     };
 
     // Validate các field bắt buộc (giống file gốc)
@@ -56,6 +56,9 @@ export async function POST(req: Request) {
     const effectiveDspId =
       (typeof dspId !== "undefined" ? dspId : plannedDspId) ?? null;
 
+    const normalizedServiceAddressType =
+      serviceAddressType === "SECONDARY" ? "SECONDARY" : "PRIMARY";
+
     // Tạo ScheduleShift
     const created = await prisma.scheduleShift.create({
       data: {
@@ -70,6 +73,7 @@ export async function POST(req: Request) {
         status: status ?? "NOT_STARTED",
         billable: true,
         notes: notes ?? null,
+        serviceAddressType: normalizedServiceAddressType,
         // chỉ set individualId nếu FE gửi, tránh đụng schema nếu field optional
         ...(individualId ? { individualId } : {}),
       },
@@ -146,6 +150,7 @@ export async function PUT(req: Request) {
       checkOutAt,
       awakeMonitoringRequired,
       isBackupPlanShift,
+      serviceAddressType,
     } = body as {
       shiftId?: string;
       id?: string;
@@ -160,6 +165,7 @@ export async function PUT(req: Request) {
       checkOutAt?: string | null;
       awakeMonitoringRequired?: boolean;
       isBackupPlanShift?: boolean;
+      serviceAddressType?: "PRIMARY" | "SECONDARY";
     };
 
     const effectiveShiftId = shiftId || id;
@@ -180,6 +186,9 @@ export async function PUT(req: Request) {
     // Ưu tiên dspId (FE) nếu có, fallback về plannedDspId
     const effectiveDspId = typeof dspId !== "undefined" ? dspId : plannedDspId;
 
+    const normalizedServiceAddressType =
+      serviceAddressType === "SECONDARY" ? "SECONDARY" : "PRIMARY";
+
     // Update shift (chỉ update field nào FE gửi lên)
     await prisma.scheduleShift.update({
       where: { id: existing.id },
@@ -197,6 +206,9 @@ export async function PUT(req: Request) {
           : {}),
         ...(typeof isBackupPlanShift !== "undefined"
           ? { isBackupPlanShift: !!isBackupPlanShift }
+          : {}),
+        ...(typeof serviceAddressType !== "undefined"
+          ? { serviceAddressType: normalizedServiceAddressType }
           : {}),
       },
     });

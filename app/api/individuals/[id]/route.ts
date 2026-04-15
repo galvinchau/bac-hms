@@ -1,4 +1,3 @@
-// app/api/individuals/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -94,19 +93,19 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // ✅ NEW: accept status from body (support a few aliases just in case)
+    // ✅ accept status from body
     const incomingStatus =
       body.status ?? body.individualStatus ?? body.individual_status ?? null;
     const status = normalizeStatus(incomingStatus);
 
-    // acceptedServices: array -> CSV (giống POST)
+    // acceptedServices: array -> CSV
     const acceptedServicesCsv = Array.isArray(body.acceptedServices)
       ? body.acceptedServices.join(",")
       : typeof body.acceptedServices === "string"
         ? body.acceptedServices
         : "";
 
-    // map các cờ thiết bị (giống POST)
+    // map các cờ thiết bị
     const equipFlags = {
       equipOxygen: !!body.equip_oxygen || !!body.equipOxygen,
       equip_cpap: !!body.equip_cpap,
@@ -119,16 +118,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       equip_hospital_bed: !!body.equip_hospital_bed,
     };
 
-    // Dùng transaction để update main record + các bảng con
     await prisma.$transaction(async (tx: any) => {
       // 1) Update Individual
       await tx.individual.update({
         where: { id },
         data: {
-          // ✅ persist status to DB
           status,
-
-          // ✅ persist medicaidId to DB
           medicaidId: medicaidIdOrNull,
 
           firstName: body.firstName ?? "",
@@ -145,12 +140,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
           secondaryPhone: body.secondaryPhone || null,
           email: body.email || null,
 
+          // Primary address
           address1: body.address1 || null,
           address2: body.address2 || null,
           city: body.city || null,
           county: body.county || null,
           state: body.state || null,
           zip: body.zip || null,
+
+          // ✅ NEW: Secondary address
+          secondaryAddress1: body.secondaryAddress1 || null,
+          secondaryAddress2: body.secondaryAddress2 || null,
+          secondaryCity: body.secondaryCity || null,
+          secondaryCounty: body.secondaryCounty || null,
+          secondaryState: body.secondaryState || null,
+          secondaryZip: body.secondaryZip || null,
 
           acceptedServices: acceptedServicesCsv,
 
@@ -274,6 +278,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     const code = err?.code || err?.cause?.code;
+
     if (code === "P2002") {
       return NextResponse.json(
         {

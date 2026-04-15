@@ -1,13 +1,6 @@
-// web/app/individuals/[id]/page.tsx
 "use client";
 
-import React, {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  ChangeEvent,
-} from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ISPandBSP from "@/components/individual/ISPandBSP";
 
@@ -21,6 +14,7 @@ type TabKey =
   | "equipment"
   | "preferences"
   | "ispbsp";
+
 const TABS = [
   { key: "profile", label: "Profile & Contacts" },
   { key: "billing", label: "Coverage & Billing" },
@@ -31,10 +25,10 @@ const TABS = [
 ] as const;
 
 /* =========================
-   SERVICE CATALOG (for tooltip)
-   - Keep in sync with: app/services/new/page.tsx (SERVICE_OPTIONS)
+   SERVICE CATALOG
    ========================= */
 type ServiceItem = { code: string; name: string };
+
 const ACCEPTED_SERVICES: ServiceItem[] = [
   { code: "PCA", name: "Personal Care Assistant" },
   { code: "NT", name: "Nursing / Nurse Triage" },
@@ -78,7 +72,6 @@ const ACCEPTED_SERVICES: ServiceItem[] = [
 /* =========================
    FORM TYPES
    ========================= */
-
 type IndividualStatus = "PENDING" | "ACTIVE" | "INACTIVE";
 
 type EmergencyContact = {
@@ -90,16 +83,14 @@ type EmergencyContact = {
 };
 
 export type ProfileForm = {
-  // ✅ NEW: align with DB enum IndividualStatus
   status: IndividualStatus;
 
   firstName: string;
   middleName: string;
   lastName: string;
-  dob: string; // "YYYY-MM-DD"
+  dob: string;
   gender: string;
 
-  // ✅ CHANGED: Medicaid ID replaces SSN
   medicaidId: string;
 
   branch: string;
@@ -107,18 +98,27 @@ export type ProfileForm = {
   primaryPhone: string;
   secondaryPhone: string;
   email: string;
+
+  // Primary address
   address1: string;
   address2: string;
   city: string;
   county: string;
   state: string;
   zip: string;
+
+  // NEW: Secondary address
+  secondaryAddress1: string;
+  secondaryAddress2: string;
+  secondaryCity: string;
+  secondaryCounty: string;
+  secondaryState: string;
+  secondaryZip: string;
+
   acceptedServices: string[];
   emergency1: EmergencyContact;
   emergency2: EmergencyContact;
 
-  // các field khác lưu dưới dạng any (billing, meds, dx, equipment, ...)
-  // để giữ tương thích với trang New Individual và API hiện có.
   [key: string]: any;
 };
 
@@ -131,7 +131,6 @@ const makeEmptyForm = (): ProfileForm => ({
   dob: "",
   gender: "",
 
-  // ✅ CHANGED
   medicaidId: "",
 
   branch: "",
@@ -139,13 +138,23 @@ const makeEmptyForm = (): ProfileForm => ({
   primaryPhone: "",
   secondaryPhone: "",
   email: "",
+
   address1: "",
   address2: "",
   city: "",
   county: "",
   state: "PA",
   zip: "",
+
+  secondaryAddress1: "",
+  secondaryAddress2: "",
+  secondaryCity: "",
+  secondaryCounty: "",
+  secondaryState: "PA",
+  secondaryZip: "",
+
   acceptedServices: [],
+
   emergency1: {
     name: "",
     relationship: "",
@@ -165,7 +174,6 @@ const makeEmptyForm = (): ProfileForm => ({
 /* =========================
    UTIL
    ========================= */
-
 const requiredProfileOk = (f: ProfileForm) => {
   const hasPhoneOrEC1 =
     !!f.primaryPhone || !!f.emergency1?.phonePrimary || !!f.emergency1?.name;
@@ -182,14 +190,14 @@ const requiredProfileOk = (f: ProfileForm) => {
 };
 
 /* ====================================
-   SAFE INPUTS (controlled, ổn định caret)
+   SAFE INPUTS
    ==================================== */
-
 const SafeTextInput = (
   props: React.InputHTMLAttributes<HTMLInputElement> & { value?: string },
 ) => {
   const { value, className, ...rest } = props;
   const v = value ?? "";
+
   return (
     <input
       {...rest}
@@ -208,6 +216,7 @@ const SafeSelect = (
 ) => {
   const { value, className, children, ...rest } = props;
   const v = value ?? "";
+
   return (
     <select
       {...rest}
@@ -225,7 +234,6 @@ const SafeSelect = (
 /* =========================
    SMALL BUILDER
    ========================= */
-
 const Labeled = ({
   label,
   required,
@@ -248,12 +256,10 @@ const Labeled = ({
 /* =========================
    HELPERS: MAP API → FORM
    ========================= */
-
 type ApiIndividual = {
   id: string;
   code: string;
 
-  // ✅ NEW
   status?: string | null;
 
   firstName: string;
@@ -262,10 +268,7 @@ type ApiIndividual = {
   dob: string;
   gender: string | null;
 
-  // ✅ NEW field
   medicaidId?: string | null;
-
-  // legacy (keep for compatibility; not used in UI anymore)
   ssnLast4?: string | null;
 
   branch: string;
@@ -282,7 +285,14 @@ type ApiIndividual = {
   state: string | null;
   zip: string | null;
 
-  // ⚠️ acceptedServices có thể là string (CSV) hoặc string[] hoặc null
+  // NEW: secondary address fields
+  secondaryAddress1?: string | null;
+  secondaryAddress2?: string | null;
+  secondaryCity?: string | null;
+  secondaryCounty?: string | null;
+  secondaryState?: string | null;
+  secondaryZip?: string | null;
+
   acceptedServices: string | string[] | null;
 
   emergency1Name: string | null;
@@ -343,7 +353,6 @@ type ApiIndividual = {
   advPhysician: string | null;
   advAttach: string | null;
 
-  // relations:
   payers: any[];
   medications: any[];
   diagnoses: any[];
@@ -361,7 +370,6 @@ function toStatus(v: any): IndividualStatus {
 const mapApiToForm = (api: ApiIndividual): ProfileForm => {
   const form = makeEmptyForm();
 
-  // ✅ NEW
   form.status = toStatus(api.status);
 
   form.firstName = api.firstName ?? "";
@@ -370,7 +378,6 @@ const mapApiToForm = (api: ApiIndividual): ProfileForm => {
   form.dob = api.dob ?? "";
   form.gender = api.gender ?? "";
 
-  // ✅ CHANGED: show Medicaid ID only (do NOT show SSN legacy)
   form.medicaidId = api.medicaidId ?? "";
 
   form.branch = api.branch ?? "";
@@ -387,7 +394,13 @@ const mapApiToForm = (api: ApiIndividual): ProfileForm => {
   form.state = api.state ?? "PA";
   form.zip = api.zip ?? "";
 
-  // handle array / CSV / null
+  form.secondaryAddress1 = api.secondaryAddress1 ?? "";
+  form.secondaryAddress2 = api.secondaryAddress2 ?? "";
+  form.secondaryCity = api.secondaryCity ?? "";
+  form.secondaryCounty = api.secondaryCounty ?? "";
+  form.secondaryState = api.secondaryState ?? "PA";
+  form.secondaryZip = api.secondaryZip ?? "";
+
   if (Array.isArray(api.acceptedServices)) {
     form.acceptedServices = api.acceptedServices.filter(Boolean);
   } else if (
@@ -474,9 +487,8 @@ const mapApiToForm = (api: ApiIndividual): ProfileForm => {
 };
 
 /* =========================
-   MAIN PAGE — EDIT INDIVIDUAL
+   MAIN PAGE
    ========================= */
-
 export default function IndividualDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -492,13 +504,11 @@ export default function IndividualDetailPage() {
 
   const canSave = useMemo(() => requiredProfileOk(form), [form]);
 
-  // đánh dấu chỉnh sửa
   useEffect(() => {
     if (loading) return;
     setDirty(true);
   }, [form, loading]);
 
-  // cảnh báo khi rời trang
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (!isDirty) return;
@@ -509,9 +519,9 @@ export default function IndividualDetailPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  // Load individual từ API
   useEffect(() => {
     if (!id) return;
+
     const run = async () => {
       try {
         setLoading(true);
@@ -521,6 +531,7 @@ export default function IndividualDetailPage() {
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
+
         const data = (await res.json()) as ApiIndividual;
         setCode(data.code);
         setForm(mapApiToForm(data));
@@ -532,6 +543,7 @@ export default function IndividualDetailPage() {
         setDirty(false);
       }
     };
+
     run();
   }, [id]);
 
@@ -557,14 +569,12 @@ export default function IndividualDetailPage() {
         body: JSON.stringify(form),
       });
 
-      // ❗ KHÔNG throw ngay
       if (!res.ok) {
         let data: any = {};
         try {
           data = await res.json();
         } catch {}
 
-        // ✅ Trùng Medicaid ID
         if (res.status === 409 && data?.field === "medicaidId") {
           alert(
             "Medicaid ID already exists.\nPlease check and enter a different Medicaid ID.",
@@ -572,7 +582,6 @@ export default function IndividualDetailPage() {
           return;
         }
 
-        // ❌ lỗi khác
         throw new Error(`HTTP ${res.status}`);
       }
 
@@ -586,7 +595,6 @@ export default function IndividualDetailPage() {
     }
   };
 
-  // Clear theo từng tab
   const clearTab = (tab: TabKey) => {
     setForm((s) => {
       const f = { ...s } as ProfileForm;
@@ -596,25 +604,30 @@ export default function IndividualDetailPage() {
         case "profile":
           return {
             ...f,
-            // keep status as-is (do not clear)
             firstName: "",
             middleName: "",
             lastName: "",
             dob: "",
             gender: "",
-
-            // ✅ CHANGED
             medicaidId: "",
-
             primaryPhone: "",
             secondaryPhone: "",
             email: "",
+
             address1: "",
             address2: "",
             city: "",
             county: "",
             state: "PA",
             zip: "",
+
+            secondaryAddress1: "",
+            secondaryAddress2: "",
+            secondaryCity: "",
+            secondaryCounty: "",
+            secondaryState: "PA",
+            secondaryZip: "",
+
             acceptedServices: [],
             emergency1: {
               name: "",
@@ -631,6 +644,7 @@ export default function IndividualDetailPage() {
               notes: "",
             },
           };
+
         case "billing":
           anyForm.billingSameAsPrimary = true;
           anyForm.billingAddress1 = "";
@@ -644,6 +658,7 @@ export default function IndividualDetailPage() {
           anyForm.repPayeePhone = "";
           anyForm.billingPayers = [];
           return f;
+
         case "clinical":
           anyForm.pcpName = "";
           anyForm.pcpPhone = "";
@@ -654,6 +669,7 @@ export default function IndividualDetailPage() {
           anyForm.meds = [];
           anyForm.dx = [];
           return f;
+
         case "equipment":
           anyForm.priorityCode = "";
           anyForm.mobility = "";
@@ -668,6 +684,7 @@ export default function IndividualDetailPage() {
           anyForm.equip_hospital_bed = false;
           anyForm.equipOther = "";
           return f;
+
         case "preferences":
           anyForm.prefTime = "";
           anyForm.prefNotes = "";
@@ -682,8 +699,8 @@ export default function IndividualDetailPage() {
           anyForm.advPhysician = "";
           anyForm.advAttach = "";
           return f;
+
         case "ispbsp":
-          // No-op for now: giữ nguyên dữ liệu tab ISP/BSP (sẽ nối API sau)
           return f;
       }
     });
@@ -742,11 +759,8 @@ export default function IndividualDetailPage() {
     );
   }
 
-  // =================== RENDER TABS ===================
-
   return (
     <div className="p-6 space-y-5">
-      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
@@ -785,14 +799,12 @@ export default function IndividualDetailPage() {
         </div>
       </div>
 
-      {/* Banner note */}
       <div className="rounded-xl border border-yellow-600/30 bg-yellow-500/10 px-4 py-3 text-sm">
         <span className="font-semibold">Required to complete at least: </span>
         First Name, Last Name, Date of Birth, Branch, Location, Primary Phone or
         Emergency Contact 1, At least 1 service in Accepted Services.
       </div>
 
-      {/* Tabs */}
       <div className="flex items-center justify-between border-b border-bac-border">
         <div className="flex gap-3">
           {TABS.map((t) => (
@@ -810,6 +822,7 @@ export default function IndividualDetailPage() {
             </button>
           ))}
         </div>
+
         <button
           type="button"
           onClick={() => clearTab(activeTab)}
@@ -819,12 +832,8 @@ export default function IndividualDetailPage() {
         </button>
       </div>
 
-      {/* =========================
-          TAB 1 — PROFILE & CONTACTS
-          ========================= */}
       {activeTab === "profile" && (
         <div className="space-y-8">
-          {/* Basic / Demographics */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h2 className="text-lg font-semibold mb-3">Profile</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -836,6 +845,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Middle Name">
                 <SafeTextInput
                   value={form.middleName}
@@ -844,6 +854,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Last Name" required>
                 <SafeTextInput
                   value={form.lastName}
@@ -877,7 +888,6 @@ export default function IndividualDetailPage() {
                 </SafeSelect>
               </Labeled>
 
-              {/* ✅ CHANGED: Medicaid ID */}
               <Labeled label="Medicaid ID">
                 <SafeTextInput
                   type="text"
@@ -885,7 +895,6 @@ export default function IndividualDetailPage() {
                   maxLength={32}
                   value={form.medicaidId}
                   onChange={(e) => {
-                    // keep it simple + safe: trim leading spaces only
                     const v = String(e.target.value ?? "").replace(/^\s+/, "");
                     setForm((s) => ({ ...s, medicaidId: v }));
                   }}
@@ -894,7 +903,6 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Enrollment */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h2 className="text-lg font-semibold mb-3">Enrollment</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -930,7 +938,6 @@ export default function IndividualDetailPage() {
                 </SafeSelect>
               </Labeled>
 
-              {/* ✅ NEW: Individual Status */}
               <Labeled label="Individual Status">
                 <SafeSelect
                   value={form.status}
@@ -956,7 +963,6 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Contacts */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h2 className="text-lg font-semibold mb-3">Contacts</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -971,6 +977,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Secondary Phone">
                 <SafeTextInput
                   type="text"
@@ -982,6 +989,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Email">
                 <SafeTextInput
                   type="email"
@@ -995,9 +1003,9 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Address */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h2 className="text-lg font-semibold mb-3">Primary Address</h2>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Labeled label="Address Line 1">
                 <SafeTextInput
@@ -1007,6 +1015,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Address Line 2">
                 <SafeTextInput
                   value={form.address2}
@@ -1025,6 +1034,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="County">
                   <SafeTextInput
                     value={form.county}
@@ -1033,6 +1043,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="State">
                   <SafeTextInput
                     value={form.state}
@@ -1041,6 +1052,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="ZIP">
                   <SafeTextInput
                     value={form.zip}
@@ -1053,12 +1065,97 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Accepted Services */}
+          <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">Secondary Address</h2>
+              <div className="text-xs text-bac-muted">
+                Optional pickup / alternate service location
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Labeled label="Address Line 1">
+                <SafeTextInput
+                  value={form.secondaryAddress1}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      secondaryAddress1: e.target.value,
+                    }))
+                  }
+                />
+              </Labeled>
+
+              <Labeled label="Address Line 2">
+                <SafeTextInput
+                  value={form.secondaryAddress2}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      secondaryAddress2: e.target.value,
+                    }))
+                  }
+                />
+              </Labeled>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:col-span-2">
+                <Labeled label="City">
+                  <SafeTextInput
+                    value={form.secondaryCity}
+                    onChange={(e) =>
+                      setForm((s) => ({
+                        ...s,
+                        secondaryCity: e.target.value,
+                      }))
+                    }
+                  />
+                </Labeled>
+
+                <Labeled label="County">
+                  <SafeTextInput
+                    value={form.secondaryCounty}
+                    onChange={(e) =>
+                      setForm((s) => ({
+                        ...s,
+                        secondaryCounty: e.target.value,
+                      }))
+                    }
+                  />
+                </Labeled>
+
+                <Labeled label="State">
+                  <SafeTextInput
+                    value={form.secondaryState}
+                    onChange={(e) =>
+                      setForm((s) => ({
+                        ...s,
+                        secondaryState: e.target.value,
+                      }))
+                    }
+                  />
+                </Labeled>
+
+                <Labeled label="ZIP">
+                  <SafeTextInput
+                    value={form.secondaryZip}
+                    onChange={(e) =>
+                      setForm((s) => ({
+                        ...s,
+                        secondaryZip: e.target.value,
+                      }))
+                    }
+                  />
+                </Labeled>
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h2 className="text-lg font-semibold mb-3">Accepted Services *</h2>
             <div className="grid md:grid-cols-3 gap-y-2">
               {ACCEPTED_SERVICES.map((svc) => {
                 const checked = form.acceptedServices.includes(svc.code);
+
                 return (
                   <label
                     key={svc.code}
@@ -1073,6 +1170,7 @@ export default function IndividualDetailPage() {
                           const set = new Set(s.acceptedServices);
                           if (e.target.checked) set.add(svc.code);
                           else set.delete(svc.code);
+
                           return {
                             ...s,
                             acceptedServices: Array.from(set),
@@ -1087,7 +1185,6 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Emergency Contacts */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h2 className="text-lg font-semibold mb-3">Emergency Contacts</h2>
 
@@ -1095,6 +1192,7 @@ export default function IndividualDetailPage() {
               <div className="text-sm font-medium mb-2">
                 Emergency Contact 1 *
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Labeled label="Name">
                   <SafeTextInput
@@ -1110,6 +1208,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Relationship">
                   <SafeTextInput
                     value={form.emergency1.relationship}
@@ -1124,6 +1223,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Primary Phone">
                   <SafeTextInput
                     value={form.emergency1.phonePrimary}
@@ -1138,6 +1238,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Secondary Phone">
                   <SafeTextInput
                     value={form.emergency1.phoneSecondary}
@@ -1152,6 +1253,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Notes">
                   <SafeTextInput
                     value={form.emergency1.notes}
@@ -1173,6 +1275,7 @@ export default function IndividualDetailPage() {
               <div className="text-sm font-medium mb-2">
                 Emergency Contact 2
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Labeled label="Name">
                   <SafeTextInput
@@ -1188,6 +1291,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Relationship">
                   <SafeTextInput
                     value={form.emergency2.relationship}
@@ -1202,6 +1306,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Primary Phone">
                   <SafeTextInput
                     value={form.emergency2.phonePrimary}
@@ -1216,6 +1321,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Secondary Phone">
                   <SafeTextInput
                     value={form.emergency2.phoneSecondary}
@@ -1230,6 +1336,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Notes">
                   <SafeTextInput
                     value={form.emergency2.notes}
@@ -1250,14 +1357,10 @@ export default function IndividualDetailPage() {
         </div>
       )}
 
-      {/* ============================================================
-          TAB 2 — COVERAGE & BILLING
-          ============================================================ */}
       {activeTab === "billing" && (
         <div className="space-y-8">
           <h2 className="text-lg font-semibold">Coverage & Billing</h2>
 
-          {/* Insurance Payers */}
           <section>
             <div className="flex items-center gap-3 mb-3">
               <h3 className="text-base font-semibold">Insurance Payers</h3>
@@ -1314,6 +1417,7 @@ export default function IndividualDetailPage() {
                   <div className="text-sm font-medium">
                     {p.type === "Primary" ? "Primary Payer" : "Secondary Payer"}
                   </div>
+
                   {p.type !== "Primary" && (
                     <button
                       type="button"
@@ -1344,13 +1448,14 @@ export default function IndividualDetailPage() {
                         const payers = [
                           ...(((form as any).billingPayers ?? []) as any[]),
                         ];
-                        if (!payers[idx])
+                        if (!payers[idx]) {
                           payers[idx] = { ...p, name: e.target.value ?? "" };
-                        else
+                        } else {
                           payers[idx] = {
                             ...payers[idx],
                             name: e.target.value,
                           };
+                        }
                         setForm((s) => ({
                           ...(s as any),
                           billingPayers: payers,
@@ -1367,13 +1472,14 @@ export default function IndividualDetailPage() {
                         const payers = [
                           ...(((form as any).billingPayers ?? []) as any[]),
                         ];
-                        if (!payers[idx])
+                        if (!payers[idx]) {
                           payers[idx] = { ...p, plan: e.target.value ?? "" };
-                        else
+                        } else {
                           payers[idx] = {
                             ...payers[idx],
                             plan: e.target.value,
                           };
+                        }
                         setForm((s) => ({
                           ...(s as any),
                           billingPayers: payers,
@@ -1390,9 +1496,11 @@ export default function IndividualDetailPage() {
                           ...(((form as any).billingPayers ?? []) as any[]),
                         ];
                         const v = e.target.value;
-                        if (!payers[idx])
+                        if (!payers[idx]) {
                           payers[idx] = { ...p, eligibility: v };
-                        else payers[idx] = { ...payers[idx], eligibility: v };
+                        } else {
+                          payers[idx] = { ...payers[idx], eligibility: v };
+                        }
                         setForm((s) => ({
                           ...(s as any),
                           billingPayers: payers,
@@ -1412,16 +1520,17 @@ export default function IndividualDetailPage() {
                         const payers = [
                           ...(((form as any).billingPayers ?? []) as any[]),
                         ];
-                        if (!payers[idx])
+                        if (!payers[idx]) {
                           payers[idx] = {
                             ...p,
                             memberId: e.target.value ?? "",
                           };
-                        else
+                        } else {
                           payers[idx] = {
                             ...payers[idx],
                             memberId: e.target.value,
                           };
+                        }
                         setForm((s) => ({
                           ...(s as any),
                           billingPayers: payers,
@@ -1437,16 +1546,17 @@ export default function IndividualDetailPage() {
                         const payers = [
                           ...(((form as any).billingPayers ?? []) as any[]),
                         ];
-                        if (!payers[idx])
+                        if (!payers[idx]) {
                           payers[idx] = {
                             ...p,
                             groupId: e.target.value ?? "",
                           };
-                        else
+                        } else {
                           payers[idx] = {
                             ...payers[idx],
                             groupId: e.target.value,
                           };
+                        }
                         setForm((s) => ({
                           ...(s as any),
                           billingPayers: payers,
@@ -1464,16 +1574,17 @@ export default function IndividualDetailPage() {
                           const payers = [
                             ...(((form as any).billingPayers ?? []) as any[]),
                           ];
-                          if (!payers[idx])
+                          if (!payers[idx]) {
                             payers[idx] = {
                               ...p,
                               startDate: e.target.value ?? "",
                             };
-                          else
+                          } else {
                             payers[idx] = {
                               ...payers[idx],
                               startDate: e.target.value,
                             };
+                          }
                           setForm((s) => ({
                             ...(s as any),
                             billingPayers: payers,
@@ -1481,6 +1592,7 @@ export default function IndividualDetailPage() {
                         }}
                       />
                     </Labeled>
+
                     <Labeled label="End Date">
                       <SafeTextInput
                         type="date"
@@ -1489,16 +1601,17 @@ export default function IndividualDetailPage() {
                           const payers = [
                             ...(((form as any).billingPayers ?? []) as any[]),
                           ];
-                          if (!payers[idx])
+                          if (!payers[idx]) {
                             payers[idx] = {
                               ...p,
                               endDate: e.target.value ?? "",
                             };
-                          else
+                          } else {
                             payers[idx] = {
                               ...payers[idx],
                               endDate: e.target.value,
                             };
+                          }
                           setForm((s) => ({
                             ...(s as any),
                             billingPayers: payers,
@@ -1515,16 +1628,14 @@ export default function IndividualDetailPage() {
                         const payers = [
                           ...(((form as any).billingPayers ?? []) as any[]),
                         ];
-                        if (!payers[idx])
-                          payers[idx] = {
-                            ...p,
-                            notes: e.target.value ?? "",
-                          };
-                        else
+                        if (!payers[idx]) {
+                          payers[idx] = { ...p, notes: e.target.value ?? "" };
+                        } else {
                           payers[idx] = {
                             ...payers[idx],
                             notes: e.target.value,
                           };
+                        }
                         setForm((s) => ({
                           ...(s as any),
                           billingPayers: payers,
@@ -1538,9 +1649,9 @@ export default function IndividualDetailPage() {
             ))}
           </section>
 
-          {/* Billing Address */}
           <section>
             <h3 className="text-base font-semibold mb-3">Billing Address</h3>
+
             <label className="inline-flex items-center gap-2 text-sm mb-3">
               <input
                 type="checkbox"
@@ -1568,6 +1679,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="Address 2">
                   <SafeTextInput
                     value={(form as any).billingAddress2 ?? ""}
@@ -1579,6 +1691,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="City">
                   <SafeTextInput
                     value={(form as any).billingCity ?? ""}
@@ -1590,6 +1703,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="State">
                   <SafeTextInput
                     value={(form as any).billingState ?? "PA"}
@@ -1601,6 +1715,7 @@ export default function IndividualDetailPage() {
                     }
                   />
                 </Labeled>
+
                 <Labeled label="ZIP">
                   <SafeTextInput
                     value={(form as any).billingZip ?? ""}
@@ -1616,11 +1731,11 @@ export default function IndividualDetailPage() {
             )}
           </section>
 
-          {/* Guardian / Rep Payee */}
           <section>
             <h3 className="text-base font-semibold mb-3">
               Guardian / Representative Payee
             </h3>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Labeled label="Guardian / MPOA Name">
                 <SafeTextInput
@@ -1633,6 +1748,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Guardian Phone">
                 <SafeTextInput
                   value={(form as any).guardianPhone ?? ""}
@@ -1644,6 +1760,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Representative Payee Name">
                 <SafeTextInput
                   value={(form as any).repPayeeName ?? ""}
@@ -1655,6 +1772,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Rep Payee Phone">
                 <SafeTextInput
                   value={(form as any).repPayeePhone ?? ""}
@@ -1671,14 +1789,10 @@ export default function IndividualDetailPage() {
         </div>
       )}
 
-      {/* ============================================================
-          TAB 3 — CLINICAL & MEDICATION
-          ============================================================ */}
       {activeTab === "clinical" && (
         <div className="space-y-8">
           <h2 className="text-lg font-semibold">Clinical & Medication</h2>
 
-          {/* PCP */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h3 className="text-base font-semibold mb-3">
               Primary Care Physician
@@ -1695,6 +1809,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Phone">
                 <SafeTextInput
                   value={(form as any).pcpPhone ?? ""}
@@ -1706,6 +1821,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Fax">
                 <SafeTextInput
                   value={(form as any).pcpFax ?? ""}
@@ -1717,6 +1833,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="NPI">
                 <SafeTextInput
                   value={(form as any).pcpNpi ?? ""}
@@ -1728,6 +1845,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Address" className="md:col-span-2">
                 <SafeTextInput
                   value={(form as any).pcpAddress ?? ""}
@@ -1742,7 +1860,6 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Medications */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-semibold">Medications</h3>
@@ -1779,6 +1896,7 @@ export default function IndividualDetailPage() {
                       </td>
                     </tr>
                   )}
+
                   {(((form as any).meds as any[]) ?? []).map(
                     (m: any, i: number) => (
                       <tr
@@ -1797,6 +1915,7 @@ export default function IndividualDetailPage() {
                             }}
                           />
                         </td>
+
                         <td>
                           <SafeTextInput
                             value={m.dose ?? ""}
@@ -1809,6 +1928,7 @@ export default function IndividualDetailPage() {
                             }}
                           />
                         </td>
+
                         <td>
                           <SafeTextInput
                             value={m.schedule ?? ""}
@@ -1824,6 +1944,7 @@ export default function IndividualDetailPage() {
                             }}
                           />
                         </td>
+
                         <td className="text-right">
                           <button
                             type="button"
@@ -1849,7 +1970,6 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Allergies */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h3 className="text-base font-semibold mb-3">Allergies</h3>
             <Labeled label="Known allergies / reactions (comma-separated)">
@@ -1866,7 +1986,6 @@ export default function IndividualDetailPage() {
             </Labeled>
           </section>
 
-          {/* Diagnosis */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-semibold">Diagnosis (ICD)</h3>
@@ -1903,6 +2022,7 @@ export default function IndividualDetailPage() {
                       </td>
                     </tr>
                   )}
+
                   {(((form as any).dx as any[]) ?? []).map(
                     (d: any, i: number) => (
                       <tr
@@ -1922,6 +2042,7 @@ export default function IndividualDetailPage() {
                             placeholder="F84.0"
                           />
                         </td>
+
                         <td>
                           <SafeTextInput
                             value={d.description ?? ""}
@@ -1938,6 +2059,7 @@ export default function IndividualDetailPage() {
                             placeholder="Autistic disorder…"
                           />
                         </td>
+
                         <td>
                           <SafeTextInput
                             type="date"
@@ -1951,6 +2073,7 @@ export default function IndividualDetailPage() {
                             }}
                           />
                         </td>
+
                         <td className="text-right">
                           <button
                             type="button"
@@ -1978,9 +2101,6 @@ export default function IndividualDetailPage() {
         </div>
       )}
 
-      {/* ============================================================
-          TAB 4 — PREPAREDNESS & EQUIPMENT
-          ============================================================ */}
       {activeTab === "equipment" && (
         <div className="space-y-8">
           <h2 className="text-lg font-semibold">Preparedness & Equipment</h2>
@@ -2004,6 +2124,7 @@ export default function IndividualDetailPage() {
                   <option>High</option>
                 </SafeSelect>
               </Labeled>
+
               <Labeled label="Mobility Status">
                 <SafeSelect
                   value={(form as any).mobility ?? ""}
@@ -2043,6 +2164,7 @@ export default function IndividualDetailPage() {
               ].map((name) => {
                 const key = `equip_${name.replace(/\s+/g, "_").toLowerCase()}`;
                 const checked = Boolean((form as any)[key]);
+
                 return (
                   <label
                     key={key}
@@ -2081,51 +2203,47 @@ export default function IndividualDetailPage() {
         </div>
       )}
 
-      {/* ============================================================
-          TAB 5 — PREFERENCES & DIRECTIVES
-          ============================================================ */}
       {activeTab === "preferences" && (
         <div className="space-y-8">
           <h2 className="text-lg font-semibold">Preferences & Directives</h2>
 
-          {/* Scheduling Preferences */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h3 className="text-base font-semibold mb-3">
               Scheduling Preferences
             </h3>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <div className="text-sm">Preferred Weekdays</div>
                 <div className="mt-2 grid grid-cols-3 gap-y-2 text-sm">
-                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                    (d) => {
-                      const key = `prefDay_${d}`;
-                      const checked = Boolean((form as any)[key]);
-                      return (
-                        <label
-                          key={d}
-                          className="inline-flex items-center gap-2 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) =>
-                              setForm((s) => ({
-                                ...(s as any),
-                                [key]: e.target.checked,
-                              }))
-                            }
-                          />
-                          {d}
-                        </label>
-                      );
-                    },
-                  )}
+                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => {
+                    const key = `prefDay_${d}`;
+                    const checked = Boolean((form as any)[key]);
+
+                    return (
+                      <label
+                        key={d}
+                        className="inline-flex items-center gap-2 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setForm((s) => ({
+                              ...(s as any),
+                              [key]: e.target.checked,
+                            }))
+                          }
+                        />
+                        {d}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
+
               <Labeled label="Preferred Time Window">
-                <SafeText
-                  երկրների
+                <SafeTextInput
                   placeholder="e.g., 9:00 AM – 2:00 PM"
                   value={(form as any).prefTime ?? ""}
                   onChange={(e) =>
@@ -2136,6 +2254,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Notes">
                 <SafeTextInput
                   value={(form as any).prefNotes ?? ""}
@@ -2150,11 +2269,11 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Non-Scheduling Preferences */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h3 className="text-base font-semibold mb-3">
               Non-Scheduling Preferences
             </h3>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Labeled label="Primary Language">
                 <SafeTextInput
@@ -2167,6 +2286,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Secondary Language">
                 <SafeTextInput
                   value={(form as any).langSecondary ?? ""}
@@ -2178,6 +2298,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Preferred Caregiver Gender">
                 <SafeSelect
                   value={(form as any).caregiverGender ?? ""}
@@ -2194,6 +2315,7 @@ export default function IndividualDetailPage() {
                 </SafeSelect>
               </Labeled>
             </div>
+
             <div className="mt-4">
               <Labeled label="Other">
                 <SafeTextInput
@@ -2209,11 +2331,11 @@ export default function IndividualDetailPage() {
             </div>
           </section>
 
-          {/* Advanced Directives */}
           <section className="rounded-xl border border-bac-border p-4 bg-bac-bg">
             <h3 className="text-base font-semibold mb-3">
               Advanced Directives
             </h3>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Labeled label="Directive Type">
                 <SafeSelect
@@ -2232,6 +2354,7 @@ export default function IndividualDetailPage() {
                   <option>Power of Attorney</option>
                 </SafeSelect>
               </Labeled>
+
               <Labeled label="Date In">
                 <SafeTextInput
                   type="date"
@@ -2244,6 +2367,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Date Out">
                 <SafeTextInput
                   type="date"
@@ -2256,6 +2380,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Status">
                 <SafeSelect
                   value={(form as any).advStatus ?? ""}
@@ -2271,6 +2396,7 @@ export default function IndividualDetailPage() {
                   <option>Pending</option>
                 </SafeSelect>
               </Labeled>
+
               <Labeled label="Physician">
                 <SafeTextInput
                   value={(form as any).advPhysician ?? ""}
@@ -2282,6 +2408,7 @@ export default function IndividualDetailPage() {
                   }
                 />
               </Labeled>
+
               <Labeled label="Attachments / Notes" className="md:col-span-2">
                 <SafeTextInput
                   placeholder="Link, file name or short note…"
@@ -2299,9 +2426,6 @@ export default function IndividualDetailPage() {
         </div>
       )}
 
-      {/* ============================================================
-          TAB 6 — ISP & BSP
-          ============================================================ */}
       {activeTab === "ispbsp" && (
         <div className="space-y-4">
           <ISPandBSP individualId={id} />

@@ -54,11 +54,16 @@ function buildShiftTimeLabel(
   return null;
 }
 
-function buildIndividualName(individual: {
-  firstName?: string | null;
-  middleName?: string | null;
-  lastName?: string | null;
-} | null | undefined): string | null {
+function buildIndividualName(
+  individual:
+    | {
+        firstName?: string | null;
+        middleName?: string | null;
+        lastName?: string | null;
+      }
+    | null
+    | undefined
+): string | null {
   if (!individual) return null;
   const parts = [
     individual.firstName?.trim(),
@@ -136,6 +141,7 @@ export async function PUT(req: Request, context: any) {
       checkOutAt,
       awakeMonitoringRequired,
       isBackupPlanShift,
+      serviceAddressType,
     } = body as {
       serviceId?: string;
       dspId?: string | null;
@@ -148,7 +154,11 @@ export async function PUT(req: Request, context: any) {
       checkOutAt?: string | null;
       awakeMonitoringRequired?: boolean;
       isBackupPlanShift?: boolean;
+      serviceAddressType?: "PRIMARY" | "SECONDARY";
     };
+
+    const normalizedServiceAddressType =
+      serviceAddressType === "SECONDARY" ? "SECONDARY" : "PRIMARY";
 
     // Đọc shift cũ trước khi update để detect status transition
     const existingShift = await prisma.scheduleShift.findUnique({
@@ -185,6 +195,10 @@ export async function PUT(req: Request, context: any) {
 
     if ("isBackupPlanShift" in body) {
       data.isBackupPlanShift = !!isBackupPlanShift;
+    }
+
+    if ("serviceAddressType" in body) {
+      data.serviceAddressType = normalizedServiceAddressType;
     }
 
     // ===== AUTO STATUS ƯU TIÊN THEO CHECK IN / OUT =====

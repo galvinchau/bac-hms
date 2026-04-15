@@ -1,16 +1,31 @@
-// bac-hms/web/app/schedule/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // ===== Types =====
+
+type ServiceAddressType = "PRIMARY" | "SECONDARY";
 
 type Individual = {
   id: string;
   code: string;
   firstName: string;
   lastName: string;
-  status?: string; // optional: ACTIVE / INACTIVE / PENDING ...
+  status?: string;
+
+  address1?: string | null;
+  address2?: string | null;
+  city?: string | null;
+  county?: string | null;
+  state?: string | null;
+  zip?: string | null;
+
+  secondaryAddress1?: string | null;
+  secondaryAddress2?: string | null;
+  secondaryCity?: string | null;
+  secondaryCounty?: string | null;
+  secondaryState?: string | null;
+  secondaryZip?: string | null;
 };
 
 type Service = {
@@ -28,7 +43,7 @@ type Employee = {
 
 type MasterTemplateShift = {
   id: string;
-  dayOfWeek: number; // 0-6
+  dayOfWeek: number;
   startMinutes: number;
   endMinutes: number;
   serviceId: string;
@@ -66,6 +81,7 @@ type ScheduleShift = {
   status: string;
   billable: boolean;
   notes: string | null;
+  serviceAddressType?: ServiceAddressType;
   service: Service;
   plannedDsp?: Employee | null;
   actualDsp?: Employee | null;
@@ -110,9 +126,6 @@ function addDays(date: Date, days: number): Date {
   return d;
 }
 
-/**
- * Hiển thị ngày theo UTC để tránh lệch ngày do timezone
- */
 function formatDateShort(dateStr: string | Date): string {
   const d = typeof dateStr === "string" ? new Date(dateStr) : dateStr;
   const month = d.getUTCMonth() + 1;
@@ -176,10 +189,6 @@ function calcVisitedUnits(shift: ScheduleShift): number {
   return shift.visits.reduce((sum, v) => sum + (v.units ?? 0), 0);
 }
 
-/**
- * Tính vị trí trong tuần (0–6) của một scheduleDate dựa theo weekStart (ISO string).
- * Không dùng getDay/getUTCDay để tránh lệch timezone.
- */
 function getDayIndexInWeek(weekStartIso: string, dateIso: string): number {
   const ws = new Date(weekStartIso);
   ws.setHours(0, 0, 0, 0);
@@ -194,11 +203,50 @@ function getDayIndexInWeek(weekStartIso: string, dateIso: string): number {
   return diffDays;
 }
 
+function joinAddress(parts: Array<string | null | undefined>): string {
+  return parts
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function getPrimaryAddress(ind?: Individual | null): string {
+  if (!ind) return "";
+  return joinAddress([
+    ind.address1,
+    ind.address2,
+    ind.city,
+    ind.county,
+    ind.state,
+    ind.zip,
+  ]);
+}
+
+function getSecondaryAddress(ind?: Individual | null): string {
+  if (!ind) return "";
+  return joinAddress([
+    ind.secondaryAddress1,
+    ind.secondaryAddress2,
+    ind.secondaryCity,
+    ind.secondaryCounty,
+    ind.secondaryState,
+    ind.secondaryZip,
+  ]);
+}
+
+function getAddressTypeLabel(v?: string | null): string {
+  return String(v || "PRIMARY").toUpperCase() === "SECONDARY"
+    ? "Secondary Address"
+    : "Primary Address";
+}
+
 // ===== Page Component =====
 
 export default function SchedulePage() {
   const [individuals, setIndividuals] = useState<Individual[]>([]);
   const [selectedIndividualId, setSelectedIndividualId] = useState<string>("");
+  const [selectedIndividualDetail, setSelectedIndividualDetail] =
+    useState<Individual | null>(null);
 
   const [services, setServices] = useState<Service[]>([]);
   const [dsps, setDsps] = useState<Employee[]>([]);
@@ -226,7 +274,6 @@ export default function SchedulePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // inline add event (master)
   const [editingDay, setEditingDay] = useState<number | null>(null);
   const [editServiceId, setEditServiceId] = useState<string>("");
   const [editStart, setEditStart] = useState<string>("07:00");
@@ -234,7 +281,6 @@ export default function SchedulePage() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("weekly");
 
-  // Modal edit shift (weekly)
   const [editingShift, setEditingShift] = useState<ScheduleShift | null>(null);
   const [editShiftServiceId, setEditShiftServiceId] = useState<string>("");
   const [editShiftDspId, setEditShiftDspId] = useState<string>("");
@@ -246,6 +292,8 @@ export default function SchedulePage() {
     useState<boolean>(false);
   const [editShiftStatus, setEditShiftStatus] = useState<string>("NOT_STARTED");
   const [editShiftNotes, setEditShiftNotes] = useState<string>("");
+  const [editShiftServiceAddressType, setEditShiftServiceAddressType] =
+    useState<ServiceAddressType>("PRIMARY");
   const [editShiftSaving, setEditShiftSaving] = useState(false);
   const [editShiftDeleting, setEditShiftDeleting] = useState(false);
   const [editShiftCheckIn, setEditShiftCheckIn] = useState<string>("");
@@ -254,7 +302,6 @@ export default function SchedulePage() {
     null
   );
 
-  // Drag cho modal Edit shift
   const [isDraggingEditModal, setIsDraggingEditModal] = useState(false);
   const [editModalOffset, setEditModalOffset] = useState<{
     x: number;
@@ -270,7 +317,6 @@ export default function SchedulePage() {
     originY: number;
   } | null>(null);
 
-  // Modal edit master event
   const [editingMasterShift, setEditingMasterShift] =
     useState<MasterTemplateShift | null>(null);
   const [masterModalServiceId, setMasterModalServiceId] = useState<string>("");
@@ -280,11 +326,9 @@ export default function SchedulePage() {
   const [masterModalNotes, setMasterModalNotes] = useState<string>("");
   const [masterModalSaving, setMasterModalSaving] = useState(false);
 
-  // Modal generate range (đến ngày)
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [generateToDate, setGenerateToDate] = useState<string>("");
 
-  // Modal create new shift
   const [showCreateShiftModal, setShowCreateShiftModal] = useState(false);
   const [creatingShift, setCreatingShift] = useState(false);
   const [createShiftDayIndex, setCreateShiftDayIndex] = useState<number>(0);
@@ -299,6 +343,8 @@ export default function SchedulePage() {
   const [createShiftStatus, setCreateShiftStatus] =
     useState<string>("NOT_STARTED");
   const [createShiftNotes, setCreateShiftNotes] = useState<string>("");
+  const [createShiftServiceAddressType, setCreateShiftServiceAddressType] =
+    useState<ServiceAddressType>("PRIMARY");
 
   const shiftStatusOptions = [
     "NOT_STARTED",
@@ -309,7 +355,6 @@ export default function SchedulePage() {
     "BACKUP_PLAN",
   ];
 
-  // --------- load Individuals (ACTIVE only) ---------
   useEffect(() => {
     async function fetchIndividuals() {
       try {
@@ -317,7 +362,6 @@ export default function SchedulePage() {
         if (!res.ok) return;
 
         const data = await res.json();
-
         const raw = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
@@ -348,7 +392,6 @@ export default function SchedulePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --------- load Services ---------
   useEffect(() => {
     async function fetchServices() {
       try {
@@ -370,7 +413,6 @@ export default function SchedulePage() {
     fetchServices();
   }, []);
 
-  // --------- load DSPs (Employees – simple) ---------
   useEffect(() => {
     async function fetchDsps() {
       try {
@@ -390,7 +432,26 @@ export default function SchedulePage() {
     fetchDsps();
   }, []);
 
-  // --------- load Master template khi đổi Individual ---------
+  useEffect(() => {
+    if (!selectedIndividualId) {
+      setSelectedIndividualDetail(null);
+      return;
+    }
+
+    async function fetchIndividualDetail() {
+      try {
+        const res = await fetch(`/api/individuals/${selectedIndividualId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setSelectedIndividualDetail(data as Individual);
+      } catch (e) {
+        console.error("Failed to load individual detail", e);
+      }
+    }
+
+    fetchIndividualDetail();
+  }, [selectedIndividualId]);
+
   useEffect(() => {
     if (!selectedIndividualId) {
       setMasterTemplates([]);
@@ -434,7 +495,6 @@ export default function SchedulePage() {
     fetchMaster();
   }, [selectedIndividualId]);
 
-  // --------- load Weekly schedule khi đổi Individual hoặc tuần ---------
   useEffect(() => {
     if (!selectedIndividualId) {
       setCurrentWeek(null);
@@ -463,8 +523,6 @@ export default function SchedulePage() {
 
     fetchWeek();
   }, [selectedIndividualId, weekStart]);
-
-  // --------- Generate multi-weeks helper ---------
 
   async function generateWeekAt(startDate: Date): Promise<ScheduleWeek | null> {
     if (!selectedIndividualId) return null;
@@ -579,8 +637,6 @@ export default function SchedulePage() {
     return `${formatDateShort(start)} – ${formatDateShort(end)}`;
   }, [weekStart, currentWeek]);
 
-  // ---------- Tính grid weekly ----------
-
   const gridByDayAndSlot = useMemo(() => {
     if (!currentWeek) return { maxSlots: 0, slots: [] as ScheduleShift[][] };
 
@@ -655,8 +711,6 @@ export default function SchedulePage() {
     };
     setIsDraggingEditModal(true);
   }
-
-  // ---------- Master template editing ----------
 
   function ensureDraftBase(): MasterScheduleTemplate | null {
     if (!selectedIndividualId) return null;
@@ -788,14 +842,14 @@ export default function SchedulePage() {
     const updatedShifts = masterDraft.shifts.map((s) =>
       s.id === editingMasterShift.id
         ? {
-          ...s,
-          serviceId: masterModalServiceId,
-          service: svc ?? undefined,
-          defaultDsp: dsp ?? null,
-          startMinutes: start,
-          endMinutes: end,
-          notes: masterModalNotes || null,
-        }
+            ...s,
+            serviceId: masterModalServiceId,
+            service: svc ?? undefined,
+            defaultDsp: dsp ?? null,
+            startMinutes: start,
+            endMinutes: end,
+            notes: masterModalNotes || null,
+          }
         : s
     );
 
@@ -1031,8 +1085,6 @@ export default function SchedulePage() {
     return result;
   }, [currentWeek]);
 
-  // ---------- Edit weekly shift (modal) ----------
-
   function openEditShift(shift: ScheduleShift) {
     setEditingShift(shift);
     setDeleteErrorMessage(null);
@@ -1044,6 +1096,12 @@ export default function SchedulePage() {
     setEditShiftIsBackupPlan(!!shift.isBackupPlanShift);
     setEditShiftStatus(shift.status);
     setEditShiftNotes(shift.notes ?? "");
+    setEditShiftServiceAddressType(
+      String(shift.serviceAddressType || "PRIMARY").toUpperCase() ===
+        "SECONDARY"
+        ? "SECONDARY"
+        : "PRIMARY"
+    );
     const firstVisit = shift.visits[0];
     setEditShiftCheckIn(firstVisit ? formatTime(firstVisit.checkInAt) : "");
     setEditShiftCheckOut(
@@ -1061,6 +1119,7 @@ export default function SchedulePage() {
     setEditShiftCheckOut("");
     setEditShiftAwakeRequired(false);
     setEditShiftIsBackupPlan(false);
+    setEditShiftServiceAddressType("PRIMARY");
   }
 
   async function handleSaveShiftEdit() {
@@ -1130,6 +1189,7 @@ export default function SchedulePage() {
         status: editShiftStatus,
         notes: editShiftNotes || null,
         dspId: editShiftDspId || null,
+        serviceAddressType: editShiftServiceAddressType,
       };
 
       if (visitCheckInIso) payload.checkInAt = visitCheckInIso;
@@ -1153,11 +1213,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: prev.shifts.map((s) =>
-              s.id === updated.id ? updated : s
-            ),
-          }
+              ...prev,
+              shifts: prev.shifts.map((s) => (s.id === updated.id ? updated : s)),
+            }
           : prev
       );
 
@@ -1209,9 +1267,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
-          }
+              ...prev,
+              shifts: prev.shifts.filter((s) => s.id !== editingShift.id),
+            }
           : prev
       );
 
@@ -1223,8 +1281,6 @@ export default function SchedulePage() {
       setEditShiftDeleting(false);
     }
   }
-
-  // ---------- Create new shift (modal) ----------
 
   function openCreateShiftModal() {
     if (!currentWeek) {
@@ -1245,6 +1301,7 @@ export default function SchedulePage() {
     setCreateShiftIsBackupPlan(false);
     setCreateShiftStatus("NOT_STARTED");
     setCreateShiftNotes("");
+    setCreateShiftServiceAddressType("PRIMARY");
     setShowCreateShiftModal(true);
     setError(null);
     setSuccess(null);
@@ -1255,6 +1312,7 @@ export default function SchedulePage() {
     setShowCreateShiftModal(false);
     setCreateShiftAwakeRequired(false);
     setCreateShiftIsBackupPlan(false);
+    setCreateShiftServiceAddressType("PRIMARY");
   }
 
   async function handleCreateShift() {
@@ -1306,6 +1364,7 @@ export default function SchedulePage() {
           status: createShiftStatus,
           notes: createShiftNotes || null,
           dspId: createShiftDspId || null,
+          serviceAddressType: createShiftServiceAddressType,
         }),
       });
 
@@ -1319,9 +1378,9 @@ export default function SchedulePage() {
       setCurrentWeek((prev) =>
         prev
           ? {
-            ...prev,
-            shifts: [...prev.shifts, created],
-          }
+              ...prev,
+              shifts: [...prev.shifts, created],
+            }
           : prev
       );
 
@@ -1329,6 +1388,7 @@ export default function SchedulePage() {
       setShowCreateShiftModal(false);
       setCreateShiftAwakeRequired(false);
       setCreateShiftIsBackupPlan(false);
+      setCreateShiftServiceAddressType("PRIMARY");
     } catch (e: any) {
       console.error(e);
       setError(e.message ?? "Failed to create shift");
@@ -1336,8 +1396,6 @@ export default function SchedulePage() {
       setCreatingShift(false);
     }
   }
-
-  // ---------- render helpers ----------
 
   function renderMasterDayCard(dayIndex: number) {
     const shifts =
@@ -1530,7 +1588,6 @@ export default function SchedulePage() {
                 CLAIMED
               </span>
             )}
-            {/* 🔴 FAIL AWAKE */}
             {isFailAwake && (
               <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-[2px] text-[10px] font-semibold text-white">
                 <span className="h-1.5 w-1.5 rounded-full bg-white" />
@@ -1548,6 +1605,13 @@ export default function SchedulePage() {
             {dsp.firstName} {dsp.lastName}
           </div>
         )}
+
+        <div className="mb-1">
+          <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-2 py-[2px] text-[10px] font-medium text-sky-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+            {getAddressTypeLabel(shift.serviceAddressType)}
+          </span>
+        </div>
 
         {shift.awakeMonitoringRequired && (
           <div className="mb-1">
@@ -1570,10 +1634,11 @@ export default function SchedulePage() {
           <span className="whitespace-nowrap">
             Visit:{" "}
             {shift.visits.length > 0
-              ? `${formatTime(shift.visits[0].checkInAt)}–${shift.visits[0].checkOutAt
-                ? formatTime(shift.visits[0].checkOutAt)
-                : "--:--"
-              }`
+              ? `${formatTime(shift.visits[0].checkInAt)}–${
+                  shift.visits[0].checkOutAt
+                    ? formatTime(shift.visits[0].checkOutAt)
+                    : "--:--"
+                }`
               : "--:-- – --:--"}
           </span>
           <span>{visitedUnits}u</span>
@@ -1596,6 +1661,9 @@ export default function SchedulePage() {
   const currentIndividual = Array.isArray(individuals)
     ? individuals.find((i) => i.id === selectedIndividualId)
     : undefined;
+
+  const primaryAddressText = getPrimaryAddress(selectedIndividualDetail);
+  const secondaryAddressText = getSecondaryAddress(selectedIndividualDetail);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -1670,6 +1738,27 @@ export default function SchedulePage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {selectedIndividualDetail && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 px-4 py-3">
+              <div className="text-xs font-semibold text-sky-300 mb-1">
+                Primary Address
+              </div>
+              <div className="text-xs text-slate-300">
+                {primaryAddressText || "No primary address on file."}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 px-4 py-3">
+              <div className="text-xs font-semibold text-violet-300 mb-1">
+                Secondary Address
+              </div>
+              <div className="text-xs text-slate-300">
+                {secondaryAddressText || "No secondary address on file."}
+              </div>
+            </div>
           </div>
         )}
 
@@ -1757,30 +1846,33 @@ export default function SchedulePage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("weekly")}
-                  className={`px-3 py-1 rounded-full ${activeTab === "weekly"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                    }`}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "weekly"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
                 >
                   Weekly detail
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("summary")}
-                  className={`px-3 py-1 rounded-full ${activeTab === "summary"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                    }`}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "summary"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
                 >
                   Summary & conflicts
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("payroll")}
-                  className={`px-3 py-1 rounded-full ${activeTab === "payroll"
-                    ? "bg-slate-100 text-slate-950"
-                    : "text-slate-300 hover:text-slate-50"
-                    }`}
+                  className={`px-3 py-1 rounded-full ${
+                    activeTab === "payroll"
+                      ? "bg-slate-100 text-slate-950"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
                 >
                   Payroll & ISP
                 </button>
@@ -1903,12 +1995,13 @@ export default function SchedulePage() {
                               {row.visitedUnits}
                             </td>
                             <td
-                              className={`py-1 text-right ${delta > 0
-                                ? "text-emerald-300"
-                                : delta < 0
-                                  ? "text-rose-300"
-                                  : "text-slate-300"
-                                }`}
+                              className={`py-1 text-right ${
+                                delta > 0
+                                  ? "text-emerald-300"
+                                  : delta < 0
+                                    ? "text-rose-300"
+                                    : "text-slate-300"
+                              }`}
                             >
                               {delta}
                             </td>
@@ -1994,12 +2087,13 @@ export default function SchedulePage() {
                               {actualHours.toFixed(2)}
                             </td>
                             <td
-                              className={`py-1 text-right ${delta > 0
-                                ? "text-emerald-300"
-                                : delta < 0
-                                  ? "text-rose-300"
-                                  : "text-slate-300"
-                                }`}
+                              className={`py-1 text-right ${
+                                delta > 0
+                                  ? "text-emerald-300"
+                                  : delta < 0
+                                    ? "text-rose-300"
+                                    : "text-slate-300"
+                              }`}
                             >
                               {delta.toFixed(2)}
                             </td>
@@ -2145,6 +2239,31 @@ export default function SchedulePage() {
                     Backup shift will not have a DSP assigned.
                   </div>
                 )}
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">
+                  Service address
+                </div>
+                <select
+                  value={editShiftServiceAddressType}
+                  onChange={(e) =>
+                    setEditShiftServiceAddressType(
+                      e.target.value === "SECONDARY" ? "SECONDARY" : "PRIMARY"
+                    )
+                  }
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="PRIMARY">Primary Address</option>
+                  <option value="SECONDARY" disabled={!secondaryAddressText}>
+                    Secondary Address
+                  </option>
+                </select>
+                <div className="mt-1 text-[11px] text-slate-400">
+                  {editShiftServiceAddressType === "SECONDARY"
+                    ? secondaryAddressText || "No secondary address on file."
+                    : primaryAddressText || "No primary address on file."}
+                </div>
               </div>
 
               <div className="flex gap-3">
@@ -2556,6 +2675,31 @@ export default function SchedulePage() {
                     Backup shift will not have a DSP assigned.
                   </div>
                 )}
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-300 mb-1">
+                  Service address
+                </div>
+                <select
+                  value={createShiftServiceAddressType}
+                  onChange={(e) =>
+                    setCreateShiftServiceAddressType(
+                      e.target.value === "SECONDARY" ? "SECONDARY" : "PRIMARY"
+                    )
+                  }
+                  className="h-8 w-full rounded-md bg-slate-900 border border-slate-700 px-2 text-xs"
+                >
+                  <option value="PRIMARY">Primary Address</option>
+                  <option value="SECONDARY" disabled={!secondaryAddressText}>
+                    Secondary Address
+                  </option>
+                </select>
+                <div className="mt-1 text-[11px] text-slate-400">
+                  {createShiftServiceAddressType === "SECONDARY"
+                    ? secondaryAddressText || "No secondary address on file."
+                    : primaryAddressText || "No primary address on file."}
+                </div>
               </div>
 
               <div className="flex gap-3">

@@ -39,6 +39,14 @@ model Individual {
   state    String?
   zip      String?
 
+  secondaryAddress1 String?
+  secondaryAddress2 String?
+  secondaryCity     String?
+  secondaryCounty   String?
+  secondaryState    String?
+  secondaryZip      String?
+
+
   // acceptedServices: form gửi lên là mảng string, DB lưu dạng CSV cho đơn giản
   acceptedServices String
 
@@ -136,6 +144,14 @@ model Individual {
 
   // ✅ ADD: Authorizations
   authorizations Authorization[]
+}
+
+//////////////////////////////////////////////////////
+// ✅ THÊM ĐOẠN NÀY (ở ngoài model)
+//////////////////////////////////////////////////////
+enum ServiceAddressType {
+  PRIMARY
+  SECONDARY
 }
 
 /**
@@ -539,6 +555,7 @@ model ScheduleShift {
 
   billable Boolean @default(true)
   notes    String?
+   serviceAddressType ServiceAddressType @default(PRIMARY)
 
   week       ScheduleWeek @relation(fields: [weekId], references: [id])
   individual Individual   @relation(fields: [individualId], references: [id], onDelete: Cascade)

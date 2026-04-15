@@ -1,3 +1,5 @@
+// bac-hms/web/app/reports/daily-notes/page.tsx
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
