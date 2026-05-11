@@ -1,3 +1,5 @@
+// C:\bac-hms\web\app\api\schedule\shift\[id]\route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { VisitSource } from "@prisma/client";
@@ -54,6 +56,29 @@ function buildShiftTimeLabel(
   return null;
 }
 
+function sameDateTime(
+  a?: Date | string | null,
+  b?: Date | string | null
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+
+  const da = new Date(a);
+  const db = new Date(b);
+
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
+  return da.getTime() === db.getTime();
+}
+
+function sameDateOnly(
+  a?: Date | string | null,
+  b?: Date | string | null
+): boolean {
+  const la = formatDateLabel(a);
+  const lb = formatDateLabel(b);
+  return la === lb;
+}
+
 function buildIndividualName(
   individual:
     | {
@@ -73,13 +98,77 @@ function buildIndividualName(
   return parts.length ? parts.join(" ") : null;
 }
 
-async function sendCancelledShiftPush(params: {
+function buildServiceDisplayName(
+  service:
+    | {
+        serviceCode?: string | null;
+        serviceName?: string | null;
+      }
+    | null
+    | undefined
+): string | null {
+  if (!service) return null;
+
+  if (service.serviceCode && service.serviceName) {
+    return `${service.serviceCode} — ${service.serviceName}`;
+  }
+
+  return service.serviceName || service.serviceCode || null;
+}
+
+type ShiftAlertType =
+  | "SHIFT_CANCELLED"
+  | "SHIFT_TIME_CHANGED"
+  | "SHIFT_REASSIGNED_REMOVED"
+  | "SHIFT_REASSIGNED_ASSIGNED"
+  | "SHIFT_DETAILS_CHANGED";
+
+function getAlertTitle(alertType: ShiftAlertType): string {
+  switch (alertType) {
+    case "SHIFT_CANCELLED":
+      return "Assigned Shift Cancelled";
+    case "SHIFT_TIME_CHANGED":
+      return "Assigned Shift Time Updated";
+    case "SHIFT_REASSIGNED_REMOVED":
+      return "Removed From Assigned Shift";
+    case "SHIFT_REASSIGNED_ASSIGNED":
+      return "New Assigned Shift";
+    case "SHIFT_DETAILS_CHANGED":
+      return "Assigned Shift Details Updated";
+    default:
+      return "Assigned Shift Updated";
+  }
+}
+
+function getAlertMessage(alertType: ShiftAlertType): string {
+  switch (alertType) {
+    case "SHIFT_CANCELLED":
+      return "Your assigned shift has been cancelled.";
+    case "SHIFT_TIME_CHANGED":
+      return "Your assigned shift time has been updated.";
+    case "SHIFT_REASSIGNED_REMOVED":
+      return "You have been removed from this shift.";
+    case "SHIFT_REASSIGNED_ASSIGNED":
+      return "You have been assigned to this shift.";
+    case "SHIFT_DETAILS_CHANGED":
+      return "Your assigned shift details have been updated.";
+    default:
+      return "Your assigned shift has been updated.";
+  }
+}
+
+async function sendShiftAlertPush(params: {
   staffId: string;
+  alertType: ShiftAlertType;
   shiftId: string;
   individualName?: string | null;
   serviceName?: string | null;
   shiftDateLabel?: string | null;
   shiftTimeLabel?: string | null;
+  oldShiftTimeLabel?: string | null;
+  newShiftTimeLabel?: string | null;
+  oldShiftDateLabel?: string | null;
+  newShiftDateLabel?: string | null;
   note?: string | null;
 }) {
   const baseUrl =
@@ -88,34 +177,113 @@ async function sendCancelledShiftPush(params: {
     "https://blueangelscareapi.onrender.com";
 
   try {
-    const res = await fetch(`${baseUrl}/mobile/push/shift-cancelled`, {
+    const res = await fetch(`${baseUrl}/mobile/push/shift-alert`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         staffId: params.staffId,
+        alertType: params.alertType,
         shiftId: params.shiftId,
         individualName: params.individualName ?? null,
         serviceName: params.serviceName ?? null,
         shiftDateLabel: params.shiftDateLabel ?? null,
         shiftTimeLabel: params.shiftTimeLabel ?? null,
+        oldShiftTimeLabel: params.oldShiftTimeLabel ?? null,
+        newShiftTimeLabel: params.newShiftTimeLabel ?? null,
+        oldShiftDateLabel: params.oldShiftDateLabel ?? null,
+        newShiftDateLabel: params.newShiftDateLabel ?? null,
         note: params.note ?? null,
       }),
     });
 
+    const text = await res.text().catch(() => "");
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("[SHIFT_CANCEL_PUSH] API failed", {
+      console.error("[SHIFT_ALERT_PUSH] API failed", {
         status: res.status,
         body: text,
+        alertType: params.alertType,
         shiftId: params.shiftId,
         staffId: params.staffId,
       });
+      return;
     }
+
+    console.log("[SHIFT_ALERT_PUSH] API success", {
+      status: res.status,
+      body: text,
+      alertType: params.alertType,
+      shiftId: params.shiftId,
+      staffId: params.staffId,
+    });
   } catch (err) {
-    console.error("[SHIFT_CANCEL_PUSH] request failed", err);
+    console.error("[SHIFT_ALERT_PUSH] request failed", {
+      alertType: params.alertType,
+      shiftId: params.shiftId,
+      staffId: params.staffId,
+      err,
+    });
   }
+}
+
+async function createMobileAlertAndPush(params: {
+  employeeId: string;
+  shiftId: string;
+  alertType: ShiftAlertType;
+  individualName?: string | null;
+  serviceName?: string | null;
+  shiftDateLabel?: string | null;
+  shiftTimeLabel?: string | null;
+  oldShiftTimeLabel?: string | null;
+  newShiftTimeLabel?: string | null;
+  oldShiftDateLabel?: string | null;
+  newShiftDateLabel?: string | null;
+  note?: string | null;
+}) {
+  const title = getAlertTitle(params.alertType);
+  const message = getAlertMessage(params.alertType);
+
+  try {
+    await prisma.mobileAlert.create({
+      data: {
+        employeeId: params.employeeId,
+        shiftId: params.shiftId,
+        type: params.alertType,
+        title,
+        message,
+        note: params.note ?? null,
+        individualName: params.individualName ?? null,
+        serviceName: params.serviceName ?? null,
+        shiftDateLabel: params.shiftDateLabel ?? null,
+        shiftTimeLabel: params.shiftTimeLabel ?? null,
+        isRead: false,
+      },
+    });
+  } catch (err) {
+    console.error("[SHIFT_ALERT] Failed to create mobileAlert", {
+      alertType: params.alertType,
+      shiftId: params.shiftId,
+      employeeId: params.employeeId,
+      err,
+    });
+  }
+
+  await sendShiftAlertPush({
+    staffId: params.employeeId,
+    alertType: params.alertType,
+    shiftId: params.shiftId,
+    individualName: params.individualName ?? null,
+    serviceName: params.serviceName ?? null,
+    shiftDateLabel: params.shiftDateLabel ?? null,
+    shiftTimeLabel: params.shiftTimeLabel ?? null,
+    oldShiftTimeLabel: params.oldShiftTimeLabel ?? null,
+    newShiftTimeLabel: params.newShiftTimeLabel ?? null,
+    oldShiftDateLabel: params.oldShiftDateLabel ?? null,
+    newShiftDateLabel: params.newShiftDateLabel ?? null,
+    note: params.note ?? null,
+  });
 }
 
 export async function PUT(req: Request, context: any) {
@@ -135,6 +303,7 @@ export async function PUT(req: Request, context: any) {
       plannedDspId,
       plannedStart,
       plannedEnd,
+      scheduleDate,
       status,
       notes,
       checkInAt,
@@ -148,6 +317,7 @@ export async function PUT(req: Request, context: any) {
       plannedDspId?: string | null;
       plannedStart?: string;
       plannedEnd?: string;
+      scheduleDate?: string;
       status?: string;
       notes?: string | null;
       checkInAt?: string | null;
@@ -160,7 +330,7 @@ export async function PUT(req: Request, context: any) {
     const normalizedServiceAddressType =
       serviceAddressType === "SECONDARY" ? "SECONDARY" : "PRIMARY";
 
-    // Đọc shift cũ trước khi update để detect status transition
+    // Đọc shift cũ trước khi update để detect schedule changes
     const existingShift = await prisma.scheduleShift.findUnique({
       where: { id },
       include: {
@@ -188,6 +358,7 @@ export async function PUT(req: Request, context: any) {
 
     if (plannedStart) data.plannedStart = new Date(plannedStart);
     if (plannedEnd) data.plannedEnd = new Date(plannedEnd);
+    if (scheduleDate) data.scheduleDate = new Date(scheduleDate);
 
     if ("awakeMonitoringRequired" in body) {
       data.awakeMonitoringRequired = !!awakeMonitoringRequired;
@@ -225,11 +396,65 @@ export async function PUT(req: Request, context: any) {
       data,
     });
 
-    // ===== Direct alert when shift transitions into CANCELLED =====
+    // ===== Schedule change mobile alerts + push notifications =====
     const oldStatus = String(existingShift.status || "");
     const newStatus = String(updatedShift.status || "");
     const movedIntoCancelled =
       oldStatus !== "CANCELLED" && newStatus === "CANCELLED";
+
+    const oldPlannedDspId = existingShift.plannedDspId ?? null;
+    const newPlannedDspId = updatedShift.plannedDspId ?? null;
+    const plannedDspChanged = oldPlannedDspId !== newPlannedDspId;
+
+    const plannedStartChanged = !sameDateTime(
+      existingShift.plannedStart,
+      updatedShift.plannedStart
+    );
+    const plannedEndChanged = !sameDateTime(
+      existingShift.plannedEnd,
+      updatedShift.plannedEnd
+    );
+    const timeChanged = plannedStartChanged || plannedEndChanged;
+
+    const dateChanged = !sameDateOnly(
+      existingShift.scheduleDate,
+      updatedShift.scheduleDate
+    );
+
+    const serviceChanged =
+      String(existingShift.serviceId || "") !== String(updatedShift.serviceId || "");
+
+    const detailsChanged = serviceChanged || dateChanged;
+
+    const serviceForAlert =
+      serviceId && serviceId !== existingShift.serviceId
+        ? await prisma.service.findUnique({
+            where: { id: serviceId },
+            select: {
+              serviceCode: true,
+              serviceName: true,
+            },
+          })
+        : existingShift.service;
+
+    const individualName = buildIndividualName(existingShift.individual);
+    const serviceDisplayName = buildServiceDisplayName(serviceForAlert);
+
+    const oldDateLabel = formatDateLabel(existingShift.scheduleDate);
+    const newDateLabel = formatDateLabel(updatedShift.scheduleDate);
+    const currentDateLabel = newDateLabel ?? oldDateLabel;
+
+    const oldTimeLabel = buildShiftTimeLabel(
+      existingShift.plannedStart,
+      existingShift.plannedEnd
+    );
+
+    const newTimeLabel = buildShiftTimeLabel(
+      updatedShift.plannedStart,
+      updatedShift.plannedEnd
+    );
+
+    const currentTimeLabel = newTimeLabel ?? oldTimeLabel;
 
     if (movedIntoCancelled) {
       // Ưu tiên actualDspId, fallback plannedDspId
@@ -240,61 +465,14 @@ export async function PUT(req: Request, context: any) {
         existingShift.plannedDspId;
 
       if (targetEmployeeId) {
-        // Lấy service / individual / thời gian mới nhất để snapshot vào alert
-        const serviceForAlert =
-          serviceId && serviceId !== existingShift.serviceId
-            ? await prisma.service.findUnique({
-                where: { id: serviceId },
-                select: {
-                  serviceCode: true,
-                  serviceName: true,
-                },
-              })
-            : existingShift.service;
-
-        const individualName = buildIndividualName(existingShift.individual);
-
-        const dateLabel = formatDateLabel(
-          updatedShift.scheduleDate ?? existingShift.scheduleDate
-        );
-
-        const timeLabel = buildShiftTimeLabel(
-          updatedShift.plannedStart ?? existingShift.plannedStart,
-          updatedShift.plannedEnd ?? existingShift.plannedEnd
-        );
-
-        const serviceDisplayName =
-          serviceForAlert?.serviceCode && serviceForAlert?.serviceName
-            ? `${serviceForAlert.serviceCode} — ${serviceForAlert.serviceName}`
-            : serviceForAlert?.serviceName ||
-              serviceForAlert?.serviceCode ||
-              null;
-
-        await prisma.mobileAlert.create({
-          data: {
-            employeeId: targetEmployeeId,
-            shiftId: updatedShift.id,
-            type: "SHIFT_CANCELLED",
-            title: "Assigned Shift Cancelled",
-            message:
-              "Sorry, your assigned shift has been cancelled. The individual's schedule has changed unexpectedly. Please contact the office if you have any questions.",
-            note: updatedShift.notes ?? null,
-            individualName,
-            serviceName: serviceDisplayName,
-            shiftDateLabel: dateLabel,
-            shiftTimeLabel: timeLabel,
-            isRead: false,
-          },
-        });
-
-        // ✅ NEW: send real push notification via BAC API
-        await sendCancelledShiftPush({
-          staffId: targetEmployeeId,
+        await createMobileAlertAndPush({
+          employeeId: targetEmployeeId,
           shiftId: updatedShift.id,
+          alertType: "SHIFT_CANCELLED",
           individualName,
           serviceName: serviceDisplayName,
-          shiftDateLabel: dateLabel,
-          shiftTimeLabel: timeLabel,
+          shiftDateLabel: currentDateLabel,
+          shiftTimeLabel: currentTimeLabel,
           note: updatedShift.notes ?? null,
         });
       } else {
@@ -302,6 +480,70 @@ export async function PUT(req: Request, context: any) {
           "[SHIFT_CANCEL_ALERT] Skip alert because no assigned DSP found for shift",
           updatedShift.id
         );
+      }
+    } else {
+      if (plannedDspChanged) {
+        if (oldPlannedDspId) {
+          await createMobileAlertAndPush({
+            employeeId: oldPlannedDspId,
+            shiftId: updatedShift.id,
+            alertType: "SHIFT_REASSIGNED_REMOVED",
+            individualName,
+            serviceName: serviceDisplayName,
+            shiftDateLabel: currentDateLabel,
+            shiftTimeLabel: currentTimeLabel,
+            note: updatedShift.notes ?? null,
+          });
+        }
+
+        if (newPlannedDspId) {
+          await createMobileAlertAndPush({
+            employeeId: newPlannedDspId,
+            shiftId: updatedShift.id,
+            alertType: "SHIFT_REASSIGNED_ASSIGNED",
+            individualName,
+            serviceName: serviceDisplayName,
+            shiftDateLabel: currentDateLabel,
+            shiftTimeLabel: currentTimeLabel,
+            note: updatedShift.notes ?? null,
+          });
+        }
+      } else {
+        const targetEmployeeId =
+          updatedShift.actualDspId ??
+          existingShift.actualDspId ??
+          updatedShift.plannedDspId ??
+          existingShift.plannedDspId;
+
+        if (targetEmployeeId && timeChanged) {
+          await createMobileAlertAndPush({
+            employeeId: targetEmployeeId,
+            shiftId: updatedShift.id,
+            alertType: "SHIFT_TIME_CHANGED",
+            individualName,
+            serviceName: serviceDisplayName,
+            shiftDateLabel: currentDateLabel,
+            shiftTimeLabel: currentTimeLabel,
+            oldShiftTimeLabel: oldTimeLabel,
+            newShiftTimeLabel: newTimeLabel,
+            note: updatedShift.notes ?? null,
+          });
+        }
+
+        if (targetEmployeeId && detailsChanged && !timeChanged) {
+          await createMobileAlertAndPush({
+            employeeId: targetEmployeeId,
+            shiftId: updatedShift.id,
+            alertType: "SHIFT_DETAILS_CHANGED",
+            individualName,
+            serviceName: serviceDisplayName,
+            shiftDateLabel: currentDateLabel,
+            shiftTimeLabel: currentTimeLabel,
+            oldShiftDateLabel: oldDateLabel,
+            newShiftDateLabel: newDateLabel,
+            note: updatedShift.notes ?? null,
+          });
+        }
       }
     }
 
